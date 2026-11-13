@@ -1,0 +1,59 @@
+:root {
+  color-scheme: dark;
+  --bg: #141414;
+  --surface: #1a1a1a;
+  --surface-2: #202020;
+  --surface-3: #262626;
+  --surface-canvas: #101010;
+  --clip-mask-opacity: 0.65;
+  --surface-input: #111111;
+  --surface-hover: #292929;
+  --surface-pressed: #2c2c2c;
+  --collection-row: #1b1b1b;
+  --collection-row-alt: #202020;
+  --collection-row-hover: #292929;
+  --surface-drop: rgba(24, 24, 24, 0.35);
+  --surface-overlay: rgba(20, 20, 20, 0.82);
+  --surface-overlay-soft: rgba(24, 24, 24, 0.82);
+  --checker: #121212;
+  --line: #303030;
+  --line-subtle: #2c2c2c;
+  --line-strong: #454545;
+  --muted: #929292;
+  --dim: #686868;
+  --faint: #626262;
+  --secondary-text: #c5c5c5;
+  --text: #e8e8e8;
+  --accent: #a3a3a3;
+  --accent-soft: rgba(163, 163, 163, 0.13);
+  --danger: #c9827b;
+  --danger-text: #d9a09a;
+  --danger-surface: #342220;
+  --danger-line: #70433e;
+  --status-live: #858585;
+  --status-warning: #b18a52;
+  --selection-ring: rgba(163, 163, 163, 0.12);
+  --focus-shadow: rgba(163, 163, 163, 0.1);
+  --shadow: rgba(0, 0, 0, 0.35);
+  --panel-header-height: 28px;
+  --panel-padding: 6px;
+  --field-gap: 3px;
+  --section-gap: 8px;
+  --control-height: 26px;
+  --control-radius: 4px;
+  --viewport-background: #101010;
+  --viewport-grid-major: #3b3b3b;
+  --viewport-grid-minor: #242424;
+  --node-camera: #e5a05b;
+  --node-image: #72a9e5;
+  --viewport-helper: #8a8a8a;
+  --viewport-axis-x: #b0b0b0;
+  --viewport-axis-y: #828282;
+  --viewport-axis-z: #5f5f5f;
+  --viewport-active: #dedede;
+}
+
+input[type="checkbox"],
+input[type="range"] {
+  accent-color: var(--accent);
+}

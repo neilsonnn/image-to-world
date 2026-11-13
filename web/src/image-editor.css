@@ -1,0 +1,719 @@
+.image-panel-shell {
+  flex: 0 0 min(var(--editor-height), calc(100% - 200px));
+  display: grid;
+  min-width: 0;
+  min-height: 240px;
+  max-height: 1000px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.image-panel-shell > .image-editor {
+  min-height: 0;
+}
+
+.image-editor {
+  container-type: inline-size;
+  --ie-bg: var(--bg);
+  --ie-panel: var(--surface);
+  --ie-raised: var(--surface-2);
+  --ie-line: var(--line);
+  --ie-line-strong: var(--line-strong);
+  --ie-text: var(--text);
+  --ie-muted: var(--muted);
+  --ie-dim: var(--dim);
+  display: grid;
+  grid-template-rows: var(--panel-header-height) minmax(0, 1fr);
+  height: 100%;
+  min-height: 240px;
+  width: 100%;
+  overflow: hidden;
+  color: var(--ie-text);
+  background: var(--ie-bg);
+  font-family: inherit;
+}
+
+.image-editor *,
+.image-editor *::before,
+.image-editor *::after {
+  box-sizing: border-box;
+}
+
+/* Zero specificity so Radix controls keep their own size-1 type. */
+:where(.image-editor) :where(button, input, select, textarea) {
+  font: inherit;
+}
+
+.image-editor button,
+.image-editor a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.image-editor button:focus-visible,
+.image-editor a:focus-visible,
+.image-editor input:focus-visible,
+.image-editor select:focus-visible,
+.image-editor textarea:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.image-editor button:active,
+.image-editor a:active {
+  transform: translateY(1px);
+}
+
+.image-editor button:disabled {
+  opacity: 0.38;
+  cursor: default;
+  transform: none;
+}
+
+.ie-button {
+  font-size: 11px;
+}
+
+.ie-button-primary {
+  color: var(--ie-text);
+  font-weight: 650;
+  background: var(--surface-3);
+  border-color: var(--ie-line-strong);
+}
+
+.ie-button-primary:hover {
+  background: var(--surface-pressed);
+  border-color: var(--ie-line-strong);
+}
+
+.ie-button-quiet.is-active {
+  color: var(--ie-text);
+  border-color: var(--ie-line-strong);
+  background: var(--accent-soft);
+}
+
+.ie-canvas-shell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-canvas);
+}
+
+.ie-canvas-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+
+.ie-canvas-stage::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background-image:
+    linear-gradient(45deg, var(--checker) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker) 75%);
+  background-position:
+    0 0,
+    0 7px,
+    7px -7px,
+    -7px 0;
+  background-size: 14px 14px;
+  opacity: 0.45;
+}
+
+.ie-canvas-stage canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.ie-canvas-stage canvas:last-of-type {
+  pointer-events: auto;
+}
+
+.ie-canvas-stage.ie-tool-pan canvas:last-of-type {
+  cursor: grab;
+}
+
+.ie-canvas-stage.ie-tool-pan canvas:last-of-type:active {
+  cursor: grabbing;
+}
+
+.ie-canvas-stage.ie-tool-draw canvas:last-of-type {
+  cursor: crosshair;
+}
+
+.ie-canvas-stage.ie-tool-erase canvas:last-of-type {
+  cursor: cell;
+}
+
+.ie-canvas-tools {
+  position: absolute;
+  z-index: 4;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 3px;
+  color: var(--ie-muted);
+  background: var(--surface-overlay-soft);
+  border: 1px solid var(--ie-line);
+  border-radius: 6px;
+  box-shadow: 0 7px 22px var(--shadow);
+}
+
+.ie-canvas-tools button {
+  display: grid;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  place-items: center;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.ie-canvas-tools button:hover {
+  color: var(--ie-text);
+  background: var(--ie-raised);
+}
+
+.ie-canvas-tools button.is-active {
+  color: var(--ie-text);
+  background: var(--accent-soft);
+}
+
+.ie-canvas-tools output {
+  min-width: 37px;
+  color: var(--ie-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.ie-toolbar-rule {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: var(--ie-line);
+}
+
+.ie-empty-canvas {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--ie-muted);
+  text-align: center;
+}
+
+.ie-empty-canvas strong {
+  color: var(--ie-text);
+  font-size: 13px;
+}
+
+.ie-empty-canvas span {
+  max-width: 260px;
+  font-size: 11px;
+}
+
+.ie-empty-canvas .ie-button {
+  margin-top: 5px;
+}
+
+.ie-empty-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  margin-bottom: 3px;
+  place-items: center;
+  color: var(--accent);
+  border: 1px dashed var(--ie-line-strong);
+  border-radius: 7px;
+}
+
+.ie-canvas-loading {
+  position: absolute;
+  z-index: 3;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  color: var(--ie-muted);
+  font-size: 10px;
+  background: var(--surface-overlay-soft);
+  border: 1px solid var(--ie-line);
+  border-radius: 5px;
+}
+
+.ie-canvas-loading span,
+.ie-job-pulse {
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: ie-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ie-pulse {
+  50% {
+    opacity: 0.3;
+    transform: scale(0.72);
+  }
+}
+
+.ie-before-badge {
+  position: absolute;
+  z-index: 3;
+  right: 10px;
+  top: 10px;
+  padding: 4px 7px;
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--surface-3);
+  border: 1px solid var(--ie-line-strong);
+  border-radius: 4px;
+}
+
+.image-editor select,
+.image-editor input[type="number"] {
+  height: 25px;
+  padding: 0 6px;
+  color: var(--ie-text);
+  font-size: 10px;
+  background: var(--surface-input);
+  border: 1px solid var(--ie-line);
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ie-canvas-loading span,
+  .ie-job-pulse {
+    animation: none;
+  }
+}
+
+.ie-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-height);
+  padding: 0 10px;
+  color: var(--ie-text);
+  background: var(--ie-raised);
+  border: 1px solid var(--ie-line);
+  border-radius: var(--control-radius);
+  font-size: 11px;
+  cursor: pointer;
+}
+.ie-button:hover {
+  background: var(--surface-hover);
+}
+
+.ie-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.ie-title strong {
+  color: var(--text);
+}
+.ie-title .hint-trigger {
+  min-width: 0;
+}
+.ie-title .quiet {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.ie-warning {
+  display: inline-flex;
+  color: var(--status-warning);
+}
+
+.ie-workspace {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) 2px minmax(
+      64px,
+      var(--history-width)
+    );
+  min-width: 0;
+  min-height: 0;
+}
+
+.ie-stage-column {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--ie-line);
+}
+
+/* Annotation tools float on the canvas, matching the canvas tools above. */
+.ie-brush-tools {
+  position: absolute;
+  z-index: 4;
+  left: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 3px;
+  color: var(--ie-muted);
+  background: var(--surface-overlay-soft);
+  border: 1px solid var(--ie-line);
+  border-radius: 6px;
+  box-shadow: 0 7px 22px var(--shadow);
+}
+.ie-brush-tools button {
+  display: grid;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  place-items: center;
+  color: inherit;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ie-brush-tools button:hover:not(:disabled) {
+  color: var(--ie-text);
+  background: var(--ie-raised);
+}
+.ie-brush-tools button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.ie-color-control {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  cursor: pointer;
+}
+.ie-color-control input {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  border: 1px solid var(--ie-line-strong);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.ie-color-control input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.ie-color-control input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 50%;
+}
+.ie-brush-size,
+.ie-range {
+  width: 64px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+.ie-range {
+  width: 100%;
+}
+
+/* The edit request floats over the canvas, bottom right. */
+.ie-edit-box > .hint-trigger {
+  display: flex;
+}
+.ie-edit-box .prompt-button {
+  flex: 1;
+}
+.ie-edit-box {
+  position: absolute;
+  z-index: 4;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 200px;
+  padding: 3px;
+  background: var(--surface-overlay-soft);
+  border: 1px solid var(--ie-line);
+  border-radius: 6px;
+  box-shadow: 0 7px 22px var(--shadow);
+}
+.ie-action-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.ie-action-row > .hint-trigger:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.ie-generate {
+  width: 100%;
+}
+.ie-badge {
+  color: var(--ie-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.ie-tool-button {
+  position: relative;
+}
+.ie-count {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 11px;
+  height: 11px;
+  padding: 0 2px;
+  color: var(--bg);
+  background: var(--secondary-text);
+  border-radius: 6px;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 11px;
+  text-align: center;
+}
+
+/* Popover contents. */
+.ie-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px;
+}
+.ie-picker select,
+.ie-settings-grid select {
+  height: 24px;
+}
+.ie-picker select {
+  min-width: 0;
+  padding: 0 5px;
+  color: var(--ie-text);
+  background: var(--surface-input);
+  border: 1px solid var(--ie-line);
+  border-radius: 3px;
+  font-size: 10px;
+}
+.ie-thumb-grid,
+.ie-layer-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+.ie-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--ie-line);
+  border-radius: 4px;
+}
+.ie-thumb .hint-trigger,
+.ie-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.ie-thumb img,
+.ie-layer img {
+  object-fit: cover;
+}
+.ie-thumb button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: var(--text);
+  background: var(--surface-overlay);
+  border-radius: 3px;
+  opacity: 0;
+  cursor: pointer;
+}
+.ie-thumb:hover button,
+.ie-thumb button:focus-visible {
+  opacity: 1;
+}
+.ie-layer-list .hint-trigger {
+  display: block;
+}
+.ie-layer {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  background: var(--surface-input);
+  border: 1px solid var(--ie-line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ie-layer img {
+  width: 100%;
+  height: 100%;
+}
+.ie-layer.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--selection-ring);
+}
+.ie-layer.is-hidden img {
+  opacity: 0.35;
+}
+.ie-icon-row {
+  display: flex;
+  gap: 2px;
+}
+.ie-layer-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+.ie-layer-fields .field,
+.ie-settings-grid .field {
+  margin: 0;
+}
+.ie-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.ie-settings-grid .field:first-child {
+  grid-column: 1 / -1;
+}
+
+/* History: thumbnails only; details live in tooltips. */
+.ie-history-column {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ie-panel);
+}
+.ie-history-track {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+.ie-history-item {
+  position: relative;
+  display: block;
+}
+.ie-history-item > .hint-trigger:has(.ie-history-thumb) {
+  display: block;
+  min-width: 0;
+}
+.ie-history-thumb {
+  position: relative;
+  display: grid;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  place-items: center;
+  overflow: hidden;
+  color: var(--ie-dim);
+  background: var(--surface-input);
+  border: 1px solid var(--line-subtle);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ie-history-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ie-history-item.is-lineage .ie-history-thumb {
+  border-color: var(--line-strong);
+}
+.ie-history-item.selected .ie-history-thumb,
+.ie-history-item.is-active .ie-history-thumb {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--selection-ring);
+}
+.ie-history-thumb:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+.ie-active-dot {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 6px;
+  height: 6px;
+  background: var(--status-live);
+  border: 1px solid var(--bg);
+  border-radius: 50%;
+}
+.ie-history-actions {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: flex;
+  gap: 1px;
+  padding: 1px;
+  background: var(--surface-overlay);
+  border-radius: 4px;
+  opacity: 0;
+  pointer-events: none;
+}
+.ie-history-item:hover .ie-history-actions,
+.ie-history-item:focus-within .ie-history-actions,
+.ie-history-actions.is-pinned:not(:empty) {
+  opacity: 1;
+  pointer-events: auto;
+}
+.ie-history-actions.is-pinned:empty {
+  display: none;
+}
+.ie-history-actions .icon-button {
+  width: 20px;
+  height: 20px;
+}
+.ie-history-actions .icon-button svg {
+  width: 13px;
+  height: 13px;
+}
+.ie-job-card.is-failed .ie-history-thumb {
+  color: var(--danger-text);
+  border-color: var(--danger-line);
+}
+.ie-history-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  color: var(--ie-dim);
+  font-size: 10px;
+}
+
+@container (max-width: 620px) {
+  .ie-workspace {
+    grid-template-columns: minmax(0, 1fr) 2px minmax(56px, 72px);
+  }
+  .ie-brush-size {
+    width: 44px;
+  }
+}

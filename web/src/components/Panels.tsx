@@ -1,0 +1,11 @@
+import { memo } from "react";
+import { AssetsPanel as AssetsPanelView } from "./AssetsPanel";
+export const AssetsPanel = memo(AssetsPanelView);
+import { GeneratePanel as GeneratePanelView } from "./GeneratePanel";
+export const GeneratePanel = memo(GeneratePanelView);
+import { InspectorPanel as InspectorPanelView } from "./InspectorPanel";
+export const InspectorPanel = memo(InspectorPanelView);
+import { JobsPanel as JobsPanelView } from "./JobsPanel";
+export const JobsPanel = memo(JobsPanelView);
+import { ScenePanel as ScenePanelView } from "./ScenePanel";
+export const ScenePanel = memo(ScenePanelView);

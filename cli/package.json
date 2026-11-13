@@ -1,0 +1,8 @@
+{
+  "name": "@worldbash/cli",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "worldbash": "./index.ts"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@worldbash/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --env-file=../.env --bun vite --host 127.0.0.1 --port 4310",
+    "build": "bun --bun vite build",
+    "start": "bun --env-file=../.env server.ts"
+  }
+}

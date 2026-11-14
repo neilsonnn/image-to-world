@@ -4,7 +4,7 @@ import {
   Minus,
   PencilSimple,
   Plus,
-  SelectionBackground,
+  Eraser,
   SpinnerGap,
   WarningCircle,
 } from "@phosphor-icons/react";
@@ -14,6 +14,7 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import { assetUrl, type Asset, type ImageDraft } from "../../../core/schema";
 import { Hint } from "./ui";
@@ -25,6 +26,7 @@ type Tool = "pan" | "draw" | "erase";
 
 type ImageCanvasProps = {
   source: Asset | null;
+  annotationControls?: ReactNode;
   operation?: { pending: boolean; message?: string; error?: string } | null;
   parent: Asset | null;
   assets: Record<string, Asset>;
@@ -53,6 +55,7 @@ async function loadBitmap(asset: Asset): Promise<ImageBitmap> {
 
 export function ImageCanvas({
   source,
+  annotationControls,
   operation,
   parent,
   assets,
@@ -449,61 +452,76 @@ export function ImageCanvas({
 
   return (
     <section className="ie-canvas-shell" aria-label="Image canvas">
-      <div className="ie-canvas-tools" role="toolbar" aria-label="Canvas tools">
-        <Hint label="Pan">
-          <button
-            className={tool === "pan" ? "is-active" : ""}
-            aria-label="Pan"
-            onClick={() => onToolChange("pan")}
+      <div className="ie-canvas-toolbar">
+        <div
+          className="ie-canvas-tools floating-toolbar"
+          role="toolbar"
+          aria-label="Canvas tools"
+        >
+          <Hint label="Pan">
+            <button
+              className={tool === "pan" ? "is-active" : ""}
+              aria-label="Pan"
+              onClick={() => onToolChange("pan")}
+            >
+              <Hand size={16} />
+            </button>
+          </Hint>
+          <Hint label="Zoom out">
+            <button
+              aria-label="Zoom out"
+              onClick={() =>
+                onZoomChange(Math.max(0.1, Number((zoom - 0.1).toFixed(1))))
+              }
+            >
+              <Minus size={16} />
+            </button>
+          </Hint>
+          <output>{Math.round(zoom * 100)}%</output>
+          <Hint label="Zoom in">
+            <button
+              aria-label="Zoom in"
+              onClick={() =>
+                onZoomChange(Math.min(8, Number((zoom + 0.1).toFixed(1))))
+              }
+            >
+              <Plus size={16} />
+            </button>
+          </Hint>
+          <Hint label="Fit image">
+            <button aria-label="Fit image" onClick={() => onZoomChange(1)}>
+              <ArrowsOutSimple size={16} />
+            </button>
+          </Hint>
+        </div>
+        {source && (
+          <div
+            className="ie-drawing-tools floating-toolbar"
+            role="toolbar"
+            aria-label="Drawing tools"
           >
-            <Hand size={16} />
-          </button>
-        </Hint>
-        <Hint label="Draw guidance">
-          <button
-            className={tool === "draw" ? "is-active" : ""}
-            aria-label="Draw guidance"
-            onClick={() => onToolChange("draw")}
-          >
-            <PencilSimple size={16} />
-          </button>
-        </Hint>
-        <Hint label="Erase guidance">
-          <button
-            className={tool === "erase" ? "is-active" : ""}
-            aria-label="Erase guidance"
-            onClick={() => onToolChange("erase")}
-          >
-            <SelectionBackground size={16} />
-          </button>
-        </Hint>
-        <span className="ie-toolbar-rule" />
-        <Hint label="Zoom out">
-          <button
-            aria-label="Zoom out"
-            onClick={() =>
-              onZoomChange(Math.max(0.1, Number((zoom - 0.1).toFixed(1))))
-            }
-          >
-            <Minus size={16} />
-          </button>
-        </Hint>
-        <output>{Math.round(zoom * 100)}%</output>
-        <Hint label="Zoom in">
-          <button
-            aria-label="Zoom in"
-            onClick={() =>
-              onZoomChange(Math.min(8, Number((zoom + 0.1).toFixed(1))))
-            }
-          >
-            <Plus size={16} />
-          </button>
-        </Hint>
-        <Hint label="Fit image">
-          <button aria-label="Fit image" onClick={() => onZoomChange(1)}>
-            <ArrowsOutSimple size={16} />
-          </button>
-        </Hint>
+            <Hint label="Draw guidance">
+              <button
+                className={tool === "draw" ? "is-active" : ""}
+                aria-label="Draw guidance"
+                onClick={() => onToolChange("draw")}
+              >
+                <PencilSimple size={16} />
+              </button>
+            </Hint>
+            <Hint label="Erase guidance">
+              <button
+                className={tool === "erase" ? "is-active" : ""}
+                aria-label="Erase guidance"
+                onClick={() => onToolChange("erase")}
+              >
+                <Eraser size={16} />
+              </button>
+            </Hint>
+            <span className="ie-toolbar-rule" />
+            {annotationControls}
+          </div>
+        )}
       </div>
       <div
         ref={hostRef}

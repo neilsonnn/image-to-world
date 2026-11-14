@@ -1,3 +1,4 @@
+import { operationName } from "../../../core/activity";
 import { moveAssetsToTrash, revealAsset } from "./asset-files";
 import { applyCommand } from "../../../core/commands";
 import { generationInput } from "../../../core/generation";
@@ -19,6 +20,7 @@ export class CommandService {
   ) {}
   async execute(input: Command): Promise<CommandResult> {
     const command = commandSchema.parse(input);
+    this.store.reportOperation(operationName(command));
     let jobId: string | undefined, jobIds: string[] | undefined;
     switch (command.type) {
       case "caption.clear":

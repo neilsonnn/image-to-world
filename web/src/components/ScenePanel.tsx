@@ -1,3 +1,4 @@
+import { ToolbarMenu } from "./ui";
 import { useWorldbashClient, useWorkspaceData } from "../lib/client";
 import { NodeIcon, nodePresentation } from "./NodeIcon";
 import { sceneCamera } from "../../../core/captures";
@@ -50,6 +51,7 @@ export function ScenePanel({
   requestPlacement,
 }: Pick<SharedProps, "requestPlacement">) {
   const {
+    setHoveredNode,
     command,
     safeCommand,
     upload,
@@ -344,7 +346,7 @@ export function ScenePanel({
             <MagnifyingGlass />
           </button>
         </Hint>
-        <DropdownMenu.Root>
+        <ToolbarMenu>
           <Hint label="Add to the scene">
             <DropdownMenu.Trigger>
               <button className="icon-button" aria-label="Add to the scene">
@@ -359,9 +361,13 @@ export function ScenePanel({
               </DropdownMenu.Item>
             ))}
           </DropdownMenu.Content>
-        </DropdownMenu.Root>
+        </ToolbarMenu>
       </PanelHeader>
-      <div className="panel-body scene-panel" {...collection.paneProps}>
+      <div
+        className="panel-body scene-panel"
+        {...collection.paneProps}
+        onPointerLeave={() => setHoveredNode(null)}
+      >
         {searching && (
           <CollectionSearch
             label="Search scene outline"
@@ -411,6 +417,8 @@ export function ScenePanel({
                       ids: selectedRoots(workspace.nodes, ids),
                     });
                   }}
+                  onPointerEnter={() => setHoveredNode(node.id)}
+                  onPointerLeave={() => setHoveredNode(null)}
                   onDragEnd={clearDrag}
                   onDragLeave={() => {
                     if (timer.current) clearTimeout(timer.current);

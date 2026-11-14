@@ -8,10 +8,17 @@ import {
   completeCapture,
   createCapture,
   sceneCamera,
+  spatialContextFrames,
 } from "./captures";
 import { captureClip, clipMasks, clippedOpacity } from "./clips";
 import { inactiveNodeIds } from "./scene";
-import { emptyWorkspace, identity, type Asset } from "./schema";
+import {
+  emptyWorkspace,
+  identity,
+  jobSchema,
+  nodeSchema,
+  type Asset,
+} from "./schema";
 import { lookFlyCamera, zoomFlyCamera } from "../web/src/lib/fly";
 
 function fixture() {
@@ -221,6 +228,30 @@ test("camera view and exit restore the previous camera and are undoable", () => 
   expect(workspace.settings.viewingCameraId).toBe("a_camera");
 });
 
+test("switching viewed Frames preserves the independent lens and pose, including after deletion", () => {
+  const { workspace, asset } = fixture();
+  applyCommand(workspace, {
+    type: "nodes.put",
+    nodes: [...createCapture(asset, "a"), ...createCapture(asset, "b")],
+  });
+  const free = structuredClone(workspace.settings.viewportCamera);
+  free.intrinsics.fx = free.intrinsics.fy = 700;
+  free.extrinsics.position = [5, 2, -3];
+  applyCommand(workspace, {
+    type: "workspace.update",
+    settings: { viewportCamera: free },
+  });
+  applyCommand(workspace, { type: "camera.view", nodeId: "a" });
+  applyCommand(workspace, { type: "camera.view", nodeId: "b_camera" });
+  expect(workspace.settings.freeCamera).toEqual(free);
+  applyCommand(workspace, { type: "camera.release" });
+  expect(workspace.settings.viewportCamera).toEqual(free);
+  applyCommand(workspace, { type: "camera.view", nodeId: "a" });
+  applyCommand(workspace, { type: "nodes.remove", ids: ["a"] });
+  expect(workspace.settings.viewportCamera).toEqual(free);
+  expect(workspace.settings.viewingCameraId).toBeNull();
+});
+
 test("local clip masks follow their parent and leave other captures intact", () => {
   const { workspace, asset } = fixture();
   applyCommand(workspace, {
@@ -378,4 +409,70 @@ test("hiding a node makes its descendants inactive and the next snapshot sees ed
   ]);
   const shown = { ...nodes, root: { ...nodes.root, visible: true } };
   expect(inactiveNodeIds(shown).size).toBe(0);
+});
+
+test("spatial context groups imports then generated Frames in hierarchy order; Freeze only changes grouping", () => {
+  const { workspace, asset } = fixture();
+  for (const [id, order] of [
+    ["group-a", 0],
+    ["group-b", 1],
+  ] as const)
+    workspace.nodes[id] = nodeSchema.parse({
+      id,
+      name: id,
+      kind: "group",
+      order,
+    });
+  workspace.jobs.generated = jobSchema.parse({
+    id: "generated",
+    input: {
+      kind: "image",
+      prompt: "Lab",
+      placement: workspace.settings.viewportCamera,
+    },
+    status: "succeeded",
+    createdAt: 1,
+    updatedAt: 1,
+    message: "Done",
+    outputAssetIds: [],
+  });
+  for (const [id, parentId, order, generated] of [
+    ["g-b", "group-b", 1, true],
+    ["i-b", "group-b", 0, false],
+    ["i-a", "group-a", 1, false],
+    ["g-a", "group-a", 0, true],
+  ] as const) {
+    for (const node of createCapture(
+      asset,
+      id,
+      undefined,
+      generated ? "generated" : undefined,
+    ))
+      workspace.nodes[node.id] = node;
+    Object.assign(workspace.nodes[id], { parentId, order });
+  }
+  const ids = () => spatialContextFrames(workspace).map((node) => node.id);
+  expect(ids()).toEqual(["i-a", "i-b", "g-a", "g-b"]);
+  const before = structuredClone(workspace.nodes);
+  applyCommand(workspace, {
+    type: "nodes.put",
+    nodes: [{ ...workspace.nodes["g-a"], contextFrozen: true }],
+  });
+  expect(ids()).toEqual(["g-a", "i-a", "i-b", "g-b"]);
+  expect(workspace.nodes["g-a"].transform).toEqual(before["g-a"].transform);
+  expect(workspace.nodes["g-a"].locked).toBe(before["g-a"].locked);
+  expect(workspace.nodes["g-a"].visible).toBe(before["g-a"].visible);
+  applyCommand(workspace, { type: "history.undo" });
+  expect(workspace.nodes).toEqual(before);
+  expect(ids()).toEqual(["i-a", "i-b", "g-a", "g-b"]);
+  applyCommand(workspace, {
+    type: "nodes.move",
+    ids: ["i-b"],
+    parentId: "group-a",
+    beforeId: "g-a",
+  });
+  expect(ids()).toEqual(["i-b", "i-a", "g-a", "g-b"]);
+  const input = generationInput(workspace, { kind: "view" });
+  if (input.kind !== "atlas") throw new Error("Expected Atlas draft");
+  expect(input.nodeIds).toEqual(ids());
 });

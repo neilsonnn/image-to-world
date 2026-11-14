@@ -1,6 +1,7 @@
 import {
   EventDispatcher,
   Group,
+  Vector2,
   type Camera,
   type ColorRepresentation,
   type Object3D,
@@ -10,6 +11,7 @@ import {
   type TransformControlsEventMap,
   type TransformControlsMode,
 } from "three/examples/jsm/controls/TransformControls.js";
+import { GizmoHandles } from "./gizmo-handles";
 import type { TransformCapabilities } from "../../../core/node-capabilities";
 
 type Events = Pick<
@@ -21,7 +23,10 @@ type Events = Pick<
 export class CombinedTransformControls extends EventDispatcher<Events> {
   readonly controls: Record<TransformControlsMode, TransformControls>;
   private helper = new Group();
+  private visuals = new GizmoHandles();
+  private space: "world" | "local" = "world";
   private active?: TransformControls;
+  private hovered?: { mode: TransformControlsMode; axis: string };
   private pointerId?: number;
   private object?: Object3D;
   private supported: TransformCapabilities = {
@@ -30,11 +35,11 @@ export class CombinedTransformControls extends EventDispatcher<Events> {
     scale: true,
   };
   private listeners = new AbortController();
-  // Small inner scale handles, translation arrows, then outer rotation rings.
+  // TransformControls supplies drag math; visible meshes own rendering and picking.
   private order = ["scale", "translate", "rotate"] as const;
 
   constructor(
-    camera: Camera,
+    private camera: Camera,
     private element: HTMLElement,
   ) {
     super();
@@ -60,6 +65,7 @@ export class CombinedTransformControls extends EventDispatcher<Events> {
         return [mode, control];
       }),
     ) as Record<TransformControlsMode, TransformControls>;
+    this.helper.add(this.visuals.root);
     element.style.touchAction = "none";
     const signal = this.listeners.signal;
     element.addEventListener("pointermove", this.move, { signal });
@@ -90,10 +96,10 @@ export class CombinedTransformControls extends EventDispatcher<Events> {
       ColorRepresentation,
     ]
   ) {
-    for (const control of Object.values(this.controls))
-      control.setColors(...colors);
+    this.visuals.setColors(colors);
   }
   setSpace(space: "world" | "local") {
+    this.space = space;
     for (const control of Object.values(this.controls)) control.setSpace(space);
   }
   setCapabilities(value: TransformCapabilities) {
@@ -103,14 +109,17 @@ export class CombinedTransformControls extends EventDispatcher<Events> {
       control.enabled = value[mode];
       if (this.object && value[mode]) control.attach(this.object);
       else control.detach();
+      control.getHelper().visible = false;
     }
   }
   attach(object: Object3D) {
     this.object = object;
     this.setCapabilities(this.supported);
+    this.update();
   }
   detach() {
     this.object = undefined;
+    this.visuals.root.visible = false;
     for (const control of Object.values(this.controls)) control.detach();
   }
   reset() {
@@ -120,6 +129,7 @@ export class CombinedTransformControls extends EventDispatcher<Events> {
     this.cancel();
     this.listeners.abort();
     for (const control of Object.values(this.controls)) control.dispose();
+    this.visuals.dispose();
     this.helper.removeFromParent();
   }
   private pointer(event: PointerEvent) {
@@ -132,17 +142,33 @@ export class CombinedTransformControls extends EventDispatcher<Events> {
     } as PointerEvent;
   }
   private clearHover() {
+    this.hovered = undefined;
     for (const control of Object.values(this.controls)) control.axis = null;
+  }
+  update() {
+    this.helper.updateMatrixWorld(true);
+    this.visuals.update(
+      this.camera,
+      this.object,
+      this.space,
+      this.supported,
+      this.element.clientHeight,
+      this.dragging,
+      this.active
+        ? { mode: this.active.mode, axis: this.active.axis }
+        : this.hovered,
+    );
   }
   private hover(event: PointerEvent) {
     this.clearHover();
-    this.helper.updateMatrixWorld(true);
-    for (const mode of this.order) {
-      const control = this.controls[mode];
-      if (!control.enabled) continue;
-      control.pointerHover(this.pointer(event));
-      if (control.axis) return control;
-    }
+    this.update();
+    const point = this.pointer(event);
+    const hit = this.visuals.pick(this.camera, new Vector2(point.x, point.y));
+    if (!hit) return;
+    this.hovered = hit;
+    const control = this.controls[hit.mode];
+    control.axis = hit.axis;
+    return control;
   }
   private move = (event: PointerEvent) => {
     if (this.active) {

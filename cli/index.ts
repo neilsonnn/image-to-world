@@ -9,7 +9,7 @@ import { collectionMatches } from "../core/collections";
 import { frameAssets } from "../core/frames";
 import {
   atlasContext,
-  orderedCaptures,
+  spatialContextFrames,
   contextSettings,
 } from "../core/captures";
 import path from "node:path";
@@ -78,7 +78,7 @@ const HELP = `worldbash controls the same filesystem workspace as the browser.
   bun run worldbash camera place [--position x,y,z --look-at x,y,z --relative-to node-id]
                    [--name 'Camera'] [--file camera.json]  Record your chosen camera, undoably; extend selection (viewport C)
   bun run worldbash camera view <node-id> | camera free
-  bun run worldbash context [list|include|exclude|solo|show|hide|order] <capture-id>...
+  bun run worldbash context [list|include|exclude|solo|show|hide|freeze|unfreeze] <capture-id>...
   bun run worldbash path create <camera-id>... [--target-frames 36]
   bun run worldbash pose <asset-id>... [--camera camera.json]
   bun run worldbash atlas [--camera camera.json] [--path path-id] [--prompt '...']
@@ -625,16 +625,23 @@ export async function run(argv: string[]) {
     if (values.path && workspace.nodes[values.path]?.kind !== "path")
       throw new Error("Choose a camera path");
     const context = contextSettings(workspace, values.path);
+    const frames = spatialContextFrames(workspace);
+    const active = new Set(
+      atlasContext(workspace, undefined, values.path).map(
+        (frame) => frame.node.id,
+      ),
+    );
     if (!sub || sub === "list")
       output({
-        captures: orderedCaptures(workspace, values.path),
-        activeIds: atlasContext(workspace, undefined, values.path).map(
-          (frame) => frame.node.id,
-        ),
         ...context,
+        order: frames.map((node) => node.id),
+        captures: frames,
+        activeIds: frames
+          .filter((node) => active.has(node.id))
+          .map((node) => node.id),
       });
     else {
-      const captures = orderedCaptures(workspace);
+      const captures = frames;
       if (rest.some((id) => !captures.some((node) => node.id === id)))
         throw new Error("Choose capture IDs from context list");
       if (sub === "show" || sub === "hide")
@@ -647,28 +654,36 @@ export async function run(argv: string[]) {
             })),
           }),
         );
+      else if (sub === "freeze" || sub === "unfreeze")
+        output(
+          await command({
+            type: "nodes.put",
+            nodes: rest.map((id) => ({
+              ...workspace.nodes[id],
+              contextFrozen: sub === "freeze",
+            })),
+          }),
+        );
       else {
         const patch =
           sub === "solo"
             ? { soloIds: rest }
-            : sub === "order"
-              ? { order: rest }
-              : sub === "include"
+            : sub === "include"
+              ? {
+                  excludedIds: context.excludedIds.filter(
+                    (id) => !rest.includes(id),
+                  ),
+                }
+              : sub === "exclude"
                 ? {
-                    excludedIds: context.excludedIds.filter(
-                      (id) => !rest.includes(id),
-                    ),
+                    excludedIds: [
+                      ...new Set([...context.excludedIds, ...rest]),
+                    ],
                   }
-                : sub === "exclude"
-                  ? {
-                      excludedIds: [
-                        ...new Set([...context.excludedIds, ...rest]),
-                      ],
-                    }
-                  : undefined;
+                : undefined;
         if (!patch)
           throw new Error(
-            "Use context list, include, exclude, solo, show, hide, or order",
+            "Use context list, include, exclude, solo, show, hide, freeze, or unfreeze",
           );
         output(
           await command(

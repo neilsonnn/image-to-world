@@ -44,6 +44,7 @@ export function editChanges(before: Workspace, after: Workspace) {
     visit(before[key], after[key], [key]);
   for (const key of [
     "viewportCamera",
+    "viewportOptions",
     "viewingCameraId",
     "freeCamera",
     "atlas",
@@ -69,6 +70,7 @@ export function restoreEdit(
         (change.path[0] === "settings" &&
           [
             "viewportCamera",
+            "viewportOptions",
             "viewingCameraId",
             "freeCamera",
             "atlas",

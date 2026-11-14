@@ -1,12 +1,12 @@
 import { useWorldbashClient, useWorkspaceData } from "../lib/client";
-import { Button } from "@radix-ui/themes";
+import { Button, TextField } from "@radix-ui/themes";
 import { Plus, SlidersHorizontal, X } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import type { Asset, Command, SceneNode } from "../../../core/schema";
 import { usePaneShortcuts } from "../lib/shortcuts";
 import { NumericInput } from "./NumericInput";
 import { Field } from "./panelShared";
-import { Hint } from "./ui";
+import { Hint, PanelHeader } from "./ui";
 import { transformCapabilities } from "../../../core/node-capabilities";
 
 function common<T>(values: T[]): T | undefined {
@@ -37,7 +37,9 @@ function TextInput({
     else setDraft(starting.current);
   };
   return (
-    <input
+    <TextField.Root
+      size="1"
+      aria-label="Name"
       value={draft}
       placeholder={value === undefined ? "Mixed" : undefined}
       onFocus={() => {
@@ -187,17 +189,6 @@ export function InspectorPanel({
   const primaryNode = primaryId ? workspace.nodes[primaryId] : undefined;
   const primaryAsset = primaryId ? workspace.assets[primaryId] : undefined;
 
-  if (!nodes.length && !assets.length)
-    return (
-      <div className="panel-body inspector-panel" {...pane}>
-        <div className="empty-state tall">
-          <SlidersHorizontal size={24} />
-          <strong>Nothing selected</strong>
-          <span>Select an asset or scene object to edit its properties.</span>
-        </div>
-      </div>
-    );
-
   const putNodes = (next: SceneNode[]) =>
     safeCommand({ type: "nodes.put", nodes: next });
   const patchNodes = (
@@ -232,420 +223,368 @@ export function InspectorPanel({
   };
 
   return (
-    <div className="panel-body inspector-panel" {...pane}>
-      <div className="selection-summary">
-        <span>{named.length} selected</span>
-        {named.length > 1 && <em>Mixed values are shown per field</em>}
-      </div>
-      <Field label="Name">
-        <TextInput
-          value={common(named.map((item) => item.name))}
-          onCommit={(name) => {
-            void safeCommand({
-              type: "edit.batch",
-              commands: [
-                ...(nodes.length
-                  ? [
-                      {
-                        type: "nodes.put" as const,
-                        nodes: nodes.map((node) => ({ ...node, name })),
-                      },
-                    ]
-                  : []),
-                ...assets.map((asset) => ({
-                  type: "assets.update" as const,
-                  id: asset.id,
-                  patch: { name },
-                })),
-              ],
-            });
-          }}
-        />
-      </Field>
-
-      {nodes.length > 0 && (
-        <div className="inline-fields">
-          <Field label="Visible">
-            <MixedSwitch
-              value={common(nodes.map((node) => node.visible))}
-              onChange={(visible) =>
-                void patchNodes(nodes, (node) => ({ ...node, visible }))
-              }
-            />
-          </Field>
-          <Field label="Parent">
-            <select
-              value={
-                common(nodes.map((node) => node.parentId)) === undefined
-                  ? "__mixed"
-                  : (common(nodes.map((node) => node.parentId)) ?? "")
-              }
-              onChange={(event) => {
-                if (event.target.value !== "__mixed")
-                  void safeCommand({
-                    type: "nodes.reparent",
-                    ids: nodes.map((node) => node.id),
-                    parentId: event.target.value || null,
-                  });
-              }}
-            >
-              {common(nodes.map((node) => node.parentId)) === undefined && (
-                <option value="__mixed">Mixed</option>
-              )}
-              <option value="">Scene root</option>
-              {Object.values(workspace.nodes)
-                .filter((candidate) => {
-                  let ancestor: SceneNode | undefined = candidate;
-                  while (ancestor) {
-                    if (nodes.some((node) => node.id === ancestor!.id))
-                      return false;
-                    ancestor = ancestor.parentId
-                      ? workspace.nodes[ancestor.parentId]
-                      : undefined;
-                  }
-                  return true;
-                })
-                .map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.name}
-                  </option>
-                ))}
-            </select>
-          </Field>
-        </div>
-      )}
-
-      {nodes.length > 0 && (
-        <Field label="Lock transforms">
-          <input
-            type="checkbox"
-            checked={nodes.every((node) => node.locked)}
-            onChange={(event) =>
-              void patchNodes(nodes, (node) => ({
-                ...node,
-                locked: event.target.checked,
-              }))
-            }
+    <>
+      <PanelHeader title="Properties">
+        <span className="quiet">{named.length} selected</span>
+      </PanelHeader>
+      <div className="panel-body inspector-panel" {...pane}>
+        {named.length > 0 ? (
+          <TextInput
+            key={ids.join("\u001f")}
+            value={common(named.map((item) => item.name))}
+            onCommit={(name) => {
+              void safeCommand({
+                type: "edit.batch",
+                commands: [
+                  ...(nodes.length
+                    ? [
+                        {
+                          type: "nodes.put" as const,
+                          nodes: nodes.map((node) => ({ ...node, name })),
+                        },
+                      ]
+                    : []),
+                  ...assets.map((asset) => ({
+                    type: "assets.update" as const,
+                    id: asset.id,
+                    patch: { name },
+                  })),
+                ],
+              });
+            }}
           />
-        </Field>
-      )}
-      {nodes.length > 0 && !nodes.some((node) => node.locked) && (
-        <TransformFields
-          nodes={nodes}
-          preview={onPreview}
-          update={(next) => {
-            void putNodes(next).finally(() => onPreview(null));
-          }}
-        />
-      )}
+        ) : (
+          <TextField.Root
+            size="1"
+            aria-label="Name"
+            placeholder="No selection"
+            disabled
+          />
+        )}
 
-      {nodes.some((node) => node.assetId) && (
-        <section className="property-section">
-          <h3>Source asset</h3>
-          <dl className="metadata">
-            {nodes
-              .filter((node) => node.assetId)
-              .map((node) => (
-                <div key={node.id}>
-                  <dt>{node.name}</dt>
-                  <dd>
-                    {workspace.assets[node.assetId!]?.name ?? "Missing asset"}
-                  </dd>
-                </div>
-              ))}
-          </dl>
-        </section>
-      )}
+        {nodes.length > 0 && !nodes.some((node) => node.locked) && (
+          <TransformFields
+            nodes={nodes}
+            preview={onPreview}
+            update={(next) => {
+              void putNodes(next).finally(() => onPreview(null));
+            }}
+          />
+        )}
 
-      {clipNodes.length > 0 && (
-        <section className="property-section">
-          <h3>Clip volume</h3>
-          <div className="inline-fields">
-            <Field label="Scope">
-              <select
-                value={
-                  common(clipNodes.map((node) => node.clip?.scope)) ?? "__mixed"
-                }
-                onChange={(event) => {
-                  if (event.target.value === "__mixed") return;
-                  const scope = event.target.value as "local" | "global";
-                  void patchNodes(clipNodes, (node) => ({
-                    ...node,
-                    clip: {
-                      ...(node.clip ?? { invert: false, softness: 0 }),
-                      scope,
-                    },
-                  }));
-                }}
-              >
-                {common(clipNodes.map((node) => node.clip?.scope)) ===
-                  undefined && <option value="__mixed">Mixed</option>}
-                <option value="global">Global</option>
-                <option value="local">Parent object</option>
-              </select>
-            </Field>
-            <Field label="Invert">
-              <MixedSwitch
+        {nodes.some((node) => node.assetId) && (
+          <section className="property-section">
+            <h3>Source asset</h3>
+            <dl className="metadata">
+              {nodes
+                .filter((node) => node.assetId)
+                .map((node) => (
+                  <div key={node.id}>
+                    <dt>{node.name}</dt>
+                    <dd>
+                      {workspace.assets[node.assetId!]?.name ?? "Missing asset"}
+                    </dd>
+                  </div>
+                ))}
+            </dl>
+          </section>
+        )}
+
+        {clipNodes.length > 0 && (
+          <section className="property-section">
+            <h3>Clip volume</h3>
+            <div className="inline-fields">
+              <Field label="Scope">
+                <select
+                  value={
+                    common(clipNodes.map((node) => node.clip?.scope)) ??
+                    "__mixed"
+                  }
+                  onChange={(event) => {
+                    if (event.target.value === "__mixed") return;
+                    const scope = event.target.value as "local" | "global";
+                    void patchNodes(clipNodes, (node) => ({
+                      ...node,
+                      clip: {
+                        ...(node.clip ?? { invert: false, softness: 0 }),
+                        scope,
+                      },
+                    }));
+                  }}
+                >
+                  {common(clipNodes.map((node) => node.clip?.scope)) ===
+                    undefined && <option value="__mixed">Mixed</option>}
+                  <option value="global">Global</option>
+                  <option value="local">Parent object</option>
+                </select>
+              </Field>
+              <Field label="Invert">
+                <MixedSwitch
+                  value={common(
+                    clipNodes.map((node) => node.clip?.invert ?? false),
+                  )}
+                  onChange={(invert) =>
+                    void patchNodes(clipNodes, (node) => ({
+                      ...node,
+                      clip: {
+                        ...(node.clip ?? { scope: "global", softness: 0 }),
+                        invert,
+                      },
+                    }))
+                  }
+                />
+              </Field>
+            </div>
+            <Field label="Softness">
+              <NumericInput
                 value={common(
-                  clipNodes.map((node) => node.clip?.invert ?? false),
+                  clipNodes.map((node) => node.clip?.softness ?? 0),
                 )}
-                onChange={(invert) =>
+                min={0}
+                step={0.01}
+                onCommit={(softness) =>
                   void patchNodes(clipNodes, (node) => ({
                     ...node,
                     clip: {
-                      ...(node.clip ?? { scope: "global", softness: 0 }),
-                      invert,
+                      ...(node.clip ?? { scope: "global", invert: false }),
+                      softness,
                     },
                   }))
                 }
               />
             </Field>
-          </div>
-          <Field label="Softness">
-            <NumericInput
-              value={common(clipNodes.map((node) => node.clip?.softness ?? 0))}
-              min={0}
-              step={0.01}
-              onCommit={(softness) =>
-                void patchNodes(clipNodes, (node) => ({
-                  ...node,
-                  clip: {
-                    ...(node.clip ?? { scope: "global", invert: false }),
-                    softness,
-                  },
-                }))
-              }
-            />
-          </Field>
-        </section>
-      )}
+          </section>
+        )}
 
-      {primaryNode?.kind === "path" && nodes.length === 1 && (
-        <section className="property-section path-editor">
-          <div className="section-heading">
-            <h3>Camera path</h3>
-            <Button
-              size="1"
-              variant="surface"
-              color="gray"
-              className="button compact"
-              onClick={addKeyframe}
-            >
-              <Plus /> Keyframe
-            </Button>
-          </div>
-          <Field label="Field of view">
-            <NumericInput
-              label="Path field of view"
-              value={
-                primaryNode.fov ??
-                (2 *
-                  Math.atan(
-                    (primaryNode.keyframes?.[0]?.camera.intrinsics.height ??
-                      workspace.settings.viewportCamera.intrinsics.height) /
-                      (2 *
-                        (primaryNode.keyframes?.[0]?.camera.intrinsics.fy ??
-                          workspace.settings.viewportCamera.intrinsics.fy)),
-                  ) *
-                  180) /
-                  Math.PI
-              }
-              min={10}
-              max={120}
-              step={1}
-              onCommit={(fov) =>
-                void safeCommand({
-                  type: "path.update",
-                  pathId: primaryNode.id,
-                  fov,
-                })
-              }
-            />
-          </Field>
-          <Field label="Target frames">
-            <NumericInput
-              label="Target frames"
-              value={targetFrameCount}
-              min={2}
-              max={600}
-              step={1}
-              onCommit={(targetFrameCount) =>
-                void safeCommand({
-                  type: "path.update",
-                  pathId: primaryNode.id,
-                  targetFrameCount,
-                })
-              }
-            />
-          </Field>
-          {(primaryNode.keyframes ?? []).map((keyframe, index) => (
-            <div className="keyframe" key={keyframe.id}>
+        {primaryNode?.kind === "path" && nodes.length === 1 && (
+          <section className="property-section path-editor">
+            <div className="section-heading">
+              <h3>Camera path</h3>
+              <Button
+                size="1"
+                variant="surface"
+                color="gray"
+                className="button compact"
+                onClick={addKeyframe}
+              >
+                <Plus /> Keyframe
+              </Button>
+            </div>
+            <Field label="Field of view">
               <NumericInput
-                label={`Keyframe ${index + 1} order`}
-                value={index + 1}
-                min={1}
-                max={primaryNode.keyframes!.length}
+                label="Path field of view"
+                value={
+                  primaryNode.fov ??
+                  (2 *
+                    Math.atan(
+                      (primaryNode.keyframes?.[0]?.camera.intrinsics.height ??
+                        workspace.settings.viewportCamera.intrinsics.height) /
+                        (2 *
+                          (primaryNode.keyframes?.[0]?.camera.intrinsics.fy ??
+                            workspace.settings.viewportCamera.intrinsics.fy)),
+                    ) *
+                    180) /
+                    Math.PI
+                }
+                min={10}
+                max={120}
                 step={1}
-                onCommit={(position) =>
+                onCommit={(fov) =>
                   void safeCommand({
-                    type: "path.keyframe",
+                    type: "path.update",
                     pathId: primaryNode.id,
-                    id: keyframe.id,
-                    index: position - 1,
+                    fov,
                   })
                 }
               />
-              <Hint label="Replace this keyframe from the current viewport">
-                <Button
-                  size="1"
-                  variant="surface"
-                  color="gray"
-                  onClick={() =>
+            </Field>
+            <Field label="Target frames">
+              <NumericInput
+                label="Target frames"
+                value={targetFrameCount}
+                min={2}
+                max={600}
+                step={1}
+                onCommit={(targetFrameCount) =>
+                  void safeCommand({
+                    type: "path.update",
+                    pathId: primaryNode.id,
+                    targetFrameCount,
+                  })
+                }
+              />
+            </Field>
+            {(primaryNode.keyframes ?? []).map((keyframe, index) => (
+              <div className="keyframe" key={keyframe.id}>
+                <NumericInput
+                  label={`Keyframe ${index + 1} order`}
+                  value={index + 1}
+                  min={1}
+                  max={primaryNode.keyframes!.length}
+                  step={1}
+                  onCommit={(position) =>
                     void safeCommand({
                       type: "path.keyframe",
                       pathId: primaryNode.id,
                       id: keyframe.id,
+                      index: position - 1,
                     })
                   }
-                >
-                  Replace
-                </Button>
-              </Hint>
-              <Hint label={`Delete keyframe ${index + 1}`}>
-                <button
-                  className="icon-button"
-                  aria-label={`Delete keyframe ${index + 1}`}
-                  onClick={() =>
-                    void safeCommand({
-                      type: "path.keyframe",
-                      pathId: primaryNode.id,
-                      id: keyframe.id,
-                      remove: true,
-                    })
-                  }
-                >
-                  <X />
-                </button>
-              </Hint>
-            </div>
-          ))}
-        </section>
-      )}
-
-      {assets.length > 0 && (
-        <section className="property-section">
-          <h3>Asset</h3>
-          <dl className="metadata">
-            <div>
-              <dt>Type</dt>
-              <dd>
-                {common(assets.map((asset) => asset.mimeType || asset.kind)) ??
-                  "Mixed"}
-              </dd>
-            </div>
-            <div>
-              <dt>Size</dt>
-              <dd>
-                {(
-                  assets.reduce((sum, asset) => sum + asset.size, 0) / 1_048_576
-                ).toFixed(2)}{" "}
-                MB
-              </dd>
-            </div>
-            {primaryAsset && (
-              <div>
-                <dt>Path</dt>
-                <dd title={primaryAsset.path}>{primaryAsset.path}</dd>
+                />
+                <Hint label="Replace this keyframe from the current viewport">
+                  <Button
+                    size="1"
+                    variant="surface"
+                    color="gray"
+                    onClick={() =>
+                      void safeCommand({
+                        type: "path.keyframe",
+                        pathId: primaryNode.id,
+                        id: keyframe.id,
+                      })
+                    }
+                  >
+                    Replace
+                  </Button>
+                </Hint>
+                <Hint label={`Delete keyframe ${index + 1}`}>
+                  <button
+                    className="icon-button"
+                    aria-label={`Delete keyframe ${index + 1}`}
+                    onClick={() =>
+                      void safeCommand({
+                        type: "path.keyframe",
+                        pathId: primaryNode.id,
+                        id: keyframe.id,
+                        remove: true,
+                      })
+                    }
+                  >
+                    <X />
+                  </button>
+                </Hint>
               </div>
-            )}
-            {primaryAsset?.parentAssetId && (
+            ))}
+          </section>
+        )}
+
+        {assets.length > 0 && (
+          <section className="property-section">
+            <h3>Asset</h3>
+            <dl className="metadata">
               <div>
-                <dt>Derived from</dt>
+                <dt>Type</dt>
                 <dd>
-                  {workspace.assets[primaryAsset.parentAssetId]?.name ??
-                    primaryAsset.parentAssetId}
+                  {common(
+                    assets.map((asset) => asset.mimeType || asset.kind),
+                  ) ?? "Mixed"}
                 </dd>
               </div>
-            )}
-            {primaryAsset?.jobId && (
               <div>
-                <dt>Job</dt>
-                <dd>{primaryAsset.jobId}</dd>
+                <dt>Size</dt>
+                <dd>
+                  {(
+                    assets.reduce((sum, asset) => sum + asset.size, 0) /
+                    1_048_576
+                  ).toFixed(2)}{" "}
+                  MB
+                </dd>
               </div>
-            )}
-          </dl>
-          {cameraAssets.length > 0 && (
-            <div className="vector-field">
-              <span>Camera</span>
-              <div>
-                {Array.from({ length: 3 }, (_, index) => (
-                  <NumericInput
-                    key={index}
-                    value={common(
-                      cameraAssets.map(
-                        (asset) => asset.camera!.extrinsics.position[index],
-                      ),
-                    )}
-                    onCommit={(value) => {
-                      void safeCommand({
-                        type: "edit.batch",
-                        commands: cameraAssets.map((asset) => {
-                          const position = [
-                            ...asset.camera!.extrinsics.position,
-                          ] as [number, number, number];
-                          position[index] = value;
-                          return {
-                            type: "assets.update" as const,
-                            id: asset.id,
-                            patch: {
-                              camera: {
-                                ...asset.camera!,
-                                extrinsics: {
-                                  ...asset.camera!.extrinsics,
-                                  position,
+              {primaryAsset && (
+                <div>
+                  <dt>Path</dt>
+                  <dd title={primaryAsset.path}>{primaryAsset.path}</dd>
+                </div>
+              )}
+              {primaryAsset?.parentAssetId && (
+                <div>
+                  <dt>Derived from</dt>
+                  <dd>
+                    {workspace.assets[primaryAsset.parentAssetId]?.name ??
+                      primaryAsset.parentAssetId}
+                  </dd>
+                </div>
+              )}
+              {primaryAsset?.jobId && (
+                <div>
+                  <dt>Job</dt>
+                  <dd>{primaryAsset.jobId}</dd>
+                </div>
+              )}
+            </dl>
+            {cameraAssets.length > 0 && (
+              <div className="vector-field">
+                <span>Camera</span>
+                <div>
+                  {Array.from({ length: 3 }, (_, index) => (
+                    <NumericInput
+                      key={index}
+                      value={common(
+                        cameraAssets.map(
+                          (asset) => asset.camera!.extrinsics.position[index],
+                        ),
+                      )}
+                      onCommit={(value) => {
+                        void safeCommand({
+                          type: "edit.batch",
+                          commands: cameraAssets.map((asset) => {
+                            const position = [
+                              ...asset.camera!.extrinsics.position,
+                            ] as [number, number, number];
+                            position[index] = value;
+                            return {
+                              type: "assets.update" as const,
+                              id: asset.id,
+                              patch: {
+                                camera: {
+                                  ...asset.camera!,
+                                  extrinsics: {
+                                    ...asset.camera!.extrinsics,
+                                    position,
+                                  },
                                 },
                               },
-                            },
-                          };
-                        }),
-                      });
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-          {imageAssets.length > 0 && (
-            <Field label="Depth map">
-              <select
-                value={
-                  common(
-                    imageAssets.map((asset) => asset.depthAssetId ?? ""),
-                  ) ?? "__mixed"
-                }
-                onChange={(event) => {
-                  if (event.target.value !== "__mixed")
-                    void updateAssets(imageAssets, {
-                      depthAssetId: event.target.value || null,
-                    });
-                }}
-              >
-                {common(
-                  imageAssets.map((asset) => asset.depthAssetId ?? ""),
-                ) === undefined && <option value="__mixed">Mixed</option>}
-                <option value="">None</option>
-                {Object.values(workspace.assets)
-                  .filter((asset) => asset.kind === "depth")
-                  .map((asset) => (
-                    <option value={asset.id} key={asset.id}>
-                      {asset.name}
-                    </option>
+                            };
+                          }),
+                        });
+                      }}
+                    />
                   ))}
-              </select>
-            </Field>
-          )}
-        </section>
-      )}
-    </div>
+                </div>
+              </div>
+            )}
+            {imageAssets.length > 0 && (
+              <Field label="Depth map">
+                <select
+                  value={
+                    common(
+                      imageAssets.map((asset) => asset.depthAssetId ?? ""),
+                    ) ?? "__mixed"
+                  }
+                  onChange={(event) => {
+                    if (event.target.value !== "__mixed")
+                      void updateAssets(imageAssets, {
+                        depthAssetId: event.target.value || null,
+                      });
+                  }}
+                >
+                  {common(
+                    imageAssets.map((asset) => asset.depthAssetId ?? ""),
+                  ) === undefined && <option value="__mixed">Mixed</option>}
+                  <option value="">None</option>
+                  {Object.values(workspace.assets)
+                    .filter((asset) => asset.kind === "depth")
+                    .map((asset) => (
+                      <option value={asset.id} key={asset.id}>
+                        {asset.name}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+            )}
+          </section>
+        )}
+      </div>
+    </>
   );
 }

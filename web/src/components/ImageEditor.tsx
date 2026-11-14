@@ -9,6 +9,7 @@ import { selectedImageOperation } from "../../../core/image-operation";
 import { selectedCaptureMask } from "../lib/clip-mask";
 import {
   ArrowCounterClockwise,
+  ArrowElbowDownLeft,
   ArrowDown,
   ArrowsClockwise,
   ArrowUp,
@@ -22,6 +23,7 @@ import {
   Gear,
   Images,
   Plus,
+  Palette,
   SelectionInverse,
   SpinnerGap,
   Stack,
@@ -38,6 +40,7 @@ import {
   Switch,
   Text,
   Tooltip,
+  TextField,
 } from "@radix-ui/themes";
 import {
   useCallback,
@@ -60,9 +63,9 @@ import {
 import "../image-editor.css";
 import { ImageCanvas } from "./ImageCanvas";
 import { ImageHistory } from "./ImageHistory";
-import { ResizableDivider } from "./ResizableDivider";
+import { ImageVersions } from "./ImageVersions";
 import { Field } from "./panelShared";
-import { Hint, PanelHeader, PromptButton } from "./ui";
+import { Hint, PanelHeader } from "./ui";
 
 type EditorSettings = Workspace["settings"]["editor2d"];
 type NanoJob = Job & { input: Extract<Job["input"], { kind: "nano" }> };
@@ -98,7 +101,6 @@ export function ImageEditor({
     ],
     ["editor2d", "layout"],
   );
-  const rootRef = useRef<HTMLDivElement>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const commandRef = useRef(command);
   const onErrorRef = useRef(onError);
@@ -559,15 +561,7 @@ export function ImageEditor({
     !!sourceId && workspace.redo.some((edit) => edit.scope === sourceId);
 
   return (
-    <div
-      ref={rootRef}
-      className="image-editor"
-      style={
-        {
-          "--history-width": `${workspace.settings.layout.historyWidth}px`,
-        } as React.CSSProperties
-      }
-    >
+    <div className="image-editor">
       <PanelHeader
         title={
           <span className="ie-title">
@@ -700,108 +694,105 @@ export function ImageEditor({
             onStroke={addStroke}
             onImport={() => uploadInputRef.current?.click()}
             onError={onError}
+            annotationControls={
+              source ? (
+                <div
+                  className="ie-brush-tools"
+                  role="toolbar"
+                  aria-label="Annotation tools"
+                >
+                  <Hint label="Brush color">
+                    <label className="ie-color-control">
+                      <Palette size={14} aria-hidden="true" />
+                      <input
+                        type="color"
+                        aria-label="Brush color"
+                        value={editor.brushColor}
+                        onChange={(event) =>
+                          updateEditor({ brushColor: event.target.value }, true)
+                        }
+                      />
+                    </label>
+                  </Hint>
+                  <Hint label="Brush size">
+                    <input
+                      className="ie-brush-size"
+                      type="range"
+                      aria-label="Brush size"
+                      min="0.001"
+                      max="0.2"
+                      step="0.001"
+                      value={editor.brushSize}
+                      onChange={(event) =>
+                        updateEditor(
+                          { brushSize: Number(event.target.value) },
+                          true,
+                        )
+                      }
+                    />
+                  </Hint>
+                  <span className="ie-toolbar-rule" />
+                  <Hint label="Undo annotation">
+                    <button
+                      aria-label="Undo annotation"
+                      disabled={!canUndo}
+                      onClick={() => void undoDraft()}
+                    >
+                      <ArrowUUpLeft />
+                    </button>
+                  </Hint>
+                  <Hint label="Redo annotation">
+                    <button
+                      aria-label="Redo annotation"
+                      disabled={!canRedo}
+                      onClick={() => void redoDraft()}
+                    >
+                      <ArrowUUpRight />
+                    </button>
+                  </Hint>
+                  <Hint label="Clear annotations">
+                    <button
+                      aria-label="Clear annotations"
+                      disabled={!draft.strokes.length}
+                      onClick={clearStrokes}
+                    >
+                      <Trash />
+                    </button>
+                  </Hint>
+                </div>
+              ) : null
+            }
           />
-          {source && (
-            <div
-              className="ie-brush-tools"
-              role="toolbar"
-              aria-label="Annotation tools"
-            >
-              <Hint label="Brush color">
-                <label className="ie-color-control">
-                  <input
-                    type="color"
-                    aria-label="Brush color"
-                    value={editor.brushColor}
-                    onChange={(event) =>
-                      updateEditor({ brushColor: event.target.value }, true)
-                    }
-                  />
-                </label>
-              </Hint>
-              <Hint label="Brush size">
-                <input
-                  className="ie-brush-size"
-                  type="range"
-                  aria-label="Brush size"
-                  min="0.001"
-                  max="0.2"
-                  step="0.001"
-                  value={editor.brushSize}
-                  onChange={(event) =>
-                    updateEditor(
-                      { brushSize: Number(event.target.value) },
-                      true,
-                    )
-                  }
-                />
-              </Hint>
-              <span className="ie-toolbar-rule" />
-              <Hint label="Undo annotation">
-                <button
-                  aria-label="Undo annotation"
-                  disabled={!canUndo}
-                  onClick={() => void undoDraft()}
-                >
-                  <ArrowUUpLeft />
-                </button>
-              </Hint>
-              <Hint label="Redo annotation">
-                <button
-                  aria-label="Redo annotation"
-                  disabled={!canRedo}
-                  onClick={() => void redoDraft()}
-                >
-                  <ArrowUUpRight />
-                </button>
-              </Hint>
-              <Hint label="Clear annotations">
-                <button
-                  aria-label="Clear annotations"
-                  disabled={!draft.strokes.length}
-                  onClick={clearStrokes}
-                >
-                  <Eraser />
-                </button>
-              </Hint>
-            </div>
-          )}
-          <div className="ie-edit-box">
-            <PromptButton
-              label="Describe the edit"
-              hint="Describe the edit for Nano Banana"
-              placeholder="Change the light to blue hour, keep the building geometry"
-              note="Drawn marks on the canvas guide the edit."
+          <div className="ie-edit-box floating-toolbar">
+            <ImageVersions assetId={source?.id ?? null} onSelect={chooseSource}>
+              <ImageHistory
+                safeCommand={safeCommand}
+                activeAssetId={source?.id ?? null}
+                onSelect={(activeAssetId) =>
+                  updateEditor({ activeAssetId }, true)
+                }
+                onReuse={reuseJob}
+                onRetry={(jobId) =>
+                  void reportCommand({ type: "jobs.retry", id: jobId })
+                }
+              />
+            </ImageVersions>
+            <TextField.Root
+              size="1"
+              aria-label="Describe the edit"
+              placeholder="Describe the edit…"
               value={editor.prompt}
-              onChange={(prompt) => updateEditor({ prompt })}
+              onChange={(event) => updateEditor({ prompt: event.target.value })}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  if (source && editor.prompt.trim() && !submitting)
+                    void submitGeneration();
+                }
+              }}
             />
             <div className="ie-action-row">
-              <Hint
-                label={
-                  !source
-                    ? "Choose an image to edit"
-                    : !editor.prompt.trim()
-                      ? "Describe the edit first"
-                      : `Generate ${editor.settings.numImages === 1 ? "an edited image" : `${editor.settings.numImages} edited images`} with Nano Banana`
-                }
-              >
-                <Button
-                  size="1"
-                  variant="surface"
-                  color="gray"
-                  className="ie-generate"
-                  disabled={!source || !editor.prompt.trim() || submitting}
-                  onClick={submitGeneration}
-                >
-                  {submitting && <SpinnerGap className="spin" />}
-                  Generate
-                  {editor.settings.numImages > 1 && (
-                    <span className="ie-badge">
-                      ×{editor.settings.numImages}
-                    </span>
-                  )}
-                </Button>
-              </Hint>
               <ToolPopover
                 label="References"
                 icon={<Images />}
@@ -1060,41 +1051,35 @@ export function ImageEditor({
                   </Tooltip>
                 </Flex>
               </ToolPopover>
+              <Hint
+                label={
+                  !source
+                    ? "Choose an image to edit"
+                    : !editor.prompt.trim()
+                      ? "Describe the edit first"
+                      : `Generate ${editor.settings.numImages === 1 ? "an edited image" : `${editor.settings.numImages} edited images`} with Nano Banana`
+                }
+              >
+                <Button
+                  size="1"
+                  variant="surface"
+                  color="gray"
+                  className="ie-generate submit-action"
+                  data-ready={!!source && !!editor.prompt.trim() && !submitting}
+                  aria-label="Generate edited image"
+                  disabled={!source || !editor.prompt.trim() || submitting}
+                  onClick={submitGeneration}
+                >
+                  {submitting ? (
+                    <SpinnerGap className="spin" />
+                  ) : (
+                    <ArrowElbowDownLeft />
+                  )}
+                </Button>
+              </Hint>
             </div>
           </div>
         </div>
-
-        <ResizableDivider
-          label="Resize image history"
-          orientation="vertical"
-          value={workspace.settings.layout.historyWidth}
-          min={110}
-          max={320}
-          step={16}
-          pointerValue={(start, startX, currentX) => start + startX - currentX}
-          onPreview={(value) =>
-            rootRef.current?.style.setProperty("--history-width", `${value}px`)
-          }
-          onCommit={(historyWidth) =>
-            void reportCommand({
-              type: "workspace.update",
-              settings: {
-                layout: { ...workspace.settings.layout, historyWidth },
-              },
-            })
-          }
-        />
-        <section className="ie-history-column" aria-label="History">
-          <ImageHistory
-            safeCommand={safeCommand}
-            activeAssetId={source?.id ?? null}
-            onSelect={(activeAssetId) => updateEditor({ activeAssetId }, true)}
-            onReuse={reuseJob}
-            onRetry={(jobId) =>
-              void reportCommand({ type: "jobs.retry", id: jobId })
-            }
-          />
-        </section>
       </div>
     </div>
   );

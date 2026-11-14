@@ -178,3 +178,23 @@ export function imageReplacementCommands(
     });
   return commands;
 }
+
+/** Available versions of one image family, in creation order for previous/next navigation. */
+export function imageVersionsFor(
+  workspace: Pick<Workspace, "assets" | "nodes">,
+  assetId: string | null,
+) {
+  if (!assetId) return [];
+  const roots = imageIndex(workspace).roots;
+  const rootId = roots.get(assetId);
+  if (!rootId) return [];
+  return Object.values(workspace.assets)
+    .filter(
+      (asset) =>
+        asset.kind === "image" &&
+        !asset.missing &&
+        !asset.trashedAt &&
+        roots.get(asset.id) === rootId,
+    )
+    .sort((a, b) => a.modifiedAt - b.modifiedAt || a.id.localeCompare(b.id));
+}

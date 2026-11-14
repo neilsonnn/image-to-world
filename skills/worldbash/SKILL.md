@@ -175,7 +175,8 @@ bun run worldbash context exclude <capture-id>
 bun run worldbash context include <capture-id>
 bun run worldbash context solo <capture-id>
 bun run worldbash context solo
-bun run worldbash context order <first-id> <second-id>
+bun run worldbash context freeze <capture-id>
+bun run worldbash context unfreeze <capture-id>
 bun run worldbash path create <camera-id> <camera-id> --target-frames 36
 bun run worldbash context exclude <capture-id> --path <path-id>
 ```
@@ -183,7 +184,10 @@ bun run worldbash context exclude <capture-id> --path <path-id>
 Hide changes scene visibility. Exclusion changes generation membership. Solo
 narrows context and the viewport; an empty `context solo` clears it. `--path`
 addresses independent context settings on a camera path; omission addresses the
-global context. Read state before replacing a context order or selection.
+global context. Context lists imports first, then generated Frames, in scene hierarchy
+order within each group. Freeze promotes a generated Frame into the import group;
+it does not lock transforms, image editing, or generation. Reorder Frames in the
+scene hierarchy to change their order within a group.
 
 All nodes share parent, transform, visibility, and selection. Use `scene put
 --file nodes.json` for exact records or `scene transform <id>...` for common edits.

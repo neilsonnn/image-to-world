@@ -34,19 +34,24 @@ button {
   border: 0;
 }
 .editor {
+  --context-column-width: 144px;
+  grid-template-columns: minmax(0, 1fr) 2px var(--context-column-width);
   height: 100vh;
   display: grid;
-  grid-template-rows: 40px minmax(0, 1fr);
+  grid-template-rows: var(--panel-header-height) minmax(0, 1fr) var(
+      --panel-header-height
+    );
   background: var(--bg);
 }
 .topbar {
   position: relative;
   z-index: 20;
-  grid-column: 1/-1;
+  grid-column: 1;
+  grid-row: 1;
   display: grid;
   grid-template-columns: 150px minmax(0, 1fr) auto;
   align-items: center;
-  height: 40px;
+  height: var(--panel-header-height);
   padding: 0 8px 0 12px;
   border-bottom: 1px solid var(--line);
   background: var(--surface-2);
@@ -123,22 +128,46 @@ button {
   border-color: var(--line);
 }
 .editor-workspace {
+  --navigation-track: minmax(180px, var(--left-width));
+  --navigation-separator: 2px;
+  --properties-track: minmax(220px, var(--right-width));
+  --properties-separator: 2px;
+  position: relative;
   min-width: 0;
   min-height: 0;
   display: grid;
   grid-template-columns:
-    minmax(180px, var(--left-width)) 2px minmax(320px, 1fr) 2px
-    minmax(220px, var(--right-width));
-  grid-template-rows: minmax(0, 1fr) 104px;
+    var(--navigation-track) var(--navigation-separator)
+    minmax(0, 1fr) var(--properties-separator) var(--properties-track);
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
-.editor-workspace > .left-column,
-.editor-workspace > [aria-label="Resize navigation"] {
+.editor-workspace.navigation-closed {
+  --navigation-track: 0px;
+  --navigation-separator: 0px;
+}
+.editor-workspace.properties-closed {
+  --properties-track: 0px;
+  --properties-separator: 0px;
+}
+.editor-workspace > .left-column {
+  grid-column: 1;
   grid-row: 1 / -1;
 }
-.editor-workspace > .workspace-center,
-.editor-workspace > [aria-label="Resize properties"],
+.editor-workspace > [aria-label="Resize navigation"] {
+  grid-column: 2;
+  grid-row: 1 / -1;
+}
+.editor-workspace > .workspace-center {
+  grid-column: 3;
+  grid-row: 1;
+}
+.editor-workspace > [aria-label="Resize properties"] {
+  grid-column: 4;
+  grid-row: 1;
+}
 .editor-workspace > .right-column {
+  grid-column: 5;
   grid-row: 1;
 }
 .shell-pane {
@@ -268,7 +297,7 @@ button {
   background: var(--viewport-background);
 }
 .viewport-panel {
-  container: viewport / inline-size;
+  position: relative;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -280,27 +309,24 @@ button {
 .viewport-overlay {
   position: absolute;
   z-index: 5;
-  top: 6px;
-  left: 6px;
-  right: 6px;
+  top: var(--floating-toolbar-edge);
+  left: var(--floating-toolbar-edge);
+  right: var(--floating-toolbar-edge);
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
   pointer-events: none;
 }
 .viewport-overlay-spacer {
   flex: 1;
 }
 .viewport-tools {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
+  flex: 0 0 auto;
   pointer-events: auto;
-  background: var(--surface-overlay-soft);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 7px 22px var(--shadow);
 }
 .viewport-canvas {
   position: relative;
@@ -1252,9 +1278,8 @@ button {
 
 @media (max-width: 900px) {
   .editor-workspace {
-    grid-template-columns:
-      clamp(140px, 22vw, 180px) 2px minmax(0, 1fr)
-      2px clamp(160px, 28vw, 220px);
+    --navigation-track: clamp(140px, 22vw, 180px);
+    --properties-track: clamp(160px, 28vw, 220px);
   }
   .viewport-shell {
     --display-toolbar-top: 46px;
@@ -1384,18 +1409,11 @@ button {
 }
 
 .viewport-prompt {
-  display: flex;
-  flex: 1;
-  min-width: 100px;
+  flex: 1 1 0;
+  min-width: 0;
   max-width: 520px;
   margin: 0 auto;
-  align-items: center;
-  gap: 4px;
-  padding: 3px;
   pointer-events: auto;
-  background: var(--surface-overlay-soft);
-  border: 1px solid var(--line);
-  border-radius: 6px;
 }
 .viewport-prompt .rt-TextFieldRoot {
   flex: 1;
@@ -1412,38 +1430,220 @@ button {
   flex-shrink: 0;
 }
 
-.gizmo-select {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding-left: 3px;
+.toolbar-select.rt-Button {
+  gap: 4px;
+  padding: 0 5px;
+  font-size: 10px;
 }
-.gizmo-select svg {
+.toolbar-select svg {
   width: 14px;
   height: 14px;
   flex: 0 0 auto;
 }
-.gizmo-select select {
-  min-width: 0;
-  width: auto;
-  padding: 3px 2px;
-  font-size: 10px;
-  background: transparent;
-  border: 0;
+
+/* Retain radio semantics while omitting the library's visual checkmark. */
+.toolbar-select-menu .rt-DropdownMenuItemIndicator {
+  display: none;
+}
+.toolbar-select-menu .rt-DropdownMenuRadioItem {
+  padding-left: var(--space-2);
 }
 
-@container viewport (max-width: 640px) {
-  .viewport-overlay {
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  .viewport-tools[aria-label="View"] {
-    margin-left: auto;
-  }
-  .viewport-prompt {
-    order: 1;
-    flex-basis: 100%;
-    min-width: 0;
-    max-width: none;
-  }
+.inspector-panel > .rt-TextFieldRoot {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.editor-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 6px;
+  height: var(--panel-header-height);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.footer-panel-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  font-size: 10px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.footer-panel-toggle:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.editor-footer svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+.editor-footer > .hint-trigger:has(.footer-operation) {
+  flex: 1;
+  min-width: 0;
+}
+.editor-footer > .hint-trigger:has(.footer-selection) {
+  min-width: 0;
+  max-width: 40%;
+}
+.footer-operation,
+.footer-selection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.footer-operation span,
+.footer-selection-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.footer-selection > span:last-child {
+  flex: 0 0 auto;
+}
+
+.editor > .editor-workspace {
+  grid-column: 1;
+  grid-row: 2;
+}
+.editor > .editor-footer {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+
+.editor > [aria-label="Resize spatial context"] {
+  grid-column: 2;
+  grid-row: 1 / 3;
+}
+.editor > [aria-label="Resize agent guide"] {
+  display: none;
+}
+
+.viewport-camera-bar {
+  position: absolute;
+  z-index: 5;
+  bottom: var(--floating-toolbar-edge);
+  left: var(--floating-toolbar-edge);
+  max-width: calc(100% - 2 * var(--floating-toolbar-edge));
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  font-size: 10px;
+}
+.viewport-camera-bar > * {
+  flex-shrink: 0;
+}
+.viewport-camera-bar > .hint-trigger:has(.viewport-camera-source) {
+  flex: 0 1 auto;
+  min-width: 28px;
+}
+.viewport-camera-source {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--muted);
+}
+.viewport-camera-source span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.viewport-camera-source svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+.viewport-camera-source.overridden {
+  color: var(--text);
+}
+.viewport-fov {
+  width: 90px;
+}
+.viewport-camera-format {
+  margin-left: auto;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.viewport-camera-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.viewport-camera-field .numeric-input {
+  flex: 1;
+  min-width: 0;
+}
+.viewport-camera-field > span {
+  width: 18px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.viewport-passepartout {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  border: 1px solid rgb(255 255 255 / 35%);
+  box-shadow: 0 0 0 100vmax rgb(0 0 0 / var(--passepartout-opacity));
+}
+
+/* Shared floating controls for the 3D viewport and image canvas. */
+.floating-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--floating-toolbar-gap);
+  padding: var(--floating-toolbar-padding);
+  background: var(--surface-overlay-soft);
+  border: 0;
+  border-radius: var(--floating-toolbar-radius);
+  box-shadow: 0 4px 14px var(--shadow);
+}
+.floating-toolbar :is(.rt-Button, .rt-IconButton) {
+  height: 22px;
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--muted);
+}
+.floating-toolbar .rt-IconButton {
+  width: 22px;
+  flex-shrink: 0;
+}
+.floating-toolbar button:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.floating-toolbar
+  button:is([aria-pressed="true"], [data-state="open"], .is-active) {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.floating-toolbar button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* A text-driven action is the app's shared colored ready state. */
+.submit-action[data-ready="true"]:not(:disabled),
+.floating-toolbar .submit-action[data-ready="true"]:not(:disabled) {
+  color: var(--action-ready);
+  background: var(--action-ready-surface);
+  box-shadow: inset 0 0 0 1px var(--action-ready);
+}
+.submit-action[data-ready="true"]:hover:not(:disabled),
+.floating-toolbar .submit-action[data-ready="true"]:hover:not(:disabled) {
+  color: var(--action-ready);
+  background: var(--action-ready-hover);
 }

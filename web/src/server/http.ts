@@ -86,6 +86,7 @@ export async function createService(root: string) {
               };
               request.signal.addEventListener("abort", abort, { once: true });
               send("change", { revision: store.snapshot().revision });
+              if (store.lastOperation) send("operation", store.lastOperation);
             },
             cancel() {
               dispose();

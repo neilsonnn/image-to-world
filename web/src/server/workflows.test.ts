@@ -1640,3 +1640,27 @@ test("already posed imports and Atlas view integration create no automatic clips
     Object.values(store.snapshot().nodes).some((node) => node.kind === "clip"),
   ).toBe(false);
 });
+
+test("footer activity reports CLI commands without persisting an extra scene edit", async () => {
+  const service = await createService(await directory());
+  cleanups.push(() => service.close());
+  const events: { event: string; data: unknown }[] = [];
+  const unsubscribe = service.store.subscribe((event, data) =>
+    events.push({ event, data }),
+  );
+  const beforeRevision = service.store.snapshot().revision;
+  try {
+    const response = await service.handle(
+      commandRequest({ type: "camera.place" }),
+    );
+    expect(response.status).toBe(200);
+    expect(service.store.lastOperation?.name).toBe("Place camera");
+    expect(
+      events.find((item) => item.event === "operation")?.data,
+    ).toMatchObject({ name: "Place camera" });
+    expect(service.store.snapshot().undo).toHaveLength(1);
+    expect(service.store.snapshot().revision).toBe(beforeRevision + 1);
+  } finally {
+    unsubscribe();
+  }
+});

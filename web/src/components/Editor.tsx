@@ -1,3 +1,6 @@
+import { AgentGuide } from "./AgentGuide";
+import "../agent-guide.css";
+import { EditorFooter } from "./EditorFooter";
 import {
   GlobeHemisphereWest,
   PlugsConnected,
@@ -6,6 +9,7 @@ import {
   FilmStrip,
   Gear,
   SpinnerGap,
+  ChatCircleText,
   Wrench,
   X,
 } from "@phosphor-icons/react";
@@ -91,6 +95,9 @@ function EditorWorkspace() {
   const connected = useClientState((state) => state.connected);
   const client = useWorldbashClient();
   const [connectionsOpen, setConnectionsOpen] = useState(false);
+  const [agentGuideOpen, setAgentGuideOpen] = useState(true);
+  const [propertiesOpen, setPropertiesOpen] = useState(false);
+  const [navigationOpen, setNavigationOpen] = useState(false);
   const { requestPlacement, dialog: imageImportDialog } = useImageImport();
   const [previewNodes, setPreviewNodes] = useState<SceneNode[] | null>(null);
   const [gizmoNodes, setGizmoNodes] = useState<SceneNode[] | null>(null);
@@ -108,7 +115,11 @@ function EditorWorkspace() {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === "Escape") {
       event.preventDefault();
-      void safeCommand({ type: "selection.set", ids: [] });
+      void (async () => {
+        if (client.getWorkspace().settings.viewingCameraId)
+          await safeCommand({ type: "camera.release" });
+        await safeCommand({ type: "selection.set", ids: [] });
+      })();
     } else if (event.key.toLowerCase() === "h") {
       event.preventDefault();
       if (!event.repeat) void safeCommand({ type: "selection.visibility" });
@@ -131,7 +142,7 @@ function EditorWorkspace() {
   return (
     <main
       ref={editorRef}
-      className="editor"
+      className={`editor${agentGuideOpen ? " agent-guide-open" : ""}`}
       onCopy={(event) => {
         const workspace = client.getWorkspace();
         if (event.defaultPrevented || window.getSelection()?.toString()) return;
@@ -205,6 +216,8 @@ function EditorWorkspace() {
       }}
       style={
         {
+          "--agent-guide-width": `${workspace.settings.layout.agentGuideWidth}px`,
+          "--context-column-width": `${workspace.settings.layout.contextWidth}px`,
           "--left-width": `${workspace.settings.sidebarWidth}px`,
           "--right-width": `${workspace.settings.layout.rightWidth}px`,
           "--left-split": workspace.settings.layout.leftSplit,
@@ -212,6 +225,28 @@ function EditorWorkspace() {
         } as React.CSSProperties
       }
     >
+      {agentGuideOpen && (
+        <>
+          <AgentGuide onClose={() => setAgentGuideOpen(false)} />
+          <ResizableDivider
+            label="Resize agent guide"
+            orientation="vertical"
+            value={workspace.settings.layout.agentGuideWidth}
+            min={160}
+            max={900}
+            step={16}
+            pointerValue={(start, startX, currentX) =>
+              start + currentX - startX
+            }
+            onPreview={(width) =>
+              setVariable("--agent-guide-width", `${width}px`)
+            }
+            onCommit={(agentGuideWidth) =>
+              void updateLayout({ agentGuideWidth })
+            }
+          />
+        </>
+      )}
       <header className="topbar">
         <div className="wordmark">
           <GlobeHemisphereWest weight="duotone" />
@@ -220,6 +255,15 @@ function EditorWorkspace() {
         </div>
         <WorkspaceTitle />
         <div className="topbar-actions">
+          <span className="agent-guide-toggle">
+            <ToolbarIconButton
+              label={agentGuideOpen ? "Hide agent guide" : "Show agent guide"}
+              aria-pressed={agentGuideOpen}
+              onClick={() => setAgentGuideOpen((open) => !open)}
+            >
+              <ChatCircleText />
+            </ToolbarIconButton>
+          </span>
           <Hint
             label={
               connected
@@ -364,51 +408,63 @@ function EditorWorkspace() {
         <EnvironmentEditor onClose={() => setConnectionsOpen(false)} />
       )}
 
-      <div className="editor-workspace">
-        <aside
-          ref={leftColumnRef}
-          className="left-column"
-          aria-label="Workspace navigation"
-        >
-          <section className="shell-pane outline-pane">
-            <ScenePanel requestPlacement={requestPlacement} />
-          </section>
-          <ResizableDivider
-            label="Resize outline and assets"
-            orientation="horizontal"
-            value={workspace.settings.layout.leftSplit}
-            min={0.2}
-            max={0.8}
-            step={0.05}
-            pointerValue={(start, startY, currentY) =>
-              start +
-              (currentY - startY) / (leftColumnRef.current?.clientHeight || 1)
-            }
-            onPreview={(value) => setVariable("--left-split", String(value))}
-            onCommit={(leftSplit) => void updateLayout({ leftSplit })}
-          />
-          <section className="shell-pane assets-pane">
-            <PanelHeader title="Project assets" />
-            <AssetsPanel />
-          </section>
-        </aside>
+      <div
+        className={`editor-workspace${propertiesOpen ? "" : " properties-closed"}${navigationOpen ? "" : " navigation-closed"}`}
+      >
+        {navigationOpen && (
+          <>
+            <aside
+              id="workspace-navigation"
+              ref={leftColumnRef}
+              className="left-column"
+              aria-label="Workspace navigation"
+            >
+              <section className="shell-pane outline-pane">
+                <ScenePanel requestPlacement={requestPlacement} />
+              </section>
+              <ResizableDivider
+                label="Resize outline and assets"
+                orientation="horizontal"
+                value={workspace.settings.layout.leftSplit}
+                min={0.2}
+                max={0.8}
+                step={0.05}
+                pointerValue={(start, startY, currentY) =>
+                  start +
+                  (currentY - startY) /
+                    (leftColumnRef.current?.clientHeight || 1)
+                }
+                onPreview={(value) =>
+                  setVariable("--left-split", String(value))
+                }
+                onCommit={(leftSplit) => void updateLayout({ leftSplit })}
+              />
+              <section className="shell-pane assets-pane">
+                <PanelHeader title="Project assets" />
+                <AssetsPanel />
+              </section>
+            </aside>
 
-        <ResizableDivider
-          label="Resize navigation"
-          orientation="vertical"
-          value={workspace.settings.sidebarWidth}
-          min={180}
-          max={600}
-          step={16}
-          pointerValue={(start, startX, currentX) => start + currentX - startX}
-          onPreview={(value) => setVariable("--left-width", `${value}px`)}
-          onCommit={(sidebarWidth) =>
-            void safeCommand({
-              type: "workspace.update",
-              settings: { sidebarWidth },
-            })
-          }
-        />
+            <ResizableDivider
+              label="Resize navigation"
+              orientation="vertical"
+              value={workspace.settings.sidebarWidth}
+              min={180}
+              max={600}
+              step={16}
+              pointerValue={(start, startX, currentX) =>
+                start + currentX - startX
+              }
+              onPreview={(value) => setVariable("--left-width", `${value}px`)}
+              onCommit={(sidebarWidth) =>
+                void safeCommand({
+                  type: "workspace.update",
+                  settings: { sidebarWidth },
+                })
+              }
+            />
+          </>
+        )}
 
         <section className="workspace-center">
           <section className="viewport-shell">
@@ -448,27 +504,64 @@ function EditorWorkspace() {
           </section>
         </section>
 
-        <ResizableDivider
-          label="Resize properties"
-          orientation="vertical"
-          value={workspace.settings.layout.rightWidth}
-          min={220}
-          max={600}
-          step={16}
-          pointerValue={(start, startX, currentX) => start + startX - currentX}
-          onPreview={(value) => setVariable("--right-width", `${value}px`)}
-          onCommit={(rightWidth) => void updateLayout({ rightWidth })}
-        />
+        {propertiesOpen && (
+          <>
+            <ResizableDivider
+              label="Resize properties"
+              orientation="vertical"
+              value={workspace.settings.layout.rightWidth}
+              min={220}
+              max={600}
+              step={16}
+              pointerValue={(start, startX, currentX) =>
+                start + startX - currentX
+              }
+              onPreview={(value) => setVariable("--right-width", `${value}px`)}
+              onCommit={(rightWidth) => void updateLayout({ rightWidth })}
+            />
 
-        <aside className="right-column shell-pane" aria-label="Properties">
-          <PanelHeader title="Properties" />
-          <InspectorPanel onPreview={setPreviewNodes} />
-        </aside>
-
-        <div className="atlas-dock-row">
-          <AtlasDock requestPlacement={requestPlacement} />
-        </div>
+            <aside
+              id="workspace-properties"
+              className="right-column shell-pane"
+              aria-label="Properties"
+            >
+              <InspectorPanel onPreview={setPreviewNodes} />
+            </aside>
+          </>
+        )}
       </div>
+      <ResizableDivider
+        label="Resize spatial context"
+        orientation="vertical"
+        value={workspace.settings.layout.contextWidth}
+        min={96}
+        max={500}
+        step={16}
+        pointerValue={(start, startX, currentX) => start + startX - currentX}
+        onPreview={(width) =>
+          setVariable("--context-column-width", `${width}px`)
+        }
+        onCommit={(contextWidth) => void updateLayout({ contextWidth })}
+      />
+      <aside
+        className="spatial-context-column"
+        aria-label="Spatial context column"
+      >
+        <AtlasDock requestPlacement={requestPlacement} />
+      </aside>
+
+      <EditorFooter
+        navigationOpen={navigationOpen}
+        propertiesOpen={propertiesOpen}
+        onNavigation={() => {
+          setNavigationOpen((open) => !open);
+          client.setHoveredNode(null);
+        }}
+        onProperties={() => {
+          setPropertiesOpen((open) => !open);
+          setPreviewNodes(null);
+        }}
+      />
 
       {error && (
         <div className="error-toast">

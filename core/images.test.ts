@@ -1,3 +1,4 @@
+import { imageVersionsFor } from "./images";
 import { expect, test } from "bun:test";
 import { applyCommand } from "./commands";
 import { createCapture, captureFrame, sceneCamera } from "./captures";
@@ -145,4 +146,45 @@ test("history activation can undo back through capture creation and redo", () =>
   applyCommand(w, { type: "history.redo" });
   expect(w.nodes.a.assetId).toBe("edit");
   expect(w.imageVersions.photo).toBe("edit");
+});
+
+test("version navigation stays within the current image family and skips unavailable versions", () => {
+  const w = fixture();
+  const source = w.assets.photo;
+  w.assets.photo.modifiedAt = 1;
+  w.assets.edit.modifiedAt = 3;
+  w.assets.branch = {
+    ...source,
+    id: "branch",
+    name: "Branch",
+    parentAssetId: "photo",
+    modifiedAt: 2,
+  };
+  w.assets.missing = {
+    ...source,
+    id: "missing",
+    parentAssetId: "photo",
+    modifiedAt: 4,
+    missing: true,
+  };
+  w.assets.trash = {
+    ...source,
+    id: "trash",
+    parentAssetId: "photo",
+    modifiedAt: 5,
+    trashedAt: 5,
+  };
+  w.assets.unrelated = {
+    ...source,
+    id: "unrelated",
+    parentAssetId: undefined,
+    modifiedAt: 6,
+  };
+  expect(imageVersionsFor(w, "edit").map((a) => a.id)).toEqual([
+    "photo",
+    "branch",
+    "edit",
+  ]);
+  expect(imageVersionsFor(w, null)).toEqual([]);
+  expect(imageVersionsFor(w, "unknown")).toEqual([]);
 });

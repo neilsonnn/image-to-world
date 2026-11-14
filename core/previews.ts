@@ -1,4 +1,8 @@
-import { captureNodes, captureFrameStatus, orderedCaptures } from "./captures";
+import {
+  captureNodes,
+  captureFrameStatus,
+  spatialContextFrames,
+} from "./captures";
 import { frameAssets } from "./frames";
 import type { JobInput, Workspace } from "./schema";
 export type PreviewItem = {
@@ -35,7 +39,7 @@ export function previewItems(
     });
   else
     items = (
-      input.nodeIds ?? orderedCaptures(workspace).map((node) => node.id)
+      input.nodeIds ?? spatialContextFrames(workspace).map((node) => node.id)
     ).map((id) => {
       const node = workspace.nodes[id];
       if (!node) throw new Error(`Node does not exist: ${id}`);

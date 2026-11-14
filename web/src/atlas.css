@@ -155,16 +155,21 @@
   font-size: 9px;
 }
 
-/* Bottom dock: one Spatial context panel under the viewport and Properties. */
-.atlas-dock-row {
-  grid-column: 3 / -1;
-  grid-row: 2;
-  display: grid;
+.spatial-context-column {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  display: flex;
   min-width: 0;
   min-height: 0;
-  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+}
+.spatial-context-column > .spatial-context-pane {
+  flex: 1;
+  width: 100%;
 }
 .atlas-dock-body {
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -186,12 +191,9 @@
 .format-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 1px 5px;
-  color: var(--secondary-text);
-  border: 1px solid var(--line-strong);
-  border-radius: 3px;
-  font-size: 9px;
+  height: 24px;
+  padding: 0 6px;
+  font-size: var(--font-size-1);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -202,13 +204,15 @@
 }
 .spatial-context-strip {
   flex: 1;
+  flex-direction: column;
+  min-width: 0;
   min-height: 0;
   display: flex;
   align-items: stretch;
-  gap: 2px;
-  padding: 2px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
   overscroll-behavior: none;
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
@@ -223,7 +227,7 @@
 .context-tile {
   position: relative;
   flex: 0 0 auto;
-  height: 100%;
+  width: 100%;
   aspect-ratio: var(--context-thumbnail-aspect);
   overflow: hidden;
   background: var(--surface-input);
@@ -326,20 +330,60 @@
   height: 11px;
 }
 .new-frames {
-  flex: 0 0 200px;
+  flex: 0 0 auto;
+  min-height: 86px;
+  width: 100%;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: 4px;
-  padding: 6px;
-  border-left: 1px solid var(--line);
+  padding: 4px;
+  border-top: 1px solid var(--line);
 }
-.new-frames > .hint-trigger {
+.scene-prompt-row {
   display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
-.new-frames .rt-Button {
+.scene-prompt-row > .hint-trigger {
+  display: flex;
+  min-width: 0;
+}
+.scene-prompt-row > .hint-trigger:first-child {
+  flex: 0 1 auto;
+}
+.scene-prompt-row > .hint-trigger:last-child {
+  flex: 1;
+}
+.scene-prompt-row .format-chip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.new-frames .prompt-button {
+  width: 100%;
+  min-width: 0;
+}
+.new-frames-actions {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  gap: 4px;
+  min-height: 32px;
+}
+.new-frames-actions > .hint-trigger {
+  display: flex;
   flex: 1;
   min-width: 0;
+}
+.new-frames-render.rt-Button {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+}
+.new-frames-actions > .rt-IconButton {
+  flex: 0 0 24px;
+  height: auto;
 }
 .credit-chip {
   display: inline-flex;
@@ -528,4 +572,159 @@
     height: 208px;
     min-height: 0;
   }
+}
+
+.spatial-context-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spatial-context-title .quiet {
+  flex: 0 0 auto;
+}
+.new-frames > .hint-trigger:has(.format-chip) {
+  align-self: flex-start;
+}
+
+.spatial-context-pane {
+  container-type: inline-size;
+}
+@container (max-width: 150px) {
+  .scene-prompt-row {
+    gap: 2px;
+  }
+  .scene-prompt-row .prompt-button {
+    padding: 0 4px;
+  }
+  .spatial-context-title {
+    gap: 3px;
+  }
+  .spatial-context-title .quiet {
+    font-size: 8px;
+  }
+}
+
+.splat-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 62px;
+  max-height: 35%;
+  border-top: 1px solid var(--line);
+}
+.splat-create-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  min-width: 0;
+}
+.splat-create-row > .hint-trigger:first-child {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.splat-create.rt-Button {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.splat-create-row > .hint-trigger:not(:first-child),
+.splat-create-row > .rt-IconButton {
+  flex: 0 0 auto;
+}
+.splat-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0 4px 4px;
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+}
+.splat-job {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.splat-job > .hint-trigger {
+  min-width: 0;
+}
+.splat-job-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  width: 100%;
+  background: transparent;
+  text-align: left;
+  font-size: 11px;
+  cursor: pointer;
+}
+.splat-job-name:disabled {
+  cursor: default;
+}
+.splat-job-name svg {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+}
+.splat-job-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.splat-job-bottom {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  justify-content: space-between;
+}
+.splat-job-bottom > .hint-trigger {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.splat-job-status {
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.splat-job.status-failed .splat-job-status {
+  color: var(--danger);
+}
+.splat-job-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: 0 0 auto;
+}
+.splat-job-actions button,
+.splat-job-actions a {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.splat-job-actions button:hover,
+.splat-job-actions a:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.splat-job-actions svg {
+  width: 12px;
+  height: 12px;
 }

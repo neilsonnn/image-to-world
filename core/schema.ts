@@ -173,6 +173,12 @@ export const nodeSchema = z
     jobId: z.string().optional(),
     clipInitialized: z.boolean().optional(),
     context: atlasContextSchema.optional(),
+    contextFrozen: z
+      .boolean()
+      .optional()
+      .describe(
+        "Group this Frame with imported context; editing remains enabled.",
+      ),
     projection: projectionSchema.optional(),
     fov: number.min(10).max(120).optional(),
     targetFrameCount: number.int().min(2).max(600).optional(),
@@ -202,6 +208,8 @@ export const panelIds = [
   "jobs",
 ] as const;
 export const layoutSchema = z.object({
+  agentGuideWidth: number.min(160).max(900).default(240),
+  contextWidth: number.min(96).max(500).default(144),
   rightWidth: number.min(220).max(600).default(280),
   leftSplit: number.min(0.2).max(0.8).default(0.6),
   historyWidth: number.min(110).max(320).default(160),
@@ -214,6 +222,17 @@ export const displaySchema = z.object({
   pointStyle: z.enum(["gaussian", "points"]).default("gaussian"),
   showFrustums: z.boolean().default(true),
 });
+export const viewportOptionsSchema = z
+  .object({
+    passepartout: z.boolean().default(true),
+    maskOpacity: number.min(0).max(1).default(0.8),
+    near: number.min(0.001).max(1000).default(0.01),
+    far: number.min(1).max(1000000).default(10000),
+  })
+  .refine(
+    (value) => value.far > value.near,
+    "Far clipping must be beyond near clipping",
+  );
 export const collectionSettingsSchema = z.object({
   assetSearch: z.string().default(""),
   sceneSearch: z.string().default(""),
@@ -283,9 +302,11 @@ export const settingsSchema = z.object({
   activePanel: z.enum(panelIds),
   sidebarWidth: number.min(180).max(600),
   viewportCamera: cameraSchema,
+  viewportOptions: viewportOptionsSchema.default({}),
   grid: z.boolean(),
   pointSize: number.positive().max(20),
   atlasReturnDepth: z.boolean().default(true),
+  splatDraft: z.boolean().default(false),
   prompt: z.string(),
   falModel: z.string(),
   falInput: z.string(),
@@ -503,9 +524,11 @@ export function emptyWorkspace(): Workspace {
       activePanel: "assets",
       sidebarWidth: 240,
       viewportCamera: defaultCamera(),
+      viewportOptions: viewportOptionsSchema.parse({}),
       grid: true,
       pointSize: 2,
       atlasReturnDepth: true,
+      splatDraft: false,
       atlas: atlasContextSchema.parse({}),
       atlasPanel: {
         selectedOnly: false,

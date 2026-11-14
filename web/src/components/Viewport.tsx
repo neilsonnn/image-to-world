@@ -1,25 +1,32 @@
+import { ViewportCameraTools } from "./ViewportCameraTools";
+import { sessionFormat } from "../../../core/formats";
+import { atlasCamera } from "../../../core/cameras";
+import {
+  applyCamera,
+  cameraValue,
+  applyCalibratedProjection,
+  viewportProjection,
+  cameraWithIntrinsics,
+  cameraInViewfinder,
+  viewfinderRect,
+} from "../lib/viewport-projection";
+import { GizmoOptions } from "./GizmoOptions";
 import { NewImagePrompt } from "./NewImagePrompt";
-import { useWorldbashClient, useWorkspaceData } from "../lib/client";
-import { NodeIcon } from "./NodeIcon";
-import { ViewportPathActions } from "./ViewportPathActions";
+import {
+  useWorldbashClient,
+  useWorkspaceData,
+  useClientState,
+} from "../lib/client";
 import { clipboardAssetIds, type RequestPlacement } from "./ImageImport";
-import { generationInput } from "../../../core/generation";
-import { cameraNode, sceneCamera, selectedPath } from "../../../core/captures";
+import { sceneCamera } from "../../../core/captures";
 import { collectionDragPayload, endCollectionDrag } from "../lib/drag";
 import { SparkRenderer } from "@sparkjsdev/spark";
 import {
-  Camera as CameraIcon,
   Crosshair,
   ImageSquare,
-  Globe,
-  Cube,
-  BoundingBox,
-  CrosshairSimple,
   SlidersHorizontal,
 } from "@phosphor-icons/react";
 import {
-  Button,
-  DropdownMenu,
   Flex,
   IconButton,
   Popover,
@@ -62,7 +69,7 @@ import {
   type PivotPlacement,
   type GizmoSpace,
 } from "../../../core/gizmo";
-import { cameraMatrix, transformNodes } from "../../../core/cameras";
+import { transformNodes } from "../../../core/cameras";
 import {
   type Camera,
   type Workspace,
@@ -101,91 +108,25 @@ type Runtime = {
   pendingSync: boolean;
   transformPointer: boolean;
   lastCamera: string;
+  releasedCameraId?: string;
+  releasePromise?: Promise<unknown>;
+  persistingCamera?: boolean;
 };
+
+function readViewportCamera(
+  runtime: Runtime,
+  workspace: Parameters<typeof sessionFormat>[0],
+) {
+  const size = runtime.renderer.getSize(new Vector2());
+  return cameraInViewfinder(
+    runtime.camera,
+    { width: size.x, height: size.y },
+    sessionFormat(workspace),
+  );
+}
 
 function message(error: unknown) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function applyCamera(camera: PerspectiveCamera, value: Camera) {
-  cameraMatrix(value).decompose(
-    camera.position,
-    camera.quaternion,
-    camera.scale,
-  );
-  camera.fov =
-    (2 * Math.atan(value.intrinsics.height / (2 * value.intrinsics.fy)) * 180) /
-    Math.PI;
-  camera.updateProjectionMatrix();
-}
-
-function cameraValue(
-  camera: PerspectiveCamera,
-  width: number,
-  height: number,
-): Camera {
-  const fy = height / (2 * Math.tan((camera.fov * Math.PI) / 360));
-  return {
-    extrinsics: {
-      position: camera.position.toArray(),
-      quaternion: camera.quaternion.clone().normalize().toArray(),
-      coordinateSystem: "rub",
-    },
-    intrinsics: { fx: fy, fy, cx: width / 2, cy: height / 2, width, height },
-  };
-}
-
-function applyCalibratedProjection(camera: PerspectiveCamera, value: Camera) {
-  const { fx, fy, cx, cy, width, height } = value.intrinsics;
-  const near = camera.near;
-  camera.aspect = width / height;
-  camera.projectionMatrix.makePerspective(
-    (-cx / fx) * near,
-    ((width - cx) / fx) * near,
-    (cy / fy) * near,
-    (-(height - cy) / fy) * near,
-    near,
-    camera.far,
-  );
-  camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
-}
-
-function viewportProjection(
-  camera: PerspectiveCamera,
-  width: number,
-  height: number,
-  calibrated?: Camera,
-) {
-  camera.aspect = width / height;
-  camera.updateProjectionMatrix();
-  if (!calibrated) return;
-  const c = calibrated.intrinsics;
-  const scale = Math.min(width / c.width, height / c.height);
-  applyCalibratedProjection(camera, {
-    ...calibrated,
-    intrinsics: {
-      width,
-      height,
-      fx: c.fx * scale,
-      fy: c.fy * scale,
-      cx: c.cx * scale + (width - c.width * scale) / 2,
-      cy: c.cy * scale + (height - c.height * scale) / 2,
-    },
-  });
-}
-
-function cameraWithIntrinsics(
-  camera: PerspectiveCamera,
-  intrinsics: Camera["intrinsics"],
-): Camera {
-  return {
-    extrinsics: {
-      position: camera.position.toArray(),
-      quaternion: camera.quaternion.clone().normalize().toArray(),
-      coordinateSystem: "rub",
-    },
-    intrinsics: { ...intrinsics },
-  };
 }
 
 function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
@@ -265,7 +206,13 @@ export function Viewport({
   onPreviewCamera,
   requestPlacement,
 }: ViewportProps) {
-  const { command, upload, setError: onError } = useWorldbashClient();
+  const {
+    command,
+    upload,
+    setError: onError,
+    setHoveredNode,
+  } = useWorldbashClient();
+  const hoveredNodeId = useClientState((state) => state.hoveredNodeId);
   const source = useWorkspaceData(
     [
       "revision",
@@ -279,6 +226,9 @@ export function Viewport({
     ],
     [
       "viewportCamera",
+      "viewportOptions",
+      "freeCamera",
+      "format",
       "viewingCameraId",
       "grid",
       "display",
@@ -327,13 +277,14 @@ export function Viewport({
     useState<PivotPlacement>("center");
   const [gizmoSpace, setGizmoSpace] = useState<GizmoSpace>("world");
   const [draggingFiles, setDraggingFiles] = useState(false);
+  const [viewportSize, setViewportSize] = useState({ width: 1, height: 1 });
   useEffect(
     () =>
       registerViewportCamera(() => {
         const runtime = runtimeRef.current;
-        const { width, height } =
-          workspaceRef.current.settings.viewportCamera.intrinsics;
-        return runtime ? cameraValue(runtime.camera, width, height) : null;
+        return runtime
+          ? readViewportCamera(runtime, workspaceRef.current)
+          : null;
       }),
     [],
   );
@@ -377,6 +328,11 @@ export function Viewport({
       }
       const runtime = runtimeRef.current;
       if (runtime?.dragging || runtime?.capturing) return;
+      if (event.key === "Escape") {
+        runtime?.fly.stop();
+        onPreviewCamera(null);
+        return;
+      }
       const key = event.key.toLowerCase();
       if ((event.metaKey || event.ctrlKey) && !event.altKey) {
         const type =
@@ -419,10 +375,8 @@ export function Viewport({
       if (key === "c") {
         event.preventDefault();
         if (event.repeat) return;
-        const intrinsics =
-          workspaceRef.current.settings.viewportCamera.intrinsics;
         const camera = runtime
-          ? cameraValue(runtime.camera, intrinsics.width, intrinsics.height)
+          ? readViewportCamera(runtime, workspaceRef.current)
           : workspaceRef.current.settings.viewportCamera;
         onPreviewCamera(null);
         void commandRef
@@ -498,6 +452,7 @@ export function Viewport({
       scene,
       (value) => errorRef.current(value),
       color("helper"),
+      color("active"),
     );
     const fly = new FlyControls(
       camera,
@@ -505,6 +460,7 @@ export function Viewport({
       () =>
         !runtime.dragging && !runtime.capturing && !previewCameraRef.current,
       () => persistCamera(),
+      () => releaseForNavigation(),
     );
     const runtime: Runtime = {
       scene,
@@ -529,22 +485,45 @@ export function Viewport({
     };
     runtimeRef.current = runtime;
 
+    const releaseForNavigation = () => {
+      const state = workspaceRef.current;
+      const id = state.settings.viewingCameraId;
+      if (!id || runtime.releasedCameraId === id) return;
+      runtime.releasedCameraId = id;
+      runtime.cameraTransition.cancel();
+      const restored = atlasCamera(
+        state.settings.freeCamera ?? state.settings.viewportCamera,
+        sessionFormat(state),
+      );
+      applyCamera(camera, restored);
+      viewportProjection(camera, host.clientWidth, host.clientHeight, restored);
+      runtime.lastCamera = JSON.stringify(restored);
+      runtime.releasePromise = commandRef
+        .current({ type: "camera.release" })
+        .catch((error) => errorRef.current(message(error)));
+    };
+
     const persistCamera = () => {
-      const intrinsics =
-        workspaceRef.current.settings.viewportCamera.intrinsics;
+      const intrinsics = sessionFormat(workspaceRef.current);
       const value = cameraValue(camera, intrinsics.width, intrinsics.height);
       runtime.lastCamera = JSON.stringify(value);
-      void commandRef
-        .current({
-          type: "workspace.update",
-          settings: {
-            viewportCamera: value,
-            viewingCameraId: null,
-            freeCamera: null,
-          },
-        })
+      runtime.persistingCamera = true;
+      void Promise.resolve(runtime.releasePromise)
+        .then(() =>
+          commandRef.current({
+            type: "workspace.update",
+            settings: {
+              viewportCamera: value,
+              viewingCameraId: null,
+              freeCamera: null,
+            },
+          }),
+        )
         .catch((error) => errorRef.current(message(error)))
-        .finally(() => setSyncTick((value) => value + 1));
+        .finally(() => {
+          runtime.persistingCamera = false;
+          setSyncTick((value) => value + 1);
+        });
     };
 
     transform.addEventListener("dragging-changed", (event) => {
@@ -619,6 +598,27 @@ export function Viewport({
       });
     });
 
+    let hoverPointer: Vector2 | null = null;
+    let hoverDirty = false;
+    const clearHover = () => {
+      hoverPointer = null;
+      hoverDirty = false;
+      setHoveredNode(null);
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.buttons || runtime.dragging || runtime.capturing) {
+        clearHover();
+        return;
+      }
+      const rect = renderer.domElement.getBoundingClientRect();
+      hoverPointer = new Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        (-(event.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      hoverDirty = true;
+    };
+    renderer.domElement.addEventListener("pointermove", onPointerMove);
+    renderer.domElement.addEventListener("pointerleave", clearHover);
     let pointerDown: Vector2 | undefined;
     const onPointerDown = (event: PointerEvent) => {
       renderer.domElement.focus({ preventScroll: true });
@@ -677,6 +677,7 @@ export function Viewport({
       const bounds = graph.bounds(ids);
       if (!bounds) return;
       const sphere = bounds.getBoundingSphere(new Sphere());
+      releaseForNavigation();
       const direction = camera.getWorldDirection(new Vector3());
       const distance = Math.max(
         0.5,
@@ -688,19 +689,21 @@ export function Viewport({
       const intrinsics =
         workspaceRef.current.settings.viewportCamera.intrinsics;
       onPreviewCamera(null);
-      void commandRef
-        .current({
-          type: "workspace.update",
-          settings: {
-            viewportCamera: cameraValue(
-              target,
-              intrinsics.width,
-              intrinsics.height,
-            ),
-            viewingCameraId: null,
-            freeCamera: null,
-          },
-        })
+      void Promise.resolve(runtime.releasePromise)
+        .then(() =>
+          commandRef.current({
+            type: "workspace.update",
+            settings: {
+              viewportCamera: cameraValue(
+                target,
+                intrinsics.width,
+                intrinsics.height,
+              ),
+              viewingCameraId: null,
+              freeCamera: null,
+            },
+          }),
+        )
         .catch((error) => errorRef.current(message(error)));
     };
     focusRef.current = focus;
@@ -711,12 +714,24 @@ export function Viewport({
       const height = Math.max(1, host.clientHeight);
       renderer.setSize(width, height, false);
       const state = workspaceRef.current;
+      setViewportSize({ width, height });
+      const format = sessionFormat(state);
       const calibrated =
-        previewCameraRef.current ??
-        (state.settings.viewingCameraId
-          ? sceneCamera(state, state.settings.viewingCameraId)
-          : undefined);
-      viewportProjection(camera, width, height, calibrated ?? undefined);
+        runtime.fly.moving || runtime.persistingCamera
+          ? cameraValue(camera, format.width, format.height)
+          : (previewCameraRef.current ??
+            (state.settings.viewingCameraId
+              ? sceneCamera(state, state.settings.viewingCameraId)
+              : undefined));
+      viewportProjection(
+        camera,
+        width,
+        height,
+        atlasCamera(
+          calibrated ?? state.settings.viewportCamera,
+          sessionFormat(state),
+        ),
+      );
     };
     const observer = new ResizeObserver(resize);
     observer.observe(host);
@@ -731,14 +746,41 @@ export function Viewport({
       lastFrame = now;
       animation = requestAnimationFrame(render);
       if (runtime.capturing) return;
-      if (runtime.fly.active && runtime.cameraTransition.active) {
+      if (runtime.fly.moving && runtime.cameraTransition.active) {
         runtime.cameraTransition.cancel();
-        viewportProjection(camera, host.clientWidth, host.clientHeight);
+        const format = sessionFormat(workspaceRef.current);
+        viewportProjection(
+          camera,
+          host.clientWidth,
+          host.clientHeight,
+          cameraValue(camera, format.width, format.height),
+        );
         // Save the interrupted pose when the fly gesture ends, even without a drag.
         runtime.fly.markChanged();
       }
       runtime.cameraTransition.update(now);
       runtime.fly.update(seconds);
+      if (runtime.fly.moving) {
+        const format = sessionFormat(workspaceRef.current);
+        viewportProjection(
+          camera,
+          host.clientWidth,
+          host.clientHeight,
+          cameraValue(camera, format.width, format.height),
+        );
+      }
+      if (
+        hoverDirty &&
+        hoverPointer &&
+        !runtime.dragging &&
+        !runtime.fly.active
+      ) {
+        hoverDirty = false;
+        camera.updateMatrixWorld();
+        runtime.raycaster.setFromCamera(hoverPointer, camera);
+        setHoveredNode(graph.pick(runtime.raycaster, hoverPointer) ?? null);
+      }
+      transform.update();
       graph.update();
       if (
         graph.spatialVersion !== spatialVersion &&
@@ -759,6 +801,8 @@ export function Viewport({
       captureControllers.current.clear();
       observer.disconnect();
       focusRef.current = () => undefined;
+      renderer.domElement.removeEventListener("pointermove", onPointerMove);
+      renderer.domElement.removeEventListener("pointerleave", clearHover);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("dblclick", onDoubleClick);
@@ -789,6 +833,10 @@ export function Viewport({
   }, []);
 
   useEffect(() => {
+    runtimeRef.current?.graph.setHovered(hoveredNodeId);
+  }, [hoveredNodeId]);
+
+  useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
     if (runtime.dragging || runtime.capturing) {
@@ -802,27 +850,41 @@ export function Viewport({
       workspace.settings.display.pointStyle === "gaussian" ? 1 : 0;
     runtime.spark.minPixelRadius = 0;
     runtime.spark.maxPixelRadius = workspace.settings.pointSize;
+    const clippingChanged =
+      runtime.camera.near !== workspace.settings.viewportOptions.near ||
+      runtime.camera.far !== workspace.settings.viewportOptions.far;
+    runtime.camera.near = workspace.settings.viewportOptions.near;
+    runtime.camera.far = workspace.settings.viewportOptions.far;
+    if (!workspace.settings.viewingCameraId)
+      runtime.releasedCameraId = undefined;
 
-    if (runtime.fly.active) {
+    if (runtime.fly.active || runtime.persistingCamera) {
       runtime.pendingSync = true;
       return;
     }
 
-    const value =
+    const value = atlasCamera(
       previewCamera ??
-      (workspace.settings.viewingCameraId
-        ? sceneCamera(workspace, workspace.settings.viewingCameraId)
-        : undefined) ??
-      workspace.settings.viewportCamera;
+        (workspace.settings.viewingCameraId &&
+        runtime.releasedCameraId !== workspace.settings.viewingCameraId
+          ? sceneCamera(workspace, workspace.settings.viewingCameraId)
+          : undefined) ??
+        (runtime.releasedCameraId ? workspace.settings.freeCamera : null) ??
+        workspace.settings.viewportCamera,
+      sessionFormat(workspace),
+    );
     const incomingCamera = JSON.stringify(value);
-    if (incomingCamera !== runtime.lastCamera && !runtime.dragging) {
+    if (
+      (incomingCamera !== runtime.lastCamera || clippingChanged) &&
+      !runtime.dragging
+    ) {
       const target = runtime.camera.clone();
       applyCamera(target, value);
       viewportProjection(
         target,
         runtime.renderer.domElement.clientWidth,
         runtime.renderer.domElement.clientHeight,
-        workspace.settings.viewingCameraId || previewCamera ? value : undefined,
+        value,
       );
       runtime.cameraTransition.start(target, performance.now());
       if (
@@ -875,6 +937,9 @@ export function Viewport({
     workspace.settings.pointSize,
     workspace.settings.viewportCamera,
     workspace.settings.viewingCameraId,
+    workspace.settings.freeCamera,
+    workspace.settings.viewportOptions,
+    workspace.settings.format,
     syncTick,
     previewCamera,
     pivotPlacement,
@@ -1035,8 +1100,6 @@ export function Viewport({
               if (captureInput.camera) {
                 runtime.renderer.setPixelRatio(originalPixelRatio);
                 runtime.renderer.setSize(originalSize.x, originalSize.y, false);
-                runtime.camera.aspect = originalSize.x / originalSize.y;
-                runtime.camera.updateProjectionMatrix();
               }
               if (runtime.pendingSync) setSyncTick((value) => value + 1);
             }
@@ -1105,11 +1168,7 @@ export function Viewport({
     const runtime = runtimeRef.current;
     const current = workspaceRef.current;
     return runtime
-      ? cameraValue(
-          runtime.camera,
-          current.settings.viewportCamera.intrinsics.width,
-          current.settings.viewportCamera.intrinsics.height,
-        )
+      ? readViewportCamera(runtime, current)
       : current.settings.viewportCamera;
   };
   const drop = async (event: DragEvent) => {
@@ -1183,42 +1242,18 @@ export function Viewport({
       .current({ type: "workspace.update", settings: patch })
       .catch((error) => errorRef.current(message(error)));
 
-  const selectedCameraIds = [
-    ...new Set(
-      selectedNodes(workspace).flatMap(
-        (node) => cameraNode(workspace, node.id)?.id ?? [],
-      ),
-    ),
-  ];
-  let splatCount = 0;
-  let splatError: string | undefined;
-  try {
-    const splatInput = generationInput(workspace, { kind: "splats" });
-    splatCount = splatInput.kind === "splats" ? splatInput.nodeIds.length : 0;
-  } catch (error) {
-    splatError = message(error);
-  }
-  const submitSplats = (refine: boolean) =>
-    void commandRef
-      .current({
-        type: "generation.submit",
-        request: {
-          kind: "splats",
-          contextPathId: selectedPath(workspace)?.id,
-          refine,
-        },
-      })
-      .catch((error) => errorRef.current(message(error)));
-  const selection = workspace.selection
-    .map((id) => workspace.nodes[id] ?? workspace.assets[id])
-    .filter(Boolean);
-  const selectedObject = selection.length === 1 ? selection[0] : undefined;
-  const selectionLabel =
-    selectedObject?.name ??
-    (selection.length ? `${selection.length} objects selected` : "0 objects");
-  const controlsHint =
-    "WASD / QE fly · Right-drag look · F focus · Shift-click select · C place camera";
   const empty = Object.keys(workspace.nodes).length === 0;
+  const format = sessionFormat(workspace);
+  const viewingNode = workspace.settings.viewingCameraId
+    ? workspace.nodes[workspace.settings.viewingCameraId]
+    : undefined;
+  const viewCamera = atlasCamera(
+    previewCamera ??
+      (viewingNode ? sceneCamera(workspace, viewingNode.id) : undefined) ??
+      workspace.settings.viewportCamera,
+    format,
+  );
+  const frame = viewfinderRect(viewportSize, format);
   return (
     <div
       {...paneHandlers}
@@ -1245,51 +1280,23 @@ export function Viewport({
     >
       <div className="viewport-overlay">
         <div
-          className="viewport-tools"
+          className="viewport-tools floating-toolbar"
           role="toolbar"
           aria-label="Transform tools"
         >
-          <Tooltip
-            delayDuration={0}
-            content="Center: combined bounds. Origin: average of selected object origins."
-          >
-            <label className="gizmo-select">
-              {pivotPlacement === "center" ? (
-                <BoundingBox />
-              ) : (
-                <CrosshairSimple />
-              )}
-              <select
-                aria-label="Gizmo placement"
-                value={pivotPlacement}
-                onChange={(e) =>
-                  setPivotPlacement(e.target.value as PivotPlacement)
-                }
-              >
-                <option value="center">Center</option>
-                <option value="origin">Origin</option>
-              </select>
-            </label>
-          </Tooltip>
-          <Tooltip
-            delayDuration={0}
-            content="World axes or the primary selected object's axes."
-          >
-            <label className="gizmo-select">
-              {gizmoSpace === "world" ? <Globe /> : <Cube />}
-              <select
-                aria-label="Gizmo space"
-                value={gizmoSpace}
-                onChange={(e) => setGizmoSpace(e.target.value as GizmoSpace)}
-              >
-                <option value="world">World</option>
-                <option value="object">Object</option>
-              </select>
-            </label>
-          </Tooltip>
+          <GizmoOptions
+            placement={pivotPlacement}
+            space={gizmoSpace}
+            onPlacement={setPivotPlacement}
+            onSpace={setGizmoSpace}
+          />
         </div>
         <NewImagePrompt camera={placementCamera} />
-        <div className="viewport-tools" role="toolbar" aria-label="View">
+        <div
+          className="viewport-tools floating-toolbar"
+          role="toolbar"
+          aria-label="View"
+        >
           <Tooltip delayDuration={0} content="Focus selection (F)">
             <IconButton
               size="1"
@@ -1301,42 +1308,9 @@ export function Viewport({
               <Crosshair />
             </IconButton>
           </Tooltip>
-          <Popover.Root>
-            <Tooltip delayDuration={0} content="Camera controls">
-              <Popover.Trigger>
-                <IconButton
-                  size="1"
-                  variant="surface"
-                  color="gray"
-                  aria-label="Camera controls"
-                >
-                  <CameraIcon />
-                </IconButton>
-              </Popover.Trigger>
-            </Tooltip>
-            <Popover.Content size="1" width="190px">
-              <Flex direction="column" gap="2">
-                <Text size="1" color="gray">
-                  Hover: WASD move, Q/E down/up. Right-drag to look. Shift
-                  speeds up. Two-finger swipe looks around; pinch changes field
-                  of view. Double-click a camera to view it. Left-click selects.
-                  Escape deselects; H hides or shows the selection. C places a
-                  camera without interrupting flight.
-                </Text>
-                <Button
-                  size="1"
-                  variant="surface"
-                  color="gray"
-                  onClick={() => focusRef.current()}
-                >
-                  Frame selection
-                </Button>
-              </Flex>
-            </Popover.Content>
-          </Popover.Root>
         </div>
         <div
-          className="viewport-tools"
+          className="viewport-tools floating-toolbar"
           role="toolbar"
           aria-label="Viewport display"
         >
@@ -1474,11 +1448,14 @@ export function Viewport({
                   />
                 </Flex>
                 <Flex justify="between" align="center">
-                  <Text size="1">Frustums</Text>
-                  <Tooltip delayDuration={0} content="Frustums">
+                  <Text size="1">Standalone cameras</Text>
+                  <Tooltip
+                    delayDuration={0}
+                    content="Show standalone camera frustums. Frame frustums are always shown."
+                  >
                     <Switch
                       size="1"
-                      aria-label="Frustums"
+                      aria-label="Standalone camera frustums"
                       checked={display.showFrustums}
                       onCheckedChange={(showFrustums) =>
                         updateDisplay({ showFrustums })
@@ -1502,100 +1479,23 @@ export function Viewport({
           </Popover.Root>
         </div>
       </div>
-      <div className="viewport-footer">
-        <Tooltip delayDuration={0} content={selectionLabel}>
-          <div className="viewport-selection" aria-label={selectionLabel}>
-            {selectedObject && <NodeIcon kind={selectedObject.kind} />}
-            <span className="viewport-selection-name">{selectionLabel}</span>
-          </div>
-        </Tooltip>
-        <div
-          className="viewport-selection-tools"
-          role="toolbar"
-          aria-label="Selection actions"
-        >
-          <Tooltip
-            delayDuration={0}
-            content="Place a camera at this view and extend camera selection (C)"
-          >
-            <Button
-              size="1"
-              variant="surface"
-              color="gray"
-              onClick={() => {
-                onPreviewCamera(null);
-                void command({
-                  type: "camera.place",
-                  camera: placementCamera(),
-                }).catch((error) => onError(message(error)));
-              }}
-            >
-              <CameraIcon /> Camera · C
-            </Button>
-          </Tooltip>
-          <ViewportPathActions
-            workspace={workspace}
-            command={command}
-            onError={onError}
-            onPreviewCamera={onPreviewCamera}
-          />
-          <DropdownMenu.Root>
-            <Tooltip
-              delayDuration={0}
-              content={
-                splatError ??
-                (splatCount < 2
-                  ? "Splats need at least two posed captures in the Atlas context"
-                  : `Reconstruct Gaussian splats from the ${splatCount} posed captures in the Atlas context`)
-              }
-            >
-              <DropdownMenu.Trigger disabled={splatCount < 2}>
-                <Button size="1" variant="surface" color="gray">
-                  Make splats
-                </Button>
-              </DropdownMenu.Trigger>
-            </Tooltip>
-            <DropdownMenu.Content size="1">
-              <DropdownMenu.Item
-                disabled={splatCount > 32}
-                onSelect={() => submitSplats(false)}
-              >
-                Draft: 500 credits, up to 32 captures
-              </DropdownMenu.Item>
-              <DropdownMenu.Item onSelect={() => submitSplats(true)}>
-                Refined: 5,000 credits, 15 to 25 minutes
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Root>
-          {selectedCameraIds.length > 1 && (
-            <Tooltip
-              delayDuration={0}
-              content="Create a camera path in selection order"
-            >
-              <Button
-                size="1"
-                variant="surface"
-                color="gray"
-                onClick={() =>
-                  void commandRef
-                    .current({
-                      type: "path.fromCameras",
-                      nodeIds: selectedCameraIds,
-                      targetFrameCount: workspace.settings.targetFrameCount,
-                    })
-                    .catch((error) => errorRef.current(message(error)))
-                }
-              >
-                Create path · {selectedCameraIds.length} cameras
-              </Button>
-            </Tooltip>
-          )}
-        </div>
-        <Tooltip delayDuration={0} content={controlsHint}>
-          <div className="viewport-hint">{controlsHint}</div>
-        </Tooltip>
-      </div>
       <div ref={hostRef} className="viewport-canvas">
+        {workspace.settings.viewportOptions.passepartout && (
+          <div
+            className="viewport-passepartout"
+            aria-hidden="true"
+            style={
+              {
+                left: frame.left,
+                top: frame.top,
+                width: frame.width,
+                height: frame.height,
+                "--passepartout-opacity":
+                  workspace.settings.viewportOptions.maskOpacity,
+              } as React.CSSProperties
+            }
+          />
+        )}
         {empty && (
           <div className="viewport-empty">
             Import an image or splat to begin
@@ -1605,6 +1505,21 @@ export function Viewport({
         )}
         {draggingFiles && <div className="viewport-drop">Drop to import</div>}
       </div>
+      <ViewportCameraTools
+        camera={viewCamera}
+        format={format}
+        options={workspace.settings.viewportOptions}
+        overrideName={
+          viewingNode?.name ?? (previewCamera ? "Path preview" : undefined)
+        }
+        onRelease={() => {
+          runtimeRef.current?.fly.stop();
+          onPreviewCamera(null);
+          void commandRef
+            .current({ type: "camera.release" })
+            .catch((error) => errorRef.current(message(error)));
+        }}
+      />
     </div>
   );
 }

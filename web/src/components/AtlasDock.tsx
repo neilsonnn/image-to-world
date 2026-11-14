@@ -1,3 +1,4 @@
+import { SplatPanel } from "./SplatPanel";
 import {
   Aperture,
   ArrowClockwise,
@@ -7,12 +8,15 @@ import {
   ImageSquare,
   Lightning,
   SpinnerGap,
+  Snowflake,
   Trash,
   UploadSimple,
   X,
 } from "@phosphor-icons/react";
 import {
+  Badge,
   Button,
+  ContextMenu,
   Flex,
   SegmentedControl,
   Switch,
@@ -25,7 +29,7 @@ import {
   captureFrameStatus,
   captureOrigin,
   isVisible,
-  orderedCaptures,
+  spatialContextFrames,
   selectedPath,
 } from "../../../core/captures";
 import {
@@ -85,7 +89,7 @@ function useDockWorkspace() {
 
 /** Keep proportions subtle so portrait and landscape tiles share a row. */
 function thumbnailAspect({ width, height }: { width: number; height: number }) {
-  return Math.max(0.85, Math.min(1.4, Math.sqrt(width / height)));
+  return width / height;
 }
 
 const isActive = (job: Job | undefined) =>
@@ -98,21 +102,9 @@ export function AtlasDock({
 }) {
   const workspace = useDockWorkspace();
   return (
-    <SpatialContext
-      workspace={workspace}
-      requestPlacement={requestPlacement}
-      settings={
-        <ToolbarPopover
-          label="Frame generation settings"
-          icon={<Gear />}
-          width={240}
-        >
-          <PanelHeader title="Frame generation" />
-          <GenerationSettings workspace={workspace} />
-        </ToolbarPopover>
-      }
-    >
+    <SpatialContext workspace={workspace} requestPlacement={requestPlacement}>
       <NewFrames workspace={workspace} />
+      <SplatPanel />
     </SpatialContext>
   );
 }
@@ -120,28 +112,24 @@ export function AtlasDock({
 function SpatialContext({
   workspace,
   requestPlacement,
-  settings,
   children,
 }: {
   workspace: DockWorkspace;
   requestPlacement: RequestPlacement;
-  /** Header control for generation settings, after import. */
-  settings: ReactNode;
-  /** Generation controls at the right end of the strip. */
+  /** Generation controls pinned below the vertical context list. */
   children: ReactNode;
 }) {
   const { safeCommand, upload, setError } = useWorldbashClient();
   const fileInput = useRef<HTMLInputElement>(null);
   const strip = useRef<HTMLDivElement>(null);
   const path = selectedPath(workspace);
-  const captures = orderedCaptures(workspace, path?.id);
+  const captures = spatialContextFrames(workspace);
   const captureIds = captures.map(({ id }) => id);
   const context = atlasContextNodes(workspace, undefined, path?.id);
   const generating = Object.values(workspace.jobs)
     .filter((job) => job.input.kind === "atlas" && isActive(job))
     .sort((a, b) => a.createdAt - b.createdAt);
   const inputCount = context.length;
-  const locked = lockedFormat(workspace);
   const full = inputCount >= MAX_CONTEXT_FRAMES;
 
   const collection = useCollection({
@@ -176,7 +164,7 @@ function SpatialContext({
     const before = seen.current;
     seen.current = new Set(itemKey.split(","));
     if ([...seen.current].some((id) => id && !before.has(id)))
-      strip.current?.scrollTo({ left: strip.current.scrollWidth });
+      strip.current?.scrollTo({ top: strip.current.scrollHeight });
   }, [itemKey]);
 
   const importFiles = (files: File[]) =>
@@ -204,7 +192,6 @@ function SpatialContext({
       <PanelHeader
         title={
           <span className="spatial-context-title">
-            <ImageSquare size={14} weight="fill" />
             <strong>
               {path ? `Spatial context · ${path.name}` : "Spatial context"}
             </strong>
@@ -214,19 +201,6 @@ function SpatialContext({
           </span>
         }
       >
-        <Hint
-          label={
-            locked
-              ? "Aspect ratio and image size, fixed across all images"
-              : "Aspect ratio and image size, chosen on first import"
-          }
-        >
-          <span className="format-chip">
-            {locked
-              ? `${closestFormat(locked).aspectRatio} · ${locked.width} × ${locked.height}`
-              : "Format set on first import"}
-          </span>
-        </Hint>
         <Hint
           label={
             full
@@ -255,7 +229,6 @@ function SpatialContext({
             if (files.length) importFiles(files);
           }}
         />
-        {settings}
       </PanelHeader>
       <div className="atlas-dock-body">
         <div
@@ -264,10 +237,6 @@ function SpatialContext({
           role="listbox"
           aria-label="Spatial context captures"
           aria-multiselectable="true"
-          onWheel={(event) => {
-            if (Math.abs(event.deltaY) > Math.abs(event.deltaX))
-              event.currentTarget.scrollLeft += event.deltaY;
-          }}
         >
           {captures.map((node) => (
             <CaptureTile
@@ -310,7 +279,7 @@ function CaptureTile({
   itemProps: ReturnType<ReturnType<typeof useCollection>["getItemProps"]>;
   onSelect: (event: React.MouseEvent) => void;
 }) {
-  const { safeCommand } = useWorldbashClient();
+  const { safeCommand, getWorkspace } = useWorldbashClient();
   const node = workspace.nodes[id];
   const asset = node.assetId ? workspace.assets[node.assetId] : undefined;
   const sourceJob = node.jobId ? workspace.jobs[node.jobId] : undefined;
@@ -334,90 +303,195 @@ function CaptureTile({
           ? (error ?? "Excluded from the context")
           : node.name;
   const camera = asset?.camera?.intrinsics;
+  const setFrozen = () => {
+    const current = getWorkspace().nodes[id];
+    if (current)
+      void safeCommand({
+        type: "nodes.put",
+        nodes: [{ ...current, contextFrozen: !current.contextFrozen }],
+      });
+  };
   return (
-    <article
-      className={`context-tile${workspace.selection.includes(id) ? " selected" : ""}${inContext && !pending ? "" : " is-muted"}`}
-      style={camera ? { aspectRatio: thumbnailAspect(camera) } : undefined}
-    >
-      <Tooltip content={status} delayDuration={0}>
-        <div
-          className="context-tile-select"
-          role="option"
-          aria-label={node.name}
-          {...itemProps}
-          onClick={(event) => {
-            onSelect(event);
-            if (!event.metaKey && !event.ctrlKey && !event.shiftKey)
-              void safeCommand({ type: "camera.view", nodeId: id });
+    <ContextMenu.Root>
+      <ContextMenu.Trigger>
+        <article
+          className={`context-tile${workspace.selection.includes(id) ? " selected" : ""}${inContext && !pending ? "" : " is-muted"}`}
+          style={camera ? { aspectRatio: thumbnailAspect(camera) } : undefined}
+        >
+          <Tooltip content={status} delayDuration={0}>
+            <div
+              className="context-tile-select"
+              role="option"
+              aria-label={node.name}
+              {...itemProps}
+              onClick={(event) => {
+                onSelect(event);
+                if (!event.metaKey && !event.ctrlKey && !event.shiftKey)
+                  void safeCommand({ type: "camera.view", nodeId: id });
+              }}
+            >
+              {asset?.kind === "image" && !asset.missing ? (
+                <img src={assetUrl(asset)} alt="" draggable={false} />
+              ) : (
+                <ImageSquare size={18} />
+              )}
+              {pending && (
+                <span className="context-tile-status">
+                  <SpinnerGap className="spin" />
+                </span>
+              )}
+            </div>
+          </Tooltip>
+          {generated && (
+            <Hint
+              label={
+                node.contextFrozen
+                  ? "Frozen: grouped with imports; editing stays enabled"
+                  : "Generated view"
+              }
+            >
+              <span
+                className="context-tile-tag"
+                aria-label={
+                  node.contextFrozen ? "Frozen view" : "Generated view"
+                }
+              >
+                {node.contextFrozen ? (
+                  <Snowflake />
+                ) : (
+                  <Aperture weight="fill" />
+                )}
+              </span>
+            </Hint>
+          )}
+          <div className={`context-tile-actions${failed ? " is-pinned" : ""}`}>
+            {failed && (
+              <Hint label="Retry generation">
+                <button
+                  aria-label={`Retry ${node.name}`}
+                  onClick={() =>
+                    void safeCommand({ type: "jobs.retry", id: failed.id })
+                  }
+                >
+                  <ArrowClockwise />
+                </button>
+              </Hint>
+            )}
+            {!pending && !failed && (
+              <Hint
+                label={
+                  visible ? "Hide from the context" : "Show in the context"
+                }
+              >
+                <button
+                  aria-label={
+                    visible
+                      ? `Hide ${node.name} from the context`
+                      : `Show ${node.name} in the context`
+                  }
+                  onClick={() =>
+                    void safeCommand({
+                      type: "nodes.put",
+                      nodes: [{ ...node, visible: !node.visible }],
+                    })
+                  }
+                >
+                  {visible ? <Eye /> : <EyeSlash />}
+                </button>
+              </Hint>
+            )}
+            <Hint label={pending || failed ? "Remove image" : "Delete Frame"}>
+              <button
+                aria-label={`Remove ${node.name}`}
+                onClick={() => {
+                  if (pending)
+                    void safeCommand({ type: "jobs.cancel", id: pending.id });
+                  void safeCommand({ type: "nodes.remove", ids: [id] });
+                }}
+              >
+                {pending || failed ? <X /> : <Trash />}
+              </button>
+            </Hint>
+          </div>
+        </article>
+      </ContextMenu.Trigger>
+      <ContextMenu.Content size="1">
+        <ContextMenu.Item
+          onSelect={() => void safeCommand({ type: "camera.view", nodeId: id })}
+        >
+          View Frame
+        </ContextMenu.Item>
+        <ContextMenu.Item
+          onSelect={() =>
+            void safeCommand({ type: "selection.set", ids: [id] })
+          }
+        >
+          Select Frame
+        </ContextMenu.Item>
+        <ContextMenu.Item
+          onSelect={() =>
+            void safeCommand({ type: "nodes.duplicate", ids: [id] })
+          }
+        >
+          Duplicate
+        </ContextMenu.Item>
+        <ContextMenu.Item
+          onSelect={() => {
+            const current = getWorkspace().nodes[id];
+            if (current)
+              void safeCommand({
+                type: "nodes.put",
+                nodes: [{ ...current, visible: !current.visible }],
+              });
           }}
         >
-          {asset?.kind === "image" && !asset.missing ? (
-            <img src={assetUrl(asset)} alt="" draggable={false} />
-          ) : (
-            <ImageSquare size={18} />
-          )}
-          {pending && (
-            <span className="context-tile-status">
-              <SpinnerGap className="spin" />
-            </span>
-          )}
-        </div>
-      </Tooltip>
-      {generated && (
-        <Hint label="Generated view">
-          <span className="context-tile-tag" aria-label="Generated view">
-            <Aperture weight="fill" />
-          </span>
-        </Hint>
-      )}
-      <div className={`context-tile-actions${failed ? " is-pinned" : ""}`}>
+          {visible ? "Hide" : "Show"}
+        </ContextMenu.Item>
+        {asset && (
+          <ContextMenu.Item
+            onSelect={() =>
+              void safeCommand({ type: "assets.reveal", id: asset.id })
+            }
+          >
+            Reveal image
+          </ContextMenu.Item>
+        )}
+        {generated && (
+          <>
+            <ContextMenu.Separator />
+            <ContextMenu.Item onSelect={setFrozen}>
+              <Snowflake />
+              {node.contextFrozen ? "Unfreeze" : "Freeze"}
+            </ContextMenu.Item>
+          </>
+        )}
+        {pending && (
+          <ContextMenu.Item
+            onSelect={() =>
+              void safeCommand({ type: "jobs.cancel", id: pending.id })
+            }
+          >
+            Cancel generation
+          </ContextMenu.Item>
+        )}
         {failed && (
-          <Hint label="Retry generation">
-            <button
-              aria-label={`Retry ${node.name}`}
-              onClick={() =>
-                void safeCommand({ type: "jobs.retry", id: failed.id })
-              }
-            >
-              <ArrowClockwise />
-            </button>
-          </Hint>
-        )}
-        {!pending && !failed && (
-          <Hint
-            label={visible ? "Hide from the context" : "Show in the context"}
+          <ContextMenu.Item
+            onSelect={() =>
+              void safeCommand({ type: "jobs.retry", id: failed.id })
+            }
           >
-            <button
-              aria-label={
-                visible
-                  ? `Hide ${node.name} from the context`
-                  : `Show ${node.name} in the context`
-              }
-              onClick={() =>
-                void safeCommand({
-                  type: "nodes.put",
-                  nodes: [{ ...node, visible: !node.visible }],
-                })
-              }
-            >
-              {visible ? <Eye /> : <EyeSlash />}
-            </button>
-          </Hint>
+            Retry generation
+          </ContextMenu.Item>
         )}
-        <Hint label={pending || failed ? "Remove image" : "Delete Frame"}>
-          <button
-            aria-label={`Remove ${node.name}`}
-            onClick={() => {
-              if (pending)
-                void safeCommand({ type: "jobs.cancel", id: pending.id });
-              void safeCommand({ type: "nodes.remove", ids: [id] });
-            }}
-          >
-            {pending || failed ? <X /> : <Trash />}
-          </button>
-        </Hint>
-      </div>
-    </article>
+        <ContextMenu.Separator />
+        <ContextMenu.Item
+          color="red"
+          onSelect={() => void safeCommand({ type: "nodes.remove", ids: [id] })}
+        >
+          Delete Frame
+        </ContextMenu.Item>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
   );
 }
 
@@ -451,6 +525,7 @@ function GeneratingTile({ job }: { job: Job }) {
 }
 
 function NewFrames({ workspace }: { workspace: DockWorkspace }) {
+  const locked = lockedFormat(workspace);
   const { safeCommand } = useWorldbashClient();
   const path = selectedPath(workspace);
   let blocked: string | null = null;
@@ -490,59 +565,89 @@ function NewFrames({ workspace }: { workspace: DockWorkspace }) {
     : RENDER_CREDITS.rgb;
   return (
     <section className="new-frames" aria-label="New frames">
-      <PromptButton
-        indicator={
-          workspace.settings.enhancedCaption ? (
-            <Lightning weight="fill" aria-label="Enhanced caption cached" />
-          ) : undefined
-        }
-        label="Describe the scene"
-        hint="Describe the scene for Atlas and splats"
-        placeholder="Add details that are not obvious in the photos, such as a 3D CGI scene with hand-painted textures"
-        note="Sent with every render and splat reconstruction."
-        value={workspace.settings.prompt}
-        onChange={(prompt) =>
-          void safeCommand({ type: "workspace.update", settings: { prompt } })
-        }
-      >
-        <Flex align="center" justify="between" gap="2">
-          <Text size="1" color="gray">
-            {workspace.settings.enhancedCaption
-              ? "Enhanced caption cached"
-              : "No enhanced caption cached"}
-          </Text>
-          {workspace.settings.enhancedCaption && (
-            <Button
-              size="1"
-              variant="surface"
-              color="gray"
-              onClick={() => void safeCommand({ type: "caption.clear" })}
-            >
-              Clear
-            </Button>
-          )}
-        </Flex>
-      </PromptButton>
-      <Hint label={blocked ?? "Render the current view (Shift+Enter)"}>
-        <Button
-          size="1"
-          variant="surface"
-          color="gray"
-          className="new-frames-render"
-          aria-keyshortcuts="Shift+Enter"
-          disabled={blocked !== null}
-          onClick={(event) => {
-            if (event.detail > 0) event.currentTarget.blur();
-            render();
-          }}
+      <div className="scene-prompt-row">
+        <Hint
+          label={
+            locked
+              ? `Context resolution: ${locked.width} × ${locked.height}`
+              : "Aspect ratio and image size, chosen on first import"
+          }
         >
-          Render
-          <span className="credit-chip">
-            <Lightning weight="fill" />
-            {credits}
-          </span>
-        </Button>
-      </Hint>
+          <Badge
+            size="2"
+            variant="surface"
+            color="gray"
+            className="format-chip"
+          >
+            {closestFormat(locked ?? sessionFormat(workspace)).aspectRatio}
+          </Badge>
+        </Hint>
+
+        <PromptButton
+          indicator={
+            workspace.settings.enhancedCaption ? (
+              <Lightning weight="fill" aria-label="Enhanced caption cached" />
+            ) : undefined
+          }
+          label="Prompt"
+          hint="Describe the scene for Atlas and splats"
+          placeholder="Add details that are not obvious in the photos, such as a 3D CGI scene with hand-painted textures"
+          note="Sent with every render and splat reconstruction."
+          value={workspace.settings.prompt}
+          onChange={(prompt) =>
+            void safeCommand({ type: "workspace.update", settings: { prompt } })
+          }
+        >
+          <Flex align="center" justify="between" gap="2">
+            <Text size="1" color="gray">
+              {workspace.settings.enhancedCaption
+                ? "Enhanced caption cached"
+                : "No enhanced caption cached"}
+            </Text>
+            {workspace.settings.enhancedCaption && (
+              <Button
+                size="1"
+                variant="surface"
+                color="gray"
+                onClick={() => void safeCommand({ type: "caption.clear" })}
+              >
+                Clear
+              </Button>
+            )}
+          </Flex>
+        </PromptButton>
+      </div>
+      <div className="new-frames-actions">
+        <Hint label={blocked ?? "Render the current view (Shift+Enter)"}>
+          <Button
+            size="1"
+            variant="surface"
+            color="gray"
+            className="new-frames-render submit-action"
+            data-ready={blocked === null && !!workspace.settings.prompt.trim()}
+            aria-keyshortcuts="Shift+Enter"
+            disabled={blocked !== null}
+            onClick={(event) => {
+              if (event.detail > 0) event.currentTarget.blur();
+              render();
+            }}
+          >
+            Render
+            <span className="credit-chip">
+              <Lightning weight="fill" />
+              {credits}
+            </span>
+          </Button>
+        </Hint>
+        <ToolbarPopover
+          label="Frame generation settings"
+          icon={<Gear />}
+          width={240}
+        >
+          <PanelHeader title="Frame generation" />
+          <GenerationSettings workspace={workspace} />
+        </ToolbarPopover>
+      </div>
     </section>
   );
 }

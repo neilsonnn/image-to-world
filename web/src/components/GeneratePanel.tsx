@@ -129,7 +129,13 @@ export function GeneratePanel({
             size="1"
             variant="surface"
             color="gray"
-            className="button"
+            className="button submit-action"
+            data-ready={
+              !!status?.falConfigured &&
+              busy === null &&
+              !!workspace.settings.falModel.trim() &&
+              !!workspace.settings.falInput.trim()
+            }
             disabled={!status?.falConfigured || busy !== null}
             onClick={doFal}
           >

@@ -1,4 +1,12 @@
 :root {
+  --floating-toolbar-edge: 4px;
+  --floating-toolbar-padding: 2px;
+  --floating-toolbar-gap: 2px;
+  --floating-toolbar-radius: 4px;
+  --action-ready: #df995f;
+  --action-ready-surface: #34251b;
+  --action-ready-hover: #443020;
+  --agent-character: #cf8666;
   color-scheme: dark;
   --bg: #141414;
   --surface: #1a1a1a;

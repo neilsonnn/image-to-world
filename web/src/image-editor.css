@@ -8,12 +8,8 @@
   background: var(--surface);
 }
 
-.image-panel-shell > .image-editor {
-  min-height: 0;
-}
-
-.image-editor {
-  container-type: inline-size;
+.image-panel-shell > .image-editor,
+.ie-version-list {
   --ie-bg: var(--bg);
   --ie-panel: var(--surface);
   --ie-raised: var(--surface-2);
@@ -22,6 +18,14 @@
   --ie-text: var(--text);
   --ie-muted: var(--muted);
   --ie-dim: var(--dim);
+}
+
+.image-editor {
+  min-height: 0;
+}
+
+.image-editor {
+  container-type: inline-size;
   display: grid;
   grid-template-rows: var(--panel-header-height) minmax(0, 1fr);
   height: 100%;
@@ -153,23 +157,14 @@
 .ie-canvas-tools {
   position: absolute;
   z-index: 4;
-  top: 8px;
-  left: 8px;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  height: 30px;
-  padding: 3px;
+  top: var(--floating-toolbar-edge);
+  left: var(--floating-toolbar-edge);
   color: var(--ie-muted);
-  background: var(--surface-overlay-soft);
-  border: 1px solid var(--ie-line);
-  border-radius: 6px;
-  box-shadow: 0 7px 22px var(--shadow);
 }
 
 .ie-canvas-tools button {
   display: grid;
-  width: 24px;
+  width: 22px;
   height: 22px;
   padding: 0;
   place-items: center;
@@ -350,10 +345,7 @@
 
 .ie-workspace {
   display: grid;
-  grid-template-columns: minmax(200px, 1fr) 2px minmax(
-      64px,
-      var(--history-width)
-    );
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
 }
@@ -361,31 +353,56 @@
 .ie-stage-column {
   position: relative;
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-  border-right: 1px solid var(--ie-line);
 }
 
-/* Annotation tools float on the canvas, matching the canvas tools above. */
-.ie-brush-tools {
+.ie-canvas-toolbar {
   position: absolute;
+  top: var(--floating-toolbar-edge);
+  left: var(--floating-toolbar-edge);
+  right: var(--floating-toolbar-edge);
   z-index: 4;
-  left: 8px;
-  bottom: 8px;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ie-canvas-toolbar .ie-canvas-tools {
+  position: static;
+  flex: 0 0 auto;
+}
+.ie-drawing-tools {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--ie-muted);
+}
+.ie-brush-tools {
   display: flex;
   align-items: center;
   gap: 2px;
-  height: 30px;
-  padding: 3px;
-  color: var(--ie-muted);
-  background: var(--surface-overlay-soft);
-  border: 1px solid var(--ie-line);
-  border-radius: 6px;
-  box-shadow: 0 7px 22px var(--shadow);
+}
+.ie-drawing-tools button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  cursor: pointer;
+}
+.ie-drawing-tools button:hover:not(:disabled),
+.ie-drawing-tools button.is-active {
+  background: var(--accent-soft);
+  color: var(--ie-text);
 }
 .ie-brush-tools button {
   display: grid;
-  width: 24px;
+  width: 22px;
   height: 22px;
   padding: 0;
   place-items: center;
@@ -403,28 +420,30 @@
   cursor: default;
 }
 .ie-color-control {
+  position: relative;
   display: grid;
   width: 22px;
   height: 22px;
   place-items: center;
+  border-radius: var(--control-radius);
   cursor: pointer;
+}
+.ie-color-control:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.ie-color-control:has(input:focus-visible) {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 .ie-color-control input {
-  width: 14px;
-  height: 14px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   padding: 0;
-  overflow: hidden;
-  background: transparent;
-  border: 1px solid var(--ie-line-strong);
-  border-radius: 50%;
+  opacity: 0;
   cursor: pointer;
-}
-.ie-color-control input::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-.ie-color-control input::-webkit-color-swatch {
-  border: 0;
-  border-radius: 50%;
 }
 .ie-brush-size,
 .ie-range {
@@ -436,39 +455,69 @@
   width: 100%;
 }
 
-/* The edit request floats over the canvas, bottom right. */
-.ie-edit-box > .hint-trigger {
-  display: flex;
-}
-.ie-edit-box .prompt-button {
-  flex: 1;
-}
+/* The edit row floats over the canvas; the prompt takes the remaining space. */
 .ie-edit-box {
   position: absolute;
-  z-index: 4;
-  right: 8px;
-  bottom: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 200px;
-  padding: 3px;
-  background: var(--surface-overlay-soft);
-  border: 1px solid var(--ie-line);
-  border-radius: 6px;
-  box-shadow: 0 7px 22px var(--shadow);
+  z-index: 5;
+  bottom: var(--floating-toolbar-edge);
+  left: var(--floating-toolbar-edge);
+  right: var(--floating-toolbar-edge);
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ie-edit-box > .rt-TextFieldRoot {
+  flex: 1 1 0;
+  min-width: 0;
 }
 .ie-action-row {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
+  gap: 3px;
+}
+.ie-generate.rt-Button {
+  width: 26px;
+  padding: 0;
+}
+.ie-version-navigation {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.ie-version-navigation .icon-button {
+  width: 22px;
+  height: 24px;
+}
+.ie-version-list .ie-history-track {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  max-height: 300px;
+  padding: 0;
   gap: 2px;
 }
-.ie-action-row > .hint-trigger:first-child {
-  flex: 1;
+.ie-version-list .ie-history-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
   min-width: 0;
 }
-.ie-generate {
-  width: 100%;
+.ie-version-list .ie-history-thumb {
+  width: 52px;
+  flex: 0 0 auto;
+}
+.ie-version-list .hint-trigger:has(.ie-history-thumb) {
+  flex: 0 0 52px;
+}
+.ie-history-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--ie-muted);
 }
 .ie-badge {
   color: var(--ie-muted);
@@ -713,9 +762,6 @@
 }
 
 @container (max-width: 620px) {
-  .ie-workspace {
-    grid-template-columns: minmax(0, 1fr) 2px minmax(56px, 72px);
-  }
   .ie-brush-size {
     width: 44px;
   }

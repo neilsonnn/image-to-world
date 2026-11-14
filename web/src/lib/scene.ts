@@ -187,6 +187,7 @@ function makePickProxy(nodeId: string) {
     depthWrite: false,
   });
   material.colorWrite = false;
+  material.visible = false;
   const proxy = new Mesh(new SphereGeometry(0.12, 8, 6), material);
   proxy.userData.nodeId = nodeId;
   proxy.userData.pickProxy = true;
@@ -332,6 +333,7 @@ export class SceneGraph {
   readonly entries = new Map<string, Entry>();
   readonly selectionOutline = new Group();
   private selection: string[] = [];
+  private hoveredId: string | null = null;
   private disposed = false;
   private pending = new Set<Promise<void>>();
   private display?: DisplaySettings;
@@ -341,6 +343,7 @@ export class SceneGraph {
     readonly scene: Scene,
     private readonly onError: (message: string) => void,
     private readonly helperColor: string,
+    private readonly activeColor: string,
   ) {
     scene.add(this.selectionOutline);
   }
@@ -585,10 +588,13 @@ export class SceneGraph {
     if (entry.node.kind === "camera" && entry.node.projection) {
       const frustum = makeFrustum(entry.node.projection, this.helperColor);
       entry.frustum = frustum;
+      entry.getSelectionTarget = () =>
+        captureRoot(this.workspace!, entry.node.id)?.id ?? entry.node.id;
       finish(frustum, {
         ...geometrySpatial(frustum),
         getCenter: () => new Vector3(),
       });
+      entry.pickProxy.visible = true;
       return;
     }
     if (entry.node.kind === "path") {
@@ -684,9 +690,44 @@ export class SceneGraph {
     }
     if (entry.pointCloud) entry.pointCloud.visible = display.showPoints;
     if (entry.frustum) {
-      entry.frustum.visible = display.showFrustums;
+      this.applyCameraHighlight(entry);
       entry.frustum.scale.setScalar(display.imageDistance);
     }
+  }
+
+  setHovered(id: string | null) {
+    if (this.hoveredId === id) return;
+    this.hoveredId = id;
+    for (const entry of this.entries.values()) this.applyCameraHighlight(entry);
+  }
+
+  private applyCameraHighlight(entry: Entry) {
+    if (!entry.frustum) return;
+    let current: SceneNode | undefined = entry.node;
+    let highlighted = false;
+    while (current) {
+      if (
+        this.selection.includes(current.id) ||
+        this.hoveredId === current.id
+      ) {
+        highlighted = true;
+        break;
+      }
+      current = current.parentId
+        ? this.workspace?.nodes[current.parentId]
+        : undefined;
+    }
+    const frame = this.workspace && captureRoot(this.workspace, entry.node.id);
+    entry.frustum.visible =
+      !!frame || !!this.display?.showFrustums || highlighted;
+    const wire = entry.frustum.children[0] as LineSegments<
+      BufferGeometry,
+      LineBasicMaterial
+    >;
+    wire.material.color.set(highlighted ? this.activeColor : this.helperColor);
+    wire.material.depthTest = !highlighted;
+    wire.material.depthWrite = false;
+    wire.renderOrder = highlighted ? 1001 : 0;
   }
 
   private localTargets(entry: Entry, workspace: SceneWorkspace) {
@@ -747,6 +788,7 @@ export class SceneGraph {
     )
       return;
     this.selection = [...ids];
+    for (const entry of this.entries.values()) this.applyCameraHighlight(entry);
     disposeObject(this.selectionOutline);
     this.selectionOutline.clear();
     for (const id of ids) {

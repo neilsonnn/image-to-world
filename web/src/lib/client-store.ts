@@ -1,3 +1,4 @@
+import type { Operation } from "../../../core/activity";
 import { createStore } from "zustand/vanilla";
 import type { EnvironmentStatus } from "../../../core/environment";
 import type {
@@ -20,6 +21,8 @@ export type ClientState = {
   status: Status | null;
   loading: boolean;
   connected: boolean;
+  hoveredNodeId: string | null;
+  lastOperation: Operation | null;
   error: string | null;
 };
 
@@ -82,8 +85,14 @@ export function createWorldbashClient() {
     status: null,
     loading: true,
     connected: false,
+    hoveredNodeId: null,
+    lastOperation: null,
     error: null,
   }));
+  const setHoveredNode = (hoveredNodeId: string | null) => {
+    if (store.getState().hoveredNodeId !== hoveredNodeId)
+      store.setState({ hoveredNodeId });
+  };
   const setError = (error: string | null) => store.setState({ error });
   const acceptWorkspace = (next: Workspace) => {
     const previous = store.getState().workspace;
@@ -189,6 +198,14 @@ export function createWorldbashClient() {
         setError(null);
       void refresh();
     });
+    events.addEventListener("operation", (event) => {
+      if (epoch !== connection) return;
+      try {
+        store.setState({
+          lastOperation: JSON.parse((event as MessageEvent).data),
+        });
+      } catch {}
+    });
     events.addEventListener("change", (event) => {
       // Commands already fetch their own result; skip revisions the client has.
       const current = store.getState().workspace?.revision;
@@ -217,6 +234,7 @@ export function createWorldbashClient() {
     getWorkspace,
     acceptWorkspace,
     setError,
+    setHoveredNode,
     refresh,
     command,
     safeCommand,

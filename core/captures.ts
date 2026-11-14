@@ -401,7 +401,11 @@ export function captureOrigin(
   workspace: Pick<Workspace, "assets" | "jobs" | "nodes">,
   id: string,
 ): "imported" | "generated" {
-  let assetId = workspace.nodes[id]?.assetId;
+  const node = workspace.nodes[id];
+  const kind = node?.jobId ? workspace.jobs[node.jobId]?.input.kind : undefined;
+  if (kind === "atlas" || kind === "video" || kind === "image")
+    return "generated";
+  let assetId = node?.assetId;
   const seen = new Set<string>();
   while (assetId && !seen.has(assetId)) {
     seen.add(assetId);
@@ -414,4 +418,24 @@ export function captureOrigin(
     assetId = asset?.parentAssetId;
   }
   return "imported";
+}
+
+/** Imported (and frozen) Frames first, preserving scene-tree order inside each group. */
+export function spatialContextFrames(
+  workspace: Pick<Workspace, "nodes" | "assets" | "jobs">,
+) {
+  const frames: SceneNode[] = [];
+  const visit = (parentId: string | null) => {
+    for (const node of orderedChildren(workspace.nodes, parentId)) {
+      if (node.kind === "capture") frames.push(node);
+      visit(node.id);
+    }
+  };
+  visit(null);
+  const generated = (node: SceneNode) =>
+    !node.contextFrozen && captureOrigin(workspace, node.id) === "generated";
+  return [
+    ...frames.filter((node) => !generated(node)),
+    ...frames.filter(generated),
+  ];
 }

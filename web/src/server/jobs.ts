@@ -15,7 +15,11 @@ import { integrateAssets } from "./integration";
 import { extractVideoFrames } from "./video";
 import type { z } from "zod";
 import { applyCommand } from "../../../core/commands";
-import { atlasContext, createCapture } from "../../../core/captures";
+import {
+  atlasContext,
+  createCapture,
+  spatialContextFrames,
+} from "../../../core/captures";
 import { identity, type Camera } from "../../../core/schema";
 import type {
   AtlasGenerateRequest,
@@ -168,7 +172,10 @@ export class JobRunner {
         throw new Error(
           "Atlas context needs visible posed captures with aligned cameras and depth",
         );
-      parsed.nodeIds = context.map((frame) => frame.node.id);
+      const participating = new Set(context.map((frame) => frame.node.id));
+      parsed.nodeIds = spatialContextFrames(snapshot)
+        .filter((node) => participating.has(node.id))
+        .map((node) => node.id);
       if (
         parsed.kind === "atlas" &&
         parsed.returnDepth &&
@@ -188,7 +195,10 @@ export class JobRunner {
         throw new Error(
           `${parsed.refine ? "Refined" : "Draft"} splats need 2 to ${limit} visible posed captures with aligned cameras and depth; found ${context.length}`,
         );
-      parsed.nodeIds = context.map((frame) => frame.node.id);
+      const participating = new Set(context.map((frame) => frame.node.id));
+      parsed.nodeIds = spatialContextFrames(snapshot)
+        .filter((node) => participating.has(node.id))
+        .map((node) => node.id);
     }
     if (parsed.kind === "video") {
       if (!ffmpegPath())

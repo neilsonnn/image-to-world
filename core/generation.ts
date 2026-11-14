@@ -5,6 +5,7 @@ import {
   captureFrame,
   sceneCamera,
   selectedPath,
+  spatialContextFrames,
 } from "./captures";
 import {
   generationSchema,
@@ -68,7 +69,10 @@ function contextCaptureIds(
     const selected = atlasContextNodes(workspace, workspace.selection, pathId);
     if (selected.length) nodes = selected;
   }
-  return nodes.map((node) => captureFrame(workspace, node.id).node.id);
+  const participating = new Set(nodes.map((node) => node.id));
+  return spatialContextFrames(workspace)
+    .filter((node) => participating.has(node.id))
+    .map((node) => captureFrame(workspace, node.id).node.id);
 }
 
 export function generationInput(

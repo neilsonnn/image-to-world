@@ -8,7 +8,7 @@ import { PackedSplats, SplatMesh } from "@sparkjsdev/spark";
 import { clipsForNode } from "../../../core/clips";
 
 test("viewport clips and masks share local scope under an image parent", async () => {
-  const graph = new SceneGraph(new Scene(), () => {}, "#888888");
+  const graph = new SceneGraph(new Scene(), () => {}, "#888888", "#ffffff");
   const workspace = emptyWorkspace();
   for (const [id, parentId, kind] of [
     ["group", null, "group"],
@@ -58,7 +58,7 @@ test("viewport clips and masks share local scope under an image parent", async (
 });
 
 test("selection extents rotate with a container under a scaled parent and hide with it", () => {
-  const graph = new SceneGraph(new Scene(), () => {}, "#888888");
+  const graph = new SceneGraph(new Scene(), () => {}, "#888888", "#ffffff");
   try {
     const workspace = emptyWorkspace();
     const capture = nodeSchema.parse({
@@ -130,7 +130,7 @@ test("selection extents rotate with a container under a scaled parent and hide w
 });
 
 test("placed camera bounds and interaction center stay at its pose, without including the world origin", () => {
-  const graph = new SceneGraph(new Scene(), () => {}, "#888888");
+  const graph = new SceneGraph(new Scene(), () => {}, "#888888", "#ffffff");
   try {
     const workspace = emptyWorkspace();
     const camera = structuredClone(workspace.settings.viewportCamera);
@@ -168,7 +168,7 @@ test("placed camera bounds and interaction center stay at its pose, without incl
 });
 
 test("registered spatial extents and centers work without render geometry or node-type dispatch", () => {
-  const graph = new SceneGraph(new Scene(), () => {}, "#888888");
+  const graph = new SceneGraph(new Scene(), () => {}, "#888888", "#ffffff");
   try {
     const workspace = emptyWorkspace();
     workspace.nodes.custom = nodeSchema.parse({
@@ -224,6 +224,7 @@ test("posed image corners stay on the frustum end at every display depth", async
       throw new Error(error);
     },
     "#888888",
+    "#ffffff",
   );
   try {
     const workspace = emptyWorkspace();
@@ -293,5 +294,67 @@ test("posed image corners stay on the frustum end at every display depth", async
     if (bitmapDescriptor)
       Object.defineProperty(globalThis, "createImageBitmap", bitmapDescriptor);
     else delete (globalThis as any).createImageBitmap;
+  }
+});
+
+test("camera attention reuses its mounted frustum, highlights through occlusion, and respects hidden ancestors", () => {
+  const graph = new SceneGraph(new Scene(), () => {}, "#888888", "#ffffff");
+  const workspace = emptyWorkspace();
+  workspace.settings.display.showFrustums = false;
+  for (const node of createCapture({ name: "Frame" }, "frame"))
+    workspace.nodes[node.id] = node;
+  try {
+    graph.sync(workspace);
+    const entry = graph.entries.get("frame_camera")!;
+    const wire = entry.frustum!.children[0] as import("three").LineSegments<
+      import("three").BufferGeometry,
+      import("three").LineBasicMaterial
+    >;
+    const mounted = entry.frustum;
+    const geometry = wire.geometry;
+    const bounds = graph.bounds(["frame_camera"])!.clone();
+    expect(mounted!.visible).toBe(true);
+    // The non-rendering camera proxy selects its owning Frame as the wire does.
+    expect(entry.pickProxy.visible).toBe(true);
+    expect((entry.pickProxy.material as import("three").Material).visible).toBe(
+      false,
+    );
+    expect(
+      graph.pick(
+        new Raycaster(new Vector3(0, 1.5, 2), new Vector3(0, 0, -1)),
+        new Vector2(),
+      ),
+    ).toBe("frame");
+    graph.setHovered("frame_camera");
+    expect(mounted!.visible).toBe(true);
+    expect(wire.material.depthTest).toBe(false);
+    expect(wire.material.color.getHexString()).toBe("ffffff");
+    graph.setHovered(null);
+    expect(mounted!.visible).toBe(true);
+    graph.setSelection(["frame"]);
+    expect(mounted!.visible).toBe(true);
+    graph.setSelection([]);
+    expect(mounted!.visible).toBe(true);
+    graph.setHovered("frame");
+    expect(mounted!.visible).toBe(true);
+    workspace.nodes.frame.visible = false;
+    graph.sync(workspace);
+    expect(entry.root.parent!.visible).toBe(false);
+    workspace.nodes.frame.visible = true;
+    workspace.settings.display.showFrustums = true;
+    graph.sync(workspace);
+    graph.setHovered(null);
+    expect(mounted!.visible).toBe(true);
+    expect(wire.material.depthTest).toBe(true);
+    expect(wire.material.color.getHexString()).toBe("888888");
+    expect(entry.frustum).toBe(mounted);
+    expect(wire.geometry).toBe(geometry);
+    expect(graph.bounds(["frame_camera"])!.equals(bounds)).toBe(true);
+    const restore = graph.hideCaptureHelpers();
+    expect(mounted!.visible).toBe(false);
+    restore();
+    expect(mounted!.visible).toBe(true);
+  } finally {
+    graph.dispose();
   }
 });

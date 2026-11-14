@@ -217,6 +217,8 @@ export function EnvironmentEditor({ onClose }: { onClose: () => void }) {
               </Button>
               <Button
                 type="submit"
+                className="submit-action"
+                data-ready={dirty && !saving}
                 variant="surface"
                 color="gray"
                 disabled={saving || !dirty}

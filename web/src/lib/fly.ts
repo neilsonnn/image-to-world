@@ -76,6 +76,7 @@ export class FlyControls {
     private element: HTMLCanvasElement,
     private enabled: () => boolean,
     private commit: () => void,
+    private begin: () => void = () => {},
   ) {
     const signal = this.listeners.signal;
     element.addEventListener("pointerdown", this.pointerDown, { signal });
@@ -98,6 +99,10 @@ export class FlyControls {
     return this.dirty || this.keys.size > 0 || this.pointer !== null;
   }
 
+  get moving() {
+    return this.dirty || this.keys.size > 0;
+  }
+
   markChanged() {
     this.dirty = true;
   }
@@ -112,6 +117,7 @@ export class FlyControls {
     this.shift = event.shiftKey;
     if (!movementKeys.has(key)) return false;
     event.preventDefault();
+    this.begin();
     this.keys.add(key);
     return true;
   }
@@ -166,6 +172,9 @@ export class FlyControls {
   };
   private pointerMove = (event: PointerEvent) => {
     if (this.pointer !== event.pointerId || !this.enabled()) return;
+    if (this.previous.x === event.clientX && this.previous.y === event.clientY)
+      return;
+    this.begin();
     lookFlyCamera(
       this.camera,
       this.previous.x - event.clientX,
@@ -182,6 +191,7 @@ export class FlyControls {
   private wheel = (event: WheelEvent) => {
     if (!this.enabled() || (!event.deltaX && !event.deltaY)) return;
     event.preventDefault();
+    this.begin();
     const units =
       event.deltaMode === 1
         ? 16

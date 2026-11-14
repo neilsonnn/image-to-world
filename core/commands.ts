@@ -370,6 +370,8 @@ export function applyCommand(workspace: Workspace, input: Command) {
     next.settings.viewingCameraId &&
     !next.nodes[next.settings.viewingCameraId]
   ) {
+    if (next.settings.freeCamera)
+      next.settings.viewportCamera = next.settings.freeCamera;
     next.settings.viewingCameraId = null;
     next.settings.freeCamera = null;
   }

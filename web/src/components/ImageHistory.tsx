@@ -202,6 +202,7 @@ export function ImageHistory({
                 )}
               </button>
             </Hint>
+            <span className="ie-history-name">{asset.name}</span>
             <div className="ie-history-actions">
               {job && (
                 <Hint label="Reuse this edit's prompt and settings">

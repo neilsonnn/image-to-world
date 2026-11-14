@@ -1,5 +1,6 @@
 import {
   Button,
+  DropdownMenu,
   Flex,
   IconButton as RadixIconButton,
   Popover,
@@ -7,7 +8,13 @@ import {
   TextArea,
   Tooltip,
 } from "@radix-ui/themes";
-import type { ComponentProps, ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 
 export function Hint({
   label,
@@ -131,7 +138,7 @@ export function PromptButton({
             color="gray"
             className={`prompt-button${value ? "" : " is-empty"}`}
           >
-            <span>{value || label}</span>
+            <span>{label}</span>
             {indicator}
           </Button>
         </Popover.Trigger>
@@ -162,5 +169,107 @@ export function PromptButton({
         </Flex>
       </Popover.Content>
     </Popover.Root>
+  );
+}
+
+/** Toolbar menus leave neighboring controls interactive; Radix handles outside dismissal and focus. */
+export function ToolbarMenu(
+  props: Omit<ComponentProps<typeof DropdownMenu.Root>, "modal">,
+) {
+  return <DropdownMenu.Root {...props} modal={false} />;
+}
+
+export type ToolbarSelectOption = {
+  label: string;
+  icon: ReactNode;
+  hint: string;
+};
+
+/** Keep hover-triggered surfaces open while crossing the trigger/content gap. */
+export function useHoverDisclosure() {
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const cancelClose = () => clearTimeout(closeTimer.current);
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimer.current = setTimeout(() => setOpen(false), 150);
+  };
+  const show = () => {
+    cancelClose();
+    setOpen(true);
+  };
+  useEffect(() => () => clearTimeout(closeTimer.current), []);
+  return { open, setOpen, cancelClose, scheduleClose, show };
+}
+
+/** Shared compact icon/label selector, with no caret and standard menu keyboard behavior. */
+export function ToolbarSelect<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: Record<T, ToolbarSelectOption>;
+  onChange: (value: T) => void;
+}) {
+  const { open, setOpen, cancelClose, scheduleClose } = useHoverDisclosure();
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const current = options[value];
+  return (
+    <ToolbarMenu open={open} onOpenChange={setOpen}>
+      <Tooltip
+        delayDuration={0}
+        content={current.hint}
+        open={!open && tooltipOpen}
+        onOpenChange={setTooltipOpen}
+      >
+        <DropdownMenu.Trigger>
+          <Button
+            size="1"
+            variant="surface"
+            color="gray"
+            className="toolbar-select"
+            aria-label={`${label}: ${current.label}`}
+            onPointerEnter={(event) => {
+              cancelClose();
+              if (event.pointerType !== "touch") setOpen(true);
+            }}
+            onPointerLeave={scheduleClose}
+          >
+            {current.icon}
+            {current.label}
+          </Button>
+        </DropdownMenu.Trigger>
+      </Tooltip>
+      <DropdownMenu.Content
+        size="1"
+        color="gray"
+        aria-label={label}
+        className="toolbar-select-menu"
+        onPointerEnter={cancelClose}
+        onPointerLeave={scheduleClose}
+      >
+        <DropdownMenu.RadioGroup
+          value={value}
+          onValueChange={(value) => onChange(value as T)}
+        >
+          {(Object.keys(options) as T[]).map((key) => {
+            const option = options[key];
+            return (
+              <Tooltip key={key} delayDuration={0} content={option.hint}>
+                <DropdownMenu.RadioItem value={key}>
+                  {option.icon}
+                  {option.label}
+                </DropdownMenu.RadioItem>
+              </Tooltip>
+            );
+          })}
+        </DropdownMenu.RadioGroup>
+      </DropdownMenu.Content>
+    </ToolbarMenu>
   );
 }

@@ -21,7 +21,7 @@ export function NewImagePrompt({ camera }: { camera: () => Camera }) {
   const pending = useRef(false);
   return (
     <form
-      className="viewport-prompt"
+      className="viewport-prompt floating-toolbar"
       aria-label="Create an image and place at view"
       onSubmit={async (event) => {
         event.preventDefault();
@@ -90,6 +90,8 @@ export function NewImagePrompt({ camera }: { camera: () => Camera }) {
       <ToolbarIconButton
         label="Create image (Enter)"
         type="submit"
+        className="submit-action"
+        data-ready={!submitting && !!prompt.trim()}
         disabled={submitting || !prompt.trim()}
       >
         <ArrowUp />

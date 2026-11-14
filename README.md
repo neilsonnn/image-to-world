@@ -274,15 +274,22 @@ bun run worldbash atlas <capture-id> --camera target-camera.json
 bun run worldbash splats --wait --timeout 1800
 ```
 
-`splats` (or **Make splats** in the viewport) sends the same posed captures as
-Atlas context to `posedImages2Splats` and adds the returned SPZ at the scene root.
+`splats` (or **Make splats** below Render in the Spatial context column) sends the
+same posed captures as Atlas context to `posedImages2Splats` and adds the returned
+SPZ at the scene root. The editor defaults to refined reconstruction; enable
+**Draft** in its settings for a faster draft. Make splats and its retry controls
+require an explicit confirmation after a five-second countdown. X or Escape
+cancels before submission. The panel lists every splat job and provides visibility,
+delete, download, and re-add controls for its results. The CLI defaults to drafts.
 Drafts take 2 to 32 captures and cost 500 credits; `--refine` takes up to 512,
 costs 5,000 credits, and usually runs 15 to 25 minutes.
 
-The Atlas grid supports range selection, arrows that move to a reference camera,
-thumbnail ordering, hide/show, exclusion, and solo. Double-click a camera in the
+The Spatial context column supports range selection, arrows that move to a
+reference camera, hide/show, exclusion, and solo. Imports appear first, then
+generated Frames, each in scene hierarchy order. Right-click a generated Frame
+and choose **Freeze** to group it with imports; this does not lock editing. Double-click a camera in the
 viewport, outline, or grid to view its perspective. Press C over the viewport to place cameras and accumulate their selection.
-The bottom viewport action palette creates a path from those cameras. Selecting a
+Use `path create` to create a path from those cameras. Selecting a
 path shows its context in Atlas;
 `context ... --path <path-id>` controls that same state from the CLI.
 
@@ -457,9 +464,23 @@ the Nano Banana models.
 
 Atlas saves the enhanced caption returned by a render and reuses it for later
 renders, path generation, and splats with the same scene description. A lightning
-icon beside **Describe the scene** indicates a cached caption. Its popover shows
+icon beside **Prompt** indicates a cached caption. Its popover shows
 only the cache status and a **Clear** action. Editing the description invalidates
 the cache; clear it when changing the scene's content while keeping the description.
+
+### Viewport camera and compact controls
+
+The floating bottom-left viewport controls own the free camera's field of view,
+lens and clipping settings, plus a toggleable passepartout matching the project
+aspect ratio. Viewing through a Frame or camera temporarily overrides the lens
+and names the source node. Navigation or Escape restores the saved free camera.
+Render uses the camera inside the project viewfinder.
+
+Image and viewport tools share compact floating groups. The edit prompt floats
+inside the image canvas, and the neutral palette icon opens the brush color
+picker. Text actions show an orange outline and icon when ready to submit.
+The footer spans the window and shows selection and live command/job activity.
+At widths of 1600px or more, the resizable agent guide opens alongside the editor.
 
 ### Agent camera planning, inspection, and previews
 

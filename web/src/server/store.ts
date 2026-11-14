@@ -1,3 +1,4 @@
+import type { Operation } from "../../../core/activity";
 import { createHash, randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
 import {
@@ -35,6 +36,12 @@ const formats: Record<string, [Asset["kind"], string]> = {
   ".mov": ["video", "video/quicktime"],
 };
 export class WorkspaceStore {
+  lastOperation: Operation | null = null;
+  reportOperation(name: string) {
+    this.lastOperation = { name, at: Date.now() };
+    this.emit("operation", this.lastOperation);
+  }
+
   readonly root: string;
   readonly assetsPath: string;
   private state = emptyWorkspace();

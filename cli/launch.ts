@@ -1,3 +1,4 @@
+import { rendererExecutable } from "../web/src/server/render-worker";
 import { createHash } from "node:crypto";
 import { access, mkdir, readFile, realpath, stat } from "node:fs/promises";
 import { constants } from "node:fs";
@@ -47,6 +48,7 @@ export async function buildFingerprint(directory = root) {
     "web/*.ts",
     "web/*.json",
     "core/**/*",
+    "scripts/**/*",
     "cli/**/*",
     "web/src/**/*",
     "web/public/**/*",
@@ -114,6 +116,12 @@ export async function doctor(project?: string) {
       ok: !!environmentValue("FAL_KEY") || !!env.FAL_KEY,
       optional: true,
       fix: `Set FAL_KEY in ${config} or .env for image edits.`,
+    },
+    {
+      name: "renderer",
+      ok: !!rendererExecutable(),
+      optional: true,
+      fix: "Install Chrome/Chromium or set CHROMIUM_PATH for independent views.",
     },
     {
       name: "ffmpeg",

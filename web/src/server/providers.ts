@@ -20,7 +20,7 @@ import {
   type TaskAsset,
 } from "@worldlabsai/client";
 import { atlasCamera } from "../../../core/cameras";
-import { sessionFormat } from "../../../core/formats";
+import { closestFormat, sessionFormat } from "../../../core/formats";
 import {
   cameraSchema,
   type Asset,
@@ -87,11 +87,8 @@ export async function buildWorldLabsRequest(
     }
     const { file } = await store.assetFile(job.input.assetIds[0]);
     const image = await loadImage(file);
-    const ratio = Math.min(1, 1280 / Math.max(image.width, image.height));
-    const targetResolution: [number, number] = [
-      Math.max(1, Math.round(image.width * ratio)),
-      Math.max(1, Math.round(image.height * ratio)),
-    ];
+    const format = closestFormat(image);
+    const targetResolution: [number, number] = [format.width, format.height];
     return {
       frames,
       canonicalizeToFirstFrame:
@@ -115,7 +112,7 @@ export async function buildWorldLabsRequest(
       frame.asset.confidenceAssetId,
     ].filter((id): id is string => !!id)) {
       const expected = snapshot.assets[assetId],
-        actual = store.snapshot().assets[assetId];
+        actual = (await store.assetFile(assetId)).asset;
       if (
         !expected ||
         !actual ||

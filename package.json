@@ -8,8 +8,8 @@
     "cli"
   ],
   "scripts": {
-    "dev": "bun --cwd web dev",
-    "build": "bun --cwd web build",
+    "dev": "bun scripts/build-renderer.ts && bun --cwd web dev",
+    "build": "bun scripts/build-renderer.ts && bun --cwd web build",
     "start": "bun --cwd web start",
     "worldbash": "bun cli/index.ts",
     "check": "tsc --noEmit",
@@ -26,6 +26,7 @@
     "@tanstack/react-router": "^1.170.41",
     "@tanstack/react-start": "^1.168.60",
     "@worldlabsai/client": "0.7.0",
+    "playwright-core": "1.58.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "three": "^0.183.0",

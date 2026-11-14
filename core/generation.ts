@@ -82,6 +82,13 @@ export function generationInput(
   const r = generationSchema.parse(request);
   const s = workspace.settings;
   switch (r.kind) {
+    case "mask":
+    case "render":
+    case "observe":
+    case "fit":
+      return r;
+    case "model":
+      return { kind: "fal", model: r.model, input: r.input };
     case "image.create":
       return {
         kind: "image",
@@ -95,6 +102,8 @@ export function generationInput(
       if (!sourceAssetId) throw new Error("Choose an image to edit");
       return {
         kind: "nano",
+        targetNodeIds: r.targetNodeIds,
+        unchangedMaskAssetId: r.unchangedMaskAssetId,
         sourceAssetId,
         prompt: r.prompt ?? s.editor2d.prompt,
         referenceAssetIds: r.referenceAssetIds ?? s.editor2d.referenceAssetIds,

@@ -1,3 +1,4 @@
+import { ActivityFeed } from "./ActivityFeed";
 import {
   SidebarSimple,
   SlidersHorizontal,
@@ -56,12 +57,7 @@ export function EditorFooter({
           <span>Outline / assets</span>
         </button>
       </Hint>
-      <Hint label={activity}>
-        <div className="footer-operation" role="status">
-          {active && <SpinnerGap className="spin" />}
-          <span>{activity}</span>
-        </div>
-      </Hint>
+      <ActivityFeed fallback={activity} />
       <Hint label={names || "No selection"}>
         <div className="footer-selection">
           <span className="footer-selection-name">{names}</span>

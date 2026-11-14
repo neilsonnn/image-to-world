@@ -1,4 +1,7 @@
 #!/usr/bin/env bun
+import { commandContextSchema } from "../core/command-context";
+import { generationSchema } from "../core/schema";
+import { sceneCamera } from "../core/captures";
 import { resolveImageModel, type ImageModelFor } from "../core/models";
 import { writeFile } from "node:fs/promises";
 import { aimCamera } from "../core/cameras";
@@ -92,6 +95,20 @@ const HELP = `worldbash controls the same filesystem workspace as the browser.
   bun run worldbash video reconstruct <job-id> [--indices 0,4,8]
   bun run worldbash reconstruct <asset-id>... [--video video-asset-id]
                    [--fps 1] [--max-frames 60]
+  bun run worldbash render <camera-or-capture-id> [--camera file.json] [--targets id,id]
+                   [--passes color,mask,depth,ids] [--reference image-id]  Independent headless renderer
+  bun run worldbash mask <asset-id>... [--operation union|intersection] [--invert] [--dilate pixels] [--feather pixels]
+  bun run worldbash observe <capture-id> --region x,y,w,h [--mask asset-id] [--padding .1]
+                   Save crop, masks, camera and scene-depth observation (normalized top-left coordinates)
+  bun run worldbash fit <mesh-node-id> --observation manifest-asset-id [--quaternion x,y,z,w]
+                   Read-only placement proposal; use its command and preconditions after reviewing
+  bun run worldbash models [endpoint] [--search text]  Suggestions or live provider schema
+  bun run worldbash model <endpoint> --file input.json  General image/3D model call; {"$asset":"id"}
+  bun run worldbash generate --file request.json   All generation and local inspection workflows
+  bun run worldbash activity [--after sequence]    Automatic action history
+  bun run worldbash revert <edit-id>               Revert only an unchanged edit
+  All mutations accept --actor name --request-id id --expect preconditions.json
+  Image edits accept --asset-only or --targets capture-id,... --unchanged-mask asset-id
   bun run worldbash fal <endpoint> --file input.json  Asset input: {"$asset":"asset-id"}
   bun run worldbash capture [--camera camera.json]   Requires an open browser viewport
   bun run worldbash jobs [show|wait|cancel|retry] [job-id] [--timeout 300]
@@ -102,7 +119,7 @@ Planning helpers leave viewpoint selection and visual review to the user or agen
 They do not choose shots, assess visual quality, or prescribe a scene-building sequence.
 
 All responses are JSON. Errors use stderr and exit 1. Generation returns a job ID
-immediately; --wait waits for completion. --url defaults to http://127.0.0.1:4310
+immediately; --wait waits for completion; --ready follows automatic depth/pose jobs. --url defaults to http://127.0.0.1:4310
 (or WORLDBASH_URL). No API credentials are needed by the CLI.
 `;
 
@@ -112,6 +129,22 @@ export async function run(argv: string[]) {
     allowPositionals: true,
     strict: true,
     options: {
+      actor: { type: "string" },
+      feather: { type: "string" },
+      polygon: { type: "string" },
+      operation: { type: "string" },
+      dilate: { type: "string" },
+      region: { type: "string" },
+      mask: { type: "string" },
+      padding: { type: "string" },
+      passes: { type: "string" },
+      observation: { type: "string" },
+      targets: { type: "string" },
+      "unchanged-mask": { type: "string" },
+      "asset-only": { type: "boolean" },
+      after: { type: "string" },
+      "request-id": { type: "string" },
+      expect: { type: "string" },
       out: { type: "string" },
       "look-at": { type: "string" },
       "relative-to": { type: "string" },
@@ -161,6 +194,7 @@ export async function run(argv: string[]) {
       "max-frames": { type: "string" },
       refine: { type: "boolean" },
       wait: { type: "boolean" },
+      ready: { type: "boolean" },
       timeout: { type: "string" },
       local: { type: "boolean" },
       invert: { type: "boolean" },
@@ -180,7 +214,17 @@ export async function run(argv: string[]) {
   const request = async (route: string, init?: RequestInit) => {
     const response = await fetch(`${base}/api/${route}`, {
       ...init,
-      headers: { "X-Worldbash-Client": "cli", ...init?.headers },
+      headers: {
+        "X-Worldbash-Client": "cli",
+        "X-Worldbash-Context": JSON.stringify({
+          actorId: values.actor ?? process.env.WORLDBASH_ACTOR ?? "CLI session",
+          requestId: values["request-id"] ?? crypto.randomUUID(),
+          ...(values.expect
+            ? { preconditions: await Bun.file(values.expect).json() }
+            : {}),
+        }),
+        ...init?.headers,
+      },
     });
     if (!response.ok) {
       const body = (await response
@@ -218,7 +262,15 @@ export async function run(argv: string[]) {
     for (;;) {
       const job = (await state()).jobs[id];
       if (!job) throw new Error(`Unknown job ${id}`);
-      if (job.status === "succeeded") return job;
+      if (job.status === "succeeded") {
+        if (values.ready && job.applicationError)
+          throw new Error(job.applicationError);
+        if (values.ready && job.childJobId) {
+          id = job.childJobId;
+          continue;
+        }
+        return job;
+      }
       if (job.status === "failed" || job.status === "cancelled")
         throw new Error(JSON.stringify(job));
       if (Date.now() >= deadline)
@@ -259,6 +311,8 @@ export async function run(argv: string[]) {
   } else if (action === "schema") {
     const schemas = {
       commands: commandSchema,
+      generation: generationSchema,
+      context: commandContextSchema,
       jobs: jobInputSchema,
       aim: cameraAimSchema,
       inspection: inspectionSchema,
@@ -270,6 +324,88 @@ export async function run(argv: string[]) {
     if (!schema)
       throw new Error(`Choose schema ${Object.keys(schemas).join(", ")}`);
     output(zodToJsonSchema(schema));
+  } else if (action === "activity") {
+    output(
+      await (await request(`activity?after=${finite(values.after, 0)}`)).json(),
+    );
+  } else if (action === "generate") {
+    await generate(generationSchema.parse(await jsonFile(values.file)));
+  } else if (action === "models") {
+    output(
+      await (
+        await request(
+          `models?${new URLSearchParams(sub ? { endpoint: sub } : values.search ? { q: values.search } : {})}`,
+        )
+      ).json(),
+    );
+  } else if (action === "model") {
+    await generate({
+      kind: "model",
+      model: need(sub, "model endpoint"),
+      input: await jsonFile(values.file),
+    });
+  } else if (action === "mask") {
+    await generate({
+      kind: "mask",
+      assetIds: positionals.slice(1),
+      operation: values.operation as "union" | "intersection" | undefined,
+      invert: values.invert,
+      dilate: finite(values.dilate, 0),
+      feather: finite(values.feather, 0),
+    });
+  } else if (action === "observe") {
+    const region = need(values.region, "--region x,y,width,height")
+      .split(",")
+      .map(Number);
+    if (region.length !== 4)
+      throw new Error(
+        "Region requires x,y,width,height in normalized coordinates",
+      );
+    await generate({
+      kind: "observe",
+      nodeId: need(sub, "capture ID"),
+      region: {
+        x: region[0],
+        y: region[1],
+        width: region[2],
+        height: region[3],
+      },
+      maskAssetId: values.mask,
+      polygon: values.polygon ? await jsonFile(values.polygon) : undefined,
+      padding: finite(values.padding, 0.1),
+    });
+  } else if (action === "fit") {
+    const quaternion = values.quaternion?.split(",").map(Number) as
+      [number, number, number, number] | undefined;
+    await generate({
+      kind: "fit",
+      nodeId: need(sub, "mesh node ID"),
+      observationAssetId: need(values.observation, "--observation asset ID"),
+      quaternion,
+    });
+  } else if (action === "render") {
+    const w = await state();
+    const camera = values.camera
+      ? cameraSchema.parse(await jsonFile(values.camera))
+      : sub
+        ? sceneCamera(w, sub)
+        : undefined;
+    if (!camera)
+      throw new Error(
+        "Supply a camera/capture ID or --camera file.json; render never borrows the live viewport",
+      );
+    await generate({
+      kind: "render",
+      camera,
+      nodeIds: values.targets?.split(","),
+      passes: values.passes?.split(",") as
+        ("color" | "depth" | "mask" | "ids")[] | undefined,
+      referenceAssetId: values.reference,
+    });
+  } else if (action === "revert") {
+    output(
+      await command({ type: "history.revert", editId: need(sub, "edit ID") }),
+    );
   } else if (action === "status")
     output(await (await request("status")).json());
   else if (action === "state") output(await state());
@@ -386,7 +522,9 @@ export async function run(argv: string[]) {
         referenceAssetIds: values.reference?.split(",").filter(Boolean) ?? [],
         prompt: need(values.prompt, "--prompt"),
         settings,
-        applyToScene: true,
+        applyToScene: !values["asset-only"],
+        targetNodeIds: values.targets?.split(","),
+        unchangedMaskAssetId: values["unchanged-mask"],
         reconstruct: !values["no-reconstruct"],
         ...(values.draft
           ? { draft: imageDraftSchema.parse(await jsonFile(values.draft)) }
@@ -586,19 +724,9 @@ export async function run(argv: string[]) {
       output(await command({ type: "nodes.remove", ids: rest }));
     else if (sub === "transform") {
       const parentId = values.parent === "root" ? null : values.parent;
-      const base = values.parent
-        ? moveNodes(workspace.nodes, rest, parentId!)
-        : workspace.nodes;
-      const nodes = rest.map((id) => {
-        const node = structuredClone(base[id]);
-        if (!node) throw new Error(`Unknown node ${id}`);
-        for (const key of ["position", "scale", "quaternion"] as const)
-          if (values[key])
-            Object.assign(node.transform, {
-              [key]: values[key]!.split(",").map(Number),
-            });
-        return node;
-      });
+      const transform: Record<string, number[]> = {};
+      for (const key of ["position", "scale", "quaternion"] as const)
+        if (values[key]) transform[key] = values[key]!.split(",").map(Number);
       output(
         await command({
           type: "edit.batch",
@@ -612,7 +740,7 @@ export async function run(argv: string[]) {
                   },
                 ]
               : []),
-            { type: "nodes.put", nodes },
+            { type: "nodes.transform", ids: rest, transform },
           ],
         }),
       );
@@ -838,8 +966,8 @@ export async function run(argv: string[]) {
       maxFrames: finite(values["max-frames"], 60),
     });
   else if (action === "fal")
-    await submit({
-      kind: "fal",
+    await generate({
+      kind: "model",
       model: need(sub, "endpoint"),
       input: await jsonFile(values.file),
     });

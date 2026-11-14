@@ -1,3 +1,5 @@
+import { modelSuggestions } from "../../../core/models";
+import { rendererExecutable } from "./render-worker";
 import { inspectScene, inspectionSchema } from "../../../core/inspection";
 import path from "node:path";
 import { CommandService } from "./commands";
@@ -6,6 +8,10 @@ import { JobRunner } from "./jobs";
 import { WorkspaceStore } from "./store";
 import { ffmpegPath } from "./video";
 import { environmentValue, environmentStatus } from "./environment";
+import {
+  commandContextSchema,
+  CommandConflict,
+} from "../../../core/command-context";
 
 export async function createService(root: string) {
   const store = await new WorkspaceStore(root).init();
@@ -40,8 +46,41 @@ export async function createService(root: string) {
         );
       try {
         const route = url.pathname.replace(/^\/api\/?/, "");
+        if (request.method === "GET" && route === "models") {
+          const query = url.searchParams.get("q"),
+            endpoint = url.searchParams.get("endpoint");
+          if (!query && !endpoint)
+            return Response.json({
+              suggestions: modelSuggestions,
+              provider: "fal",
+              assetReference: { $asset: "asset-id" },
+              discovery: "models?endpoint=... or models?q=...",
+            });
+          const key = environmentValue("FAL_KEY");
+          if (!key)
+            throw new Error("Configure FAL_KEY for live model discovery");
+          const search = new URL("https://api.fal.ai/v1/models");
+          if (endpoint) {
+            search.searchParams.set("endpoint_id", endpoint);
+            search.searchParams.set("expand", "openapi-3.0");
+          }
+          if (query) search.searchParams.set("q", query);
+          const response = await fetch(search, {
+            headers: { Authorization: `Key ${key}` },
+            signal: AbortSignal.timeout(30000),
+          });
+          if (!response.ok)
+            throw new Error(
+              `Model discovery failed (${response.status}); raw endpoint calls remain available`,
+            );
+          return Response.json(await response.json());
+        }
         if (request.method === "GET" && route === "workspace")
           return Response.json(store.snapshot());
+        if (request.method === "GET" && route === "activity")
+          return Response.json(
+            store.activitySnapshot(Number(url.searchParams.get("after") ?? 0)),
+          );
         if (request.method === "GET" && route === "scene/inspect") {
           const ids = url.searchParams.getAll("nodeId");
           return Response.json(
@@ -54,6 +93,7 @@ export async function createService(root: string) {
             workspacePath: store.root,
             worldLabsConfigured: !!environmentValue("WLT_API_KEY"),
             falConfigured: !!environmentValue("FAL_KEY"),
+            rendererAvailable: !!rendererExecutable(),
             ffmpegAvailable: !!ffmpegPath(),
             environment: environmentStatus(),
           });
@@ -87,6 +127,7 @@ export async function createService(root: string) {
               request.signal.addEventListener("abort", abort, { once: true });
               send("change", { revision: store.snapshot().revision });
               if (store.lastOperation) send("operation", store.lastOperation);
+              send("activity-history", store.activitySnapshot());
             },
             cancel() {
               dispose();
@@ -101,7 +142,13 @@ export async function createService(root: string) {
           });
         }
         if (request.method === "POST" && route === "commands") {
-          return Response.json(await commands.execute(await request.json()));
+          const context = commandContextSchema.parse({
+            ...JSON.parse(request.headers.get("X-Worldbash-Context") ?? "{}"),
+            interactive: request.headers.get("X-Worldbash-Client") === "web",
+          });
+          return Response.json(
+            await commands.execute(await request.json(), context),
+          );
         }
         if (request.method === "GET" && route.startsWith("assets/")) {
           const id = decodeURIComponent(route.slice(7));
@@ -254,7 +301,7 @@ export async function createService(root: string) {
       } catch (error) {
         return Response.json(
           { error: error instanceof Error ? error.message : String(error) },
-          { status: 400 },
+          { status: error instanceof CommandConflict ? 409 : 400 },
         );
       }
     },

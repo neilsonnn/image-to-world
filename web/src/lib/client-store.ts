@@ -1,4 +1,8 @@
-import type { Operation } from "../../../core/activity";
+import {
+  activitySchema,
+  type Activity,
+  type Operation,
+} from "../../../core/activity";
 import { createStore } from "zustand/vanilla";
 import type { EnvironmentStatus } from "../../../core/environment";
 import type {
@@ -23,6 +27,8 @@ export type ClientState = {
   connected: boolean;
   hoveredNodeId: string | null;
   lastOperation: Operation | null;
+  activity?: Activity[];
+  showPresence?: boolean;
   error: string | null;
 };
 
@@ -87,6 +93,8 @@ export function createWorldbashClient() {
     connected: false,
     hoveredNodeId: null,
     lastOperation: null,
+    activity: [],
+    showPresence: true,
     error: null,
   }));
   const setHoveredNode = (hoveredNodeId: string | null) => {
@@ -152,6 +160,10 @@ export function createWorldbashClient() {
         headers: {
           "content-type": "application/json",
           "X-Worldbash-Client": "web",
+          "X-Worldbash-Context": JSON.stringify({
+            actorId: "You",
+            requestId: crypto.randomUUID(),
+          }),
         },
         body: JSON.stringify(value),
       }),
@@ -197,6 +209,31 @@ export function createWorldbashClient() {
       if (store.getState().error === "Live updates disconnected")
         setError(null);
       void refresh();
+    });
+    events.addEventListener("activity-history", (event) => {
+      if (epoch !== connection) return;
+      try {
+        const data = JSON.parse((event as MessageEvent).data);
+        store.setState({
+          activity: data.events
+            .map((e: unknown) => activitySchema.parse(e))
+            .slice(-1000),
+        });
+      } catch {}
+    });
+    events.addEventListener("activity", (event) => {
+      if (epoch !== connection) return;
+      try {
+        const activity = activitySchema.parse(
+          JSON.parse((event as MessageEvent).data),
+        );
+        store.setState((state) => ({
+          activity: [
+            ...(state.activity ?? []).filter((e) => e.id !== activity.id),
+            activity,
+          ].slice(-1000),
+        }));
+      } catch {}
     });
     events.addEventListener("operation", (event) => {
       if (epoch !== connection) return;

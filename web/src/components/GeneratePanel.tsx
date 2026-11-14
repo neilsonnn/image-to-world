@@ -1,3 +1,4 @@
+import { modelSuggestions } from "../../../core/models";
 import { useWorldbashClient, useWorkspaceData } from "../lib/client";
 import { Button } from "@radix-ui/themes";
 import { Cpu, Image as ImageIcon, SpinnerGap } from "@phosphor-icons/react";
@@ -43,9 +44,9 @@ export function GeneratePanel({
   const doFal = () => {
     try {
       void submit("fal", {
-        type: "jobs.submit",
-        input: {
-          kind: "fal",
+        type: "generation.submit",
+        request: {
+          kind: "model",
           model: workspace.settings.falModel,
           input: JSON.parse(workspace.settings.falInput) as Record<
             string,
@@ -112,10 +113,18 @@ export function GeneratePanel({
         </div>
         <Field label="Model ID">
           <input
+            list="model-suggestions"
             value={workspace.settings.falModel}
             onChange={(e) => void updateSettings({ falModel: e.target.value })}
           />
         </Field>
+        <datalist id="model-suggestions">
+          {modelSuggestions.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.label}
+            </option>
+          ))}
+        </datalist>
         <Field label="Input (JSON)">
           <textarea
             className="code-input"

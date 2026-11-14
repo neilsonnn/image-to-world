@@ -540,3 +540,30 @@ refuses to overwrite an existing file. Preview/inspection results are normal
 assets, available through the usual export command. `schema commands` includes
 `camera.aim` and `jobs.submit`; `schema jobs` describes both new local job kinds.
 The bundled [Worldbash agent skill](skills/worldbash/SKILL.md) teaches the same paths.
+
+## Image decomposition and parallel agents
+
+Posed views can become independently editable mesh objects. The CLI provides
+`observe`, `mask`, `model`, `fit`, and `render`, plus unrestricted public FAL model
+inputs through `generate`. `models` discovers endpoints and their schemas. Existing
+image edits support asset-only outputs, explicit target captures, and unchanged
+pixel masks; scene replacements wait for reconstructed depth. See the
+[agent workflow](skills/worldbash/SKILL.md) and [design plan](IMAGE_BLASTER_PLAN.md).
+
+Mesh imports support self-contained GLB 2.0 with embedded textures. They share the
+editor's transforms, parenting, picking, bounds, properties and undo. Independent
+rendering uses an installed Chrome/Chromium (`CHROMIUM_PATH` to override). It renders
+the shared scene in a separate worker, so several agents never fight over the
+human viewport. Color works with points, splats and meshes; mask, ID and linear
+EXR depth passes currently require mesh-only targets.
+
+Commands accept optional actor identities, idempotency keys and field preconditions.
+Jobs retain immutable input bytes. The footer Activity drawer records automatic
+command/job history with Summary, Actions and Trace detail, actor/severity filters,
+search and linked resources. Colored resource badges and optional fading viewport
+markers indicate recent work. These overlays are local editor state, excluded from
+picking, scene bounds, exports and generated views; agents do not manage them.
+
+This build uses project schema version 5. Older projects are rejected explicitly;
+there is no automatic migration or rewriting of existing projects. Open a fresh
+project to try this workflow.

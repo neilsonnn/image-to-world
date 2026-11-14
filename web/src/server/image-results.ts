@@ -35,6 +35,7 @@ export async function applyNanoResult(
   signal: AbortSignal,
 ) {
   if (job.input.kind !== "nano" || !job.input.applyToScene) return;
+  if (job.input.reconstruct && asset.geometrySourceAssetId) return true;
   await store.update((state) => {
     signal.throwIfAborted();
     applyJobResult(state, job, (targets, roots) => {

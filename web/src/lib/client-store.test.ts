@@ -119,6 +119,8 @@ test("editor instances do not share their workspace or errors", () => {
     connected: false,
     hoveredNodeId: null,
     lastOperation: null,
+    activity: [],
+    showPresence: true,
     error: null,
   });
 });

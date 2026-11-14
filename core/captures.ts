@@ -110,6 +110,14 @@ export function captureFrame(
     workspace.assets[asset.depthAssetId].missing
   )
     return fail("depth asset is unavailable");
+  if (
+    image.assetId &&
+    workspace.assets[image.assetId]?.geometrySourceAssetId &&
+    !workspace.assets[image.assetId]?.depthAssetId
+  )
+    return fail(
+      "depth belongs to a different RGB version; reconstruct before using this image as context",
+    );
   if (image.assetId !== points.assetId)
     return fail("image and points use different RGB versions");
   if (

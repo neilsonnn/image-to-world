@@ -1,3 +1,6 @@
+import { PresentationView } from "./PresentationView";
+import { ExportHandoff } from "./ExportHandoff";
+import { CreationDock } from "./CreationDock";
 import { AgentGuide } from "./AgentGuide";
 import "../agent-guide.css";
 import { EditorFooter } from "./EditorFooter";
@@ -17,8 +20,8 @@ import { Button, TextField } from "@radix-ui/themes";
 import { memo, useRef, useState } from "react";
 import type { Camera as CameraData, SceneNode } from "../../../core/schema";
 import {
-  WorldbashProvider,
-  useWorldbashClient,
+  ImageToWorldProvider,
+  useImageToWorldClient,
   useClientState,
   useWorkspace,
   useWorkspaceData,
@@ -60,9 +63,9 @@ const DEFAULT_LAYOUT = {
 
 export function Editor() {
   return (
-    <WorldbashProvider>
+    <ImageToWorldProvider>
       <EditorLoading />
-    </WorldbashProvider>
+    </ImageToWorldProvider>
   );
 }
 
@@ -93,7 +96,7 @@ function WorkspaceTitle() {
 
 function EditorWorkspace() {
   const connected = useClientState((state) => state.connected);
-  const client = useWorldbashClient();
+  const client = useImageToWorldClient();
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [agentGuideOpen, setAgentGuideOpen] = useState(true);
   const [propertiesOpen, setPropertiesOpen] = useState(false);
@@ -251,7 +254,7 @@ function EditorWorkspace() {
         <div className="wordmark">
           <GlobeHemisphereWest weight="duotone" />
           <Wrench />
-          <strong>WORLDBASH</strong>
+          <strong>IMAGE-TO-WORLD</strong>
         </div>
         <WorkspaceTitle />
         <div className="topbar-actions">
@@ -401,6 +404,8 @@ function EditorWorkspace() {
               </Hint>
             </div>
           </ToolbarPopover>
+          <PresentationView />
+          <ExportHandoff />
         </div>
       </header>
 
@@ -543,11 +548,8 @@ function EditorWorkspace() {
         }
         onCommit={(contextWidth) => void updateLayout({ contextWidth })}
       />
-      <aside
-        className="spatial-context-column"
-        aria-label="Spatial context column"
-      >
-        <AtlasDock requestPlacement={requestPlacement} />
+      <aside className="spatial-context-column" aria-label="Creation workflows">
+        <CreationDock requestPlacement={requestPlacement} />
       </aside>
 
       <EditorFooter

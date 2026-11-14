@@ -76,6 +76,8 @@ export function activityTargets(command: Command) {
 }
 export type Operation = { name: string; at: number };
 export const jobNames: Record<JobInput["kind"], string> = {
+  "project.export": "Export portable project",
+  module: "Build procedural object",
   render: "Render scene",
   mask: "Compose masks",
   observe: "Observe image region",

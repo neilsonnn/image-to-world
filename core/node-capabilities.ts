@@ -4,6 +4,7 @@ export type TransformCapabilities = {
   translate: boolean;
   rotate: boolean;
   scale: boolean;
+  uniformScale?: boolean;
 };
 
 const transformOverrides: Partial<
@@ -11,6 +12,9 @@ const transformOverrides: Partial<
 > = {
   camera: { scale: false },
   capture: { scale: false },
+  light: { scale: false },
+  splat: { uniformScale: true },
+  procedural: { uniformScale: true },
 };
 
 export function transformCapabilities(nodes: readonly SceneNode[]) {
@@ -21,9 +25,8 @@ export function transformCapabilities(nodes: readonly SceneNode[]) {
   };
   for (const node of nodes) {
     const overrides = transformOverrides[node.kind];
-    for (const mode of Object.keys(
-      supported,
-    ) as (keyof TransformCapabilities)[])
+    if (overrides?.uniformScale) supported.uniformScale = true;
+    for (const mode of ["translate", "rotate", "scale"] as const)
       supported[mode] &&=
         (overrides?.[mode] ?? true) &&
         (node.transformPermissions?.[mode] ?? true);

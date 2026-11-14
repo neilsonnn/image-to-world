@@ -1,3 +1,5 @@
+import { bakeScene } from "../lib/bake";
+import { PresentationPipeline } from "../lib/presentation";
 import {
   WebGLRenderTarget,
   Scene,
@@ -9,15 +11,18 @@ import {
   NoToneMapping,
   LinearSRGBColorSpace,
   Color,
-  type Mesh,
+  Mesh,
+  Points,
+  ShaderMaterial,
   type Material,
 } from "three";
-import { SparkRenderer } from "@sparkjsdev/spark";
+import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 import { SceneGraph } from "../lib/scene";
 import {
   applyCamera,
   applyCalibratedProjection,
 } from "../lib/viewport-projection";
+import { isVisible } from "../../../core/captures";
 import { isNodeInSubtree } from "../../../core/clips";
 import type { JobInput, Workspace } from "../../../core/schema";
 
@@ -39,6 +44,7 @@ async function render(workspace: Workspace, input: RenderInput) {
     (e) => errors.push(e),
     "#657080",
     "#c4e6ff",
+    renderer,
   );
   const spark = new SparkRenderer({ renderer });
   scene.add(spark);
@@ -53,6 +59,7 @@ async function render(workspace: Workspace, input: RenderInput) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
   const outputs: Record<string, string> = {};
+  let presentation: PresentationPipeline | undefined;
   try {
     workspace = structuredClone(workspace);
     workspace.selection = [];
@@ -71,9 +78,16 @@ async function render(workspace: Workspace, input: RenderInput) {
     graph.sync(workspace);
     await graph.ready(controller.signal);
     if (errors.length) throw new Error(errors.join("\n"));
+    graph.sample(input.time ?? workspace.settings.art.time, camera);
+    if (errors.length) throw new Error(errors.join("\n"));
     graph.hideCaptureHelpers();
     for (const entry of graph.entries.values()) {
-      if (entry.imagePlane) entry.imagePlane.visible = false;
+      if (
+        entry.imagePlane &&
+        (!entry.node.imageSurface ||
+          entry.node.imageSurface.mode === "reference")
+      )
+        entry.imagePlane.visible = false;
       if (
         input.nodeIds &&
         !input.nodeIds.some((id) =>
@@ -99,27 +113,60 @@ async function render(workspace: Workspace, input: RenderInput) {
     report.boundsNote =
       "World-axis bounds from isolated renderer NodeSpatial; excludes editor helpers.";
     const ids: Record<number, string> = {};
+    const bake = input.bake ? await bakeScene(graph) : undefined;
+    if (bake) Object.assign(outputs, bake.outputs);
     for (const pass of input.passes) {
       const changed: Array<[Mesh, Material | Material[]]> = [];
       const materials: Material[] = [];
-      const oldSpace = renderer.outputColorSpace;
+      const oldSpace = renderer.outputColorSpace,
+        oldBackground = scene.background,
+        oldTone = renderer.toneMapping;
       try {
         if (pass !== "color") {
-          const geometry = [...graph.entries.values()].filter(
-            (e) =>
-              e.content &&
-              e.content.visible &&
-              e.root.visible &&
-              (!input.nodeIds ||
-                input.nodeIds.some((id) =>
-                  isNodeInSubtree(workspace, id, e.node.id),
-                )) &&
-              ["mesh", "points", "splat"].includes(e.node.kind),
-          );
-          if (geometry.some((e) => e.node.kind !== "mesh"))
-            throw new Error(
-              `${pass} requires mesh geometry; select mesh nodes explicitly. Point/splat geometry passes are unsupported.`,
-            );
+          scene.background = null;
+          const geometry = [...graph.entries.values()].filter((entry) => {
+            if (
+              !entry.content?.visible ||
+              !isVisible(workspace, entry.node) ||
+              (input.nodeIds &&
+                !input.nodeIds.some((id) =>
+                  isNodeInSubtree(workspace, id, entry.node.id),
+                ))
+            )
+              return false;
+            let drawable = false;
+            entry.content.traverseVisible((object) => {
+              if (
+                object instanceof Mesh ||
+                object instanceof Points ||
+                object instanceof SplatMesh
+              )
+                drawable = true;
+            });
+            return drawable;
+          });
+          for (const entry of geometry)
+            entry.content!.traverseVisible((object) => {
+              if (object instanceof SplatMesh || object instanceof Points)
+                throw new Error(
+                  `${pass} requires mesh geometry; select mesh nodes explicitly. Point/splat geometry passes are unsupported.`,
+                );
+              if (object instanceof Mesh)
+                for (const material of Array.isArray(object.material)
+                  ? object.material
+                  : [object.material]) {
+                  if (
+                    material instanceof ShaderMaterial ||
+                    material.opacity < 1 ||
+                    material.alphaTest > 0 ||
+                    ("transmission" in material &&
+                      Number(material.transmission) > 0)
+                  )
+                    throw new Error(
+                      `${pass} requires opaque ordinary mesh materials; ${entry.node.name} has a shader, cutout, or transmissive material.`,
+                    );
+                }
+            });
           renderer.setClearColor(0, 0);
           renderer.outputColorSpace = LinearSRGBColorSpace;
           renderer.toneMapping = NoToneMapping;
@@ -172,7 +219,14 @@ async function render(workspace: Workspace, input: RenderInput) {
             target.dispose();
           }
         } else {
-          renderer.render(scene, camera);
+          if (pass === "color" && input.presentation) {
+            presentation = new PresentationPipeline(renderer, scene, camera);
+            await presentation.configure(
+              workspace.settings.art,
+              workspace.assets,
+            );
+            presentation.render(width, height);
+          } else renderer.render(scene, camera);
           outputs[pass] = renderer.domElement
             .toDataURL("image/png")
             .split(",")[1];
@@ -181,12 +235,33 @@ async function render(workspace: Workspace, input: RenderInput) {
         for (const [mesh, material] of changed) mesh.material = material;
         materials.forEach((m) => m.dispose());
         renderer.outputColorSpace = oldSpace;
+        scene.background = oldBackground;
+        renderer.toneMapping = oldTone;
         renderer.setClearColor(0x17191e, input.referenceAssetId ? 0 : 1);
       }
     }
     return {
       outputs,
       report,
+      bake: bake
+        ? {
+            omitted: bake.omitted,
+            splatCount: bake.splatCount,
+            meshObjects: bake.meshObjects,
+          }
+        : undefined,
+      modules: Object.fromEntries(
+        [...graph.entries]
+          .filter(([, entry]) => entry.moduleFields)
+          .map(([id, entry]) => [id, { fields: entry.moduleFields }]),
+      ),
+      animations: Object.fromEntries(
+        [...graph.entries]
+          .filter(([, entry]) => entry.animationClips)
+          .map(([id, entry]) => [id, entry.animationClips]),
+      ),
+      time: input.time ?? workspace.settings.art.time,
+      presentation: input.presentation ? workspace.settings.art : null,
       ids,
       camera: input.camera,
       near: input.near,
@@ -195,11 +270,13 @@ async function render(workspace: Workspace, input: RenderInput) {
     };
   } finally {
     clearTimeout(timeout);
+    presentation?.dispose();
     graph.dispose();
     spark.dispose();
     renderer.dispose();
     renderer.forceContextLoss();
   }
 }
-(globalThis as unknown as { worldbashRender: typeof render }).worldbashRender =
-  render;
+(
+  globalThis as unknown as { imageToWorldRender: typeof render }
+).imageToWorldRender = render;

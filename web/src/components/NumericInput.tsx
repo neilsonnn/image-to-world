@@ -6,6 +6,7 @@ export type NumericInputProps = {
   onCommit: (value: number) => void;
   onPreview?: (value: number | undefined) => void;
   label?: string;
+  inlineLabel?: boolean;
   min?: number;
   max?: number;
   step?: number;
@@ -22,6 +23,7 @@ export function NumericInput({
   onCommit,
   onPreview,
   label,
+  inlineLabel = true,
   min,
   max,
   step = 0.05,
@@ -132,7 +134,7 @@ export function NumericInput({
         if (event.key === "ArrowUp" || event.key === "ArrowDown") commit();
       }}
     >
-      {label && (
+      {label && inlineLabel && (
         <TextField.Slot side="left">
           <span
             className="numeric-scrub-label"

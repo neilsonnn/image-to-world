@@ -1,8 +1,27 @@
-# worldbash
+# image-to-world
 
-worldbash is a local spatial studio for editing images, reconstructing RGBD scenes,
-and generating new views and camera-path videos. The browser and CLI share a
-filesystem workspace. Generation runs in the background while you keep editing.
+image-to-world is an **asset creation toolkit**: an open 3D canvas where you and your
+agent turn images and ideas into beautiful, portable things. Mix authored Three.js,
+meshes, Gaussian splats, pixel art, images, animation, and generation in one scene.
+The browser and CLI share a filesystem project, undoable commands, background jobs,
+and an activity feed. World Labs Atlas is one powerful workflow for environments;
+local creation and presentation need no provider key.
+
+- **References:** import images at their native dimensions and place them without a
+  generation call. Explicitly solve depth when a reconstruction workflow needs it.
+- **Build:** make primitives and lights, import GLB assets, edit materials, or give
+  your agent a live procedural node with typed parameters and deterministic animation.
+- **Present:** compose with a separate camera, environment maps, lighting, shadows,
+  bloom, pixel edges and lens distortion. Studio, cinematic, and pixel presets give
+  useful starting points; pixel mode uses a solid background and disables bloom.
+- **Export:** copy a destination prompt for your agent, bake meshes and Gaussian
+  splats, or collect a static web player with the scene, assets and procedural source.
+
+See the [reproducible demo and verification](IMAGE_TO_WORLD_DEMO.md).
+Read [the design plan](IMAGE_TO_WORLD_PLAN.md) for architecture and scope. Repository
+name remains `neilsonnn/worldbash`; the application and CLI are `image-to-world`.
+This version uses project schema 6 and deliberately rejects older projects. Create a
+new project to try it; the app does not migrate or overwrite existing projects.
 
 ## Run
 
@@ -23,8 +42,8 @@ without either key.
    entries; add any variable by name. Values stay masked, and existing values are
    never sent back to the browser. Blank replacement fields keep current values;
    removing a saved variable restores any inherited process value.
-   Saves use permissions `600` in `~/.config/worldbash/env` (or
-   `$XDG_CONFIG_HOME/worldbash/env`), outside project state and undo history.
+   Saves use permissions `600` in `~/.config/image-to-world/env` (or
+   `$XDG_CONFIG_HOME/image-to-world/env`), outside project state and undo history.
    Saved variables override shell variables and checkout `.env`. Provider keys,
    `WLT_API_BASE_URL`, `FFMPEG_PATH`, and `FFPROBE_PATH` apply immediately;
    startup settings such as the workspace directory apply next launch.
@@ -33,12 +52,12 @@ without either key.
 3. Open a project:
 
    ```sh
-   bun run worldbash open ~/Projects/my-scene
+   bun run image-to-world open ~/Projects/my-scene
    ```
 
    The launcher builds on first use or after source changes, starts the local
    server, and opens your browser. Keep the terminal open; Ctrl+C stops the server.
-   Without a project argument, it uses `WORLDBASH_WORKSPACE` or this checkout's `.worldbash/`.
+   Without a project argument, it uses `IMAGE_TO_WORLD_WORKSPACE` or this checkout's `.image-to-world/`.
    The launcher defaults to port 4310 and ignores the generic `PORT` variable.
    A matching server on the requested port is reused. For another project, use
    `--port 4311`; pass `--url http://127.0.0.1:4311` to subsequent CLI commands.
@@ -47,8 +66,8 @@ without either key.
 4. Check setup and CLI access:
 
    ```sh
-   bun run worldbash doctor ~/Projects/my-scene
-   bun run worldbash status
+   bun run image-to-world doctor ~/Projects/my-scene
+   bun run image-to-world status
    ```
 
 `doctor` reports configuration without contacting providers or printing secrets.
@@ -71,8 +90,9 @@ not roll back project data, and older versions may reject newer project formats.
 ## Editor layout and shortcuts
 
 The outline and project assets stay on the left, properties on the right, and
-Atlas and Image tabs below the viewport. Image history occupies the image editor's
-right column. Atlas context stays directly accessible; additional generation tools
+the image editor below the viewport. The far-right creation dock offers References,
+Build, and Atlas. Image history occupies the image editor's right column. Presentation
+and Export live in the top bar; additional generation tools
 and Jobs open from the top toolbar. Drag the dividers to
 resize panes, or focus a divider and use arrows, Home, or End. Workspace settings
 includes Reset layout. Sizes, collapsed branches, asset view, and selection persist. Narrow embedded
@@ -111,11 +131,11 @@ undo and macOS Trash. Files used by scene nodes, geometry, image layers, or acti
 jobs must be released first. Restore refuses to overwrite a replacement file.
 
 ```sh
-bun run worldbash assets --search "room image"
-bun run worldbash assets trash <asset-id> <another-id>
-bun run worldbash assets --trash
-bun run worldbash assets restore <asset-id>
-bun run worldbash assets reveal <asset-id>
+bun run image-to-world assets --search "room image"
+bun run image-to-world assets trash <asset-id> <another-id>
+bun run image-to-world assets --trash
+bun run image-to-world assets restore <asset-id>
+bun run image-to-world assets reveal <asset-id>
 ```
 
 Viewport buttons control RGB visibility, opacity/distance, point style/size,
@@ -123,11 +143,11 @@ frustums, and grid independently. Transform fields accept arrow steps (Shift for
 coarse, Alt for fine), label scrubbing, Enter to commit, and Escape to cancel.
 
 ```sh
-bun run worldbash scene move <node-id> --parent <parent-id> --before <sibling-id>
-bun run worldbash scene duplicate <node-id>
-bun run worldbash undo
-bun run worldbash redo
-bun run worldbash image undo <asset-id>
+bun run image-to-world scene move <node-id> --parent <parent-id> --before <sibling-id>
+bun run image-to-world scene duplicate <node-id>
+bun run image-to-world undo
+bun run image-to-world redo
+bun run image-to-world image undo <asset-id>
 ```
 
 `selection.set` accepts `primaryId` and `anchorId`. Use `edit.batch` to combine
@@ -171,13 +191,13 @@ The same workflow is available from the CLI. Replace the example asset IDs with
 IDs returned by `import`, `assets`, or `image history`:
 
 ```sh
-bun run worldbash import /absolute/path/to/photo.png
-bun run worldbash image open <asset-id>
-bun run worldbash image edit <asset-id> --prompt 'Change the light to blue hour' --model 2
-bun run worldbash jobs wait <job-id>
-bun run worldbash image history <asset-id>
-bun run worldbash image activate <output-asset-id>
-bun run worldbash image edit <output-asset-id> --prompt 'Add climbing plants' --reference <reference-id>
+bun run image-to-world import /absolute/path/to/photo.png
+bun run image-to-world image open <asset-id>
+bun run image-to-world image edit <asset-id> --prompt 'Change the light to blue hour' --model 2
+bun run image-to-world jobs wait <job-id>
+bun run image-to-world image history <asset-id>
+bun run image-to-world image activate <output-asset-id>
+bun run image-to-world image edit <output-asset-id> --prompt 'Add climbing plants' --reference <reference-id>
 ```
 
 `jobs wait` waits for the image job; read its `childJobId` and wait for that job
@@ -223,11 +243,11 @@ remaining camera, image, and points at submission and report missing, ambiguous,
 or misaligned components. Depth comes from the active points child.
 
 ```sh
-bun run worldbash pose <image-asset-id>
-bun run worldbash jobs wait <job-id>
-bun run worldbash scene
-bun run worldbash atlas <posed-node-id> --camera camera.json --prompt 'Warm afternoon light'
-bun run worldbash capture --camera camera.json --wait
+bun run image-to-world pose <image-asset-id>
+bun run image-to-world jobs wait <job-id>
+bun run image-to-world scene
+bun run image-to-world atlas <posed-node-id> --camera camera.json --prompt 'Warm afternoon light'
+bun run image-to-world capture --camera camera.json --wait
 ```
 
 `schema camera` describes pixel intrinsics and camera-to-world pose. Quaternions
@@ -253,25 +273,25 @@ paste with Cmd/Ctrl+V; text inputs retain normal clipboard behavior.
 The CLI chooses explicitly without an interactive prompt:
 
 ```sh
-bun run worldbash scene place <image-a> <image-b> --reconstruct
-bun run worldbash scene place <image-a> <image-b>
+bun run image-to-world scene place <image-a> <image-b> --reconstruct
+bun run image-to-world scene place <image-a> <image-b>
 ```
 
-Drop image files or library assets into the viewport to place them at its current
-yaw and floor position. Unposed images queue `images2PosedRGBD`; existing posed
-assets can be instanced immediately. Each capture is a movable parent with camera,
-image and point-cloud children. Clip boxes are added explicitly; posing never creates them. Estimated camera height and orientation
+Drop image files or library assets into the viewport to place local references.
+Use `--mode individual` to explicitly queue `images2PosedRGBD`, or choose joint
+reconstruction for related views. Each solved capture is a movable parent with
+camera, image and point-cloud children. Clip boxes are added explicitly; posing never creates them. Estimated camera height and orientation
 remain on the children. Moving the parent during generation preserves that edit.
 
 ```sh
-bun run worldbash scene place <asset-id> --camera camera.json
-bun run worldbash context list
-bun run worldbash camera view <capture-id>
-bun run worldbash camera free
-bun run worldbash context solo <capture-id>
-bun run worldbash context solo
-bun run worldbash atlas <capture-id> --camera target-camera.json
-bun run worldbash splats --wait --timeout 1800
+bun run image-to-world scene place <asset-id> --mode individual --camera camera.json
+bun run image-to-world context list
+bun run image-to-world camera view <capture-id>
+bun run image-to-world camera free
+bun run image-to-world context solo <capture-id>
+bun run image-to-world context solo
+bun run image-to-world atlas <capture-id> --camera target-camera.json
+bun run image-to-world splats --wait --timeout 1800
 ```
 
 `splats` (or **Make splats** below Render in the Spatial context column) sends the
@@ -322,14 +342,14 @@ does not expose the legacy known-camera single-image registration operation.
    does not create duplicate captures.
 
 ```sh
-bun run worldbash scene add path --name 'Courtyard move'
-bun run worldbash path keyframe <path-id> --file start-camera.json
-bun run worldbash path keyframe <path-id> --file end-camera.json
-bun run worldbash video --path <path-id> --target-frames 36 --fps 12 --keyframes 4
-bun run worldbash video frames <keyframe-job-id>
-bun run worldbash video --source-job <keyframe-job-id>
-bun run worldbash video integrate <dense-job-id> --indices 0,4,8
-bun run worldbash video reconstruct <dense-job-id>
+bun run image-to-world scene add path --name 'Courtyard move'
+bun run image-to-world path keyframe <path-id> --file start-camera.json
+bun run image-to-world path keyframe <path-id> --file end-camera.json
+bun run image-to-world video --path <path-id> --target-frames 36 --fps 12 --keyframes 4
+bun run image-to-world video frames <keyframe-job-id>
+bun run image-to-world video --source-job <keyframe-job-id>
+bun run image-to-world video integrate <dense-job-id> --indices 0,4,8
+bun run image-to-world video reconstruct <dense-job-id>
 ```
 
 Frame indices refer to positions in the full sampled sequence, including sparse keyframe
@@ -341,7 +361,7 @@ length (`target frames / FPS`). Adding, removing, or reordering poses preserves
 the target count. The per-keyframe order control is one-based; CLI `--index` is
 zero-based. `path keyframe` appends; `--id` replaces; `--id` with `--index` reorders.
 
-worldbash uses project schema version 4. During this buildout, schema changes are
+image-to-world uses project schema version 4. During this buildout, schema changes are
 breaking and there are no migrations or compatibility readers. Create a fresh
 project after a schema change; existing project files are left untouched.
 Camera nodes store their pose in `transform` and lens intrinsics in `projection`.
@@ -357,9 +377,9 @@ frames at up to 1 FPS, capped at 60 across the duration. The CLI exposes samplin
 controls and can reconstruct images directly:
 
 ```sh
-bun run worldbash reconstruct --video <video-asset-id> --fps 2 --max-frames 60
-bun run worldbash reconstruct <image-asset-id> <image-asset-id>
-bun run worldbash jobs wait <job-id>
+bun run image-to-world reconstruct --video <video-asset-id> --fps 2 --max-frames 60
+bun run image-to-world reconstruct <image-asset-id> <image-asset-id>
+bun run image-to-world jobs wait <job-id>
 ```
 
 Reconstruction uses public `images2PosedRGBD`. Uploaded video frames are solved
@@ -391,7 +411,7 @@ Up to three provider jobs run concurrently. Jobs preserve remote operation IDs
 and resume polling after restart. `jobs retry` resumes the same remote request,
 which is useful after download or connection failures. A terminal provider error
 may need a fresh generation with **Reuse** or another submit command. Cancellation
-stops local work; World Labs may still finish and bill a submitted task. worldbash also
+stops local work; World Labs may still finish and bill a submitted task. image-to-world also
 requests FAL cancellation when a request ID is known. If FAL submission was
 interrupted before its ID was saved, check FAL history before explicitly submitting
 again; retry will not blindly create another paid request.
@@ -418,7 +438,7 @@ project fields they read. Commands and filesystem persistence remain server-owne
 Camera animation and GPU resources stay in the renderer.
 Shared collection navigation handles outline, asset, and history selection. Provider work belongs in
 `web/src/server`, outside the browser bundle. The agent skill is
-[`skills/worldbash/SKILL.md`](skills/worldbash/SKILL.md).
+[`skills/image-to-world/SKILL.md`](skills/image-to-world/SKILL.md).
 
 ```sh
 bun run check
@@ -453,9 +473,9 @@ the Frame prevents late results from recreating it. Requires `FAL_KEY` and
 The CLI uses the same workflow:
 
 ```sh
-bun run worldbash image create --prompt 'An abandoned Soviet laboratory' --model schnell
+bun run image-to-world image create --prompt 'An abandoned Soviet laboratory' --model schnell
 # Optionally supply the placement camera:
-bun run worldbash image create --prompt 'A tiled laboratory' --camera camera.json
+bun run image-to-world image create --prompt 'A tiled laboratory' --camera camera.json
 ```
 
 `core/models.ts` owns image model IDs, labels, aliases, and shared options for the
@@ -495,25 +515,25 @@ These helpers can be combined in any order appropriate to the scene.
 
 ```sh
 # Discover the interface without guessing fields.
-bun run worldbash --help
-bun run worldbash schema aim
-bun run worldbash schema jobs
-bun run worldbash schema inspection
+bun run image-to-world --help
+bun run image-to-world schema aim
+bun run image-to-world schema jobs
+bun run image-to-world schema inspection
 
 # Resolve a camera without editing the scene. Coordinates can be world-space
 # or local to any scene node, including a transformed Frame or group.
-bun run worldbash camera solve --position 2,1.6,3 --look-at 0,1,-4 --fov 65 --out camera.json
-bun run worldbash camera place --position 2,1.6,3 --look-at 0,1,-4 --relative-to <node-id> --name 'Window aisle'
+bun run image-to-world camera solve --position 2,1.6,3 --look-at 0,1,-4 --fov 65 --out camera.json
+bun run image-to-world camera place --position 2,1.6,3 --look-at 0,1,-4 --relative-to <node-id> --name 'Window aisle'
 
 # Full scene report with bounds from the open viewport's NodeSpatial providers.
-bun run worldbash scene inspect --out inspection.json
+bun run image-to-world scene inspect --out inspection.json
 # Structural information works with no browser. Missing bounds are explicit.
-bun run worldbash scene inspect --headless
+bun run image-to-world scene inspect --headless
 
 # One contact sheet for all Frames, a selection, or completed generation rounds.
-bun run worldbash scene preview --out room.png
-bun run worldbash scene preview <frame-id> <frame-id> --columns 2 --out selected.png
-bun run worldbash scene preview --jobs <job-id>,<job-id> --out round.png
+bun run image-to-world scene preview --out room.png
+bun run image-to-world scene preview <frame-id> <frame-id> --columns 2 --out selected.png
+bun run image-to-world scene preview --jobs <job-id>,<job-id> --out round.png
 ```
 
 `camera solve` emits the standard camera JSON accepted by `atlas --camera`,
@@ -539,7 +559,7 @@ Images are letterboxed without cropping. `--out` also exports a local copy and
 refuses to overwrite an existing file. Preview/inspection results are normal
 assets, available through the usual export command. `schema commands` includes
 `camera.aim` and `jobs.submit`; `schema jobs` describes both new local job kinds.
-The bundled [Worldbash agent skill](skills/worldbash/SKILL.md) teaches the same paths.
+The bundled [image-to-world agent skill](skills/image-to-world/SKILL.md) teaches the same paths.
 
 ## Image decomposition and parallel agents
 
@@ -548,7 +568,7 @@ Posed views can become independently editable mesh objects. The CLI provides
 inputs through `generate`. `models` discovers endpoints and their schemas. Existing
 image edits support asset-only outputs, explicit target captures, and unchanged
 pixel masks; scene replacements wait for reconstructed depth. See the
-[agent workflow](skills/worldbash/SKILL.md) and [design plan](IMAGE_BLASTER_PLAN.md).
+[agent workflow](skills/image-to-world/SKILL.md) and [design plan](IMAGE_BLASTER_PLAN.md).
 
 Mesh imports support self-contained GLB 2.0 with embedded textures. They share the
 editor's transforms, parenting, picking, bounds, properties and undo. Independent
@@ -567,3 +587,51 @@ picking, scene bounds, exports and generated views; agents do not manage them.
 This build uses project schema version 5. Older projects are rejected explicitly;
 there is no automatic migration or rewriting of existing projects. Open a fresh
 project to try this workflow.
+
+## Authored assets and portable scenes
+
+```sh
+bun run image-to-world module add examples/moon-garden.ts --name 'Moon garden'
+bun run image-to-world art cinematic
+bun run image-to-world scene inspect --rendered --out inspection.json
+bun run image-to-world render <camera-node-id> --presentation --time 2 --bake --wait
+bun run image-to-world export project --out /absolute/path/to/new-web-scene
+```
+
+Modules default-export `{ parameters?, create(context) }`. Return a host Three.js
+`Object3D`, optional `sample({time, camera})`, local `bounds()`, and `dispose()`.
+`image-to-world/runtime` provides types and `defineSceneModule`. Ordinary `three`
+and `@sparkjsdev/spark` imports share the editor's engine instances; Three addons
+and installed dependencies can be bundled. Runtime files are explicit asset IDs.
+See [the code skill](skills/image-to-world-code/SKILL.md),
+[moon garden](examples/moon-garden.ts), and [pixel sculpture](examples/pixel-sculpture.ts).
+
+`module update <node> source.ts --watch` compiles changes, snapshots source/dependencies,
+preflights in an isolated browser renderer, and replaces the binding undoably only
+when successful. The newest submitted build owns that destination. Other agents
+can work on separate nodes and render independently without moving your viewport.
+Modules are **trusted project JavaScript**, not a sandbox for untrusted downloaded
+code. They can use browser APIs. A failed synchronous infinite loop is bounded in
+headless preflight, but live code still runs on the editor's main thread.
+
+`export project` writes a new directory with `index.html`, `scene-player.js`,
+`workspace.json`, and local assets/source. Serve it over HTTP; it needs neither the
+editor server nor provider credentials. The player shares the presentation renderer.
+Bake outputs are a fixed-time GLB and Gaussian PLY, with omissions reported in the
+render manifest. Custom shaders, live behavior and screen-space effects require
+the web player or adaptation by your agent. Lens distortion is a presentation
+warp; geometric depth and measurements always use the calibrated pinhole camera.
+Animation clips can be selected on GLB nodes; a fixed-time bake does not export
+animation tracks. Unknown dependencies fetched by arbitrary custom code cannot be
+collected automatically: declare assets and bundle code dependencies.
+
+Agent skills: [general creation](skills/image-to-world/SKILL.md),
+[authored scene code](skills/image-to-world-code/SKILL.md), and
+[Atlas environments](skills/image-to-world-atlas/SKILL.md).
+
+Opaque authored geometry can also seed Atlas without an image-posing request:
+`render <camera-node-id> --targets <geometry-node-id> --rgbd --wait` creates an
+undoable aligned RGBD capture from measured depth. Splats, point clouds, cutouts,
+transmission and custom shaders are rejected for this path. Pixels without geometry
+remain depth-invalid. Ordinary non-Gaussian PLY is retained as a library file;
+convert it to GLB or author an explicit point renderer before placing it.

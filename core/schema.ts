@@ -1,4 +1,14 @@
 import {
+  primitiveSchema,
+  surfaceSchema,
+  lightSchema,
+  proceduralSchema,
+  imageSurfaceSchema,
+  animationSchema,
+  artDirectionSchema,
+  parameterValue,
+} from "./creation";
+import {
   defaultImageModels,
   modelIds,
   imageEditResolutions,
@@ -115,6 +125,13 @@ export const assetSchema = z.object({
       "raw-result",
     ])
     .optional(),
+  provenance: z
+    .object({
+      url: z.string().optional(),
+      creator: z.string().optional(),
+      license: z.string().optional(),
+    })
+    .optional(),
   contentHash: z.string().optional(),
   parentAssetId: z.string().optional(),
   referenceAssetIds: z.array(z.string()).optional(),
@@ -169,6 +186,9 @@ export const nodeSchema = z
       "path",
       "clip",
       "video",
+      "primitive",
+      "light",
+      "procedural",
     ]),
     parentId: z.string().nullable().default(null),
     order: number.int().nonnegative().optional(),
@@ -184,6 +204,12 @@ export const nodeSchema = z
       })
       .strict()
       .optional(),
+    primitive: primitiveSchema.optional(),
+    surface: surfaceSchema.optional(),
+    light: lightSchema.optional(),
+    procedural: proceduralSchema.optional(),
+    imageSurface: imageSurfaceSchema.optional(),
+    animation: animationSchema.optional(),
     geometryAssetId: z.string().optional(),
     jobId: z.string().optional(),
     clipInitialized: z.boolean().optional(),
@@ -224,7 +250,7 @@ export const panelIds = [
 ] as const;
 export const layoutSchema = z.object({
   agentGuideWidth: number.min(160).max(900).default(240),
-  contextWidth: number.min(96).max(500).default(144),
+  contextWidth: number.min(96).max(500).default(240),
   rightWidth: number.min(220).max(600).default(280),
   leftSplit: number.min(0.2).max(0.8).default(0.6),
   historyWidth: number.min(110).max(320).default(160),
@@ -259,6 +285,8 @@ export const collectionSettingsSchema = z.object({
     .default(["image", "splat", "mesh", "video", "file"]),
 });
 export const settingsSchema = z.object({
+  art: artDirectionSchema.default({}),
+  workflow: z.enum(["references", "build", "atlas"]).default("references"),
   atlas: atlasContextSchema.default({}),
   atlasPanel: z
     .object({
@@ -328,7 +356,24 @@ export const settingsSchema = z.object({
   fps: number.int().min(1).max(60),
   targetFrameCount: number.int().min(2).max(600),
 });
+export const projectExportInputSchema = z.object({
+  kind: z.literal("project.export"),
+  includeLibrary: z.boolean().default(true),
+});
+export const moduleInputSchema = z.object({
+  kind: z.literal("module"),
+  nodeId: z.string(),
+  sourceAssetId: z.string(),
+  bundleAssetId: z.string(),
+  assetIds: z.array(z.string()).default([]),
+  parameters: z.record(parameterValue).default({}),
+  seed: number.int().default(1),
+});
 export const renderInputSchema = z.object({
+  time: number.min(0).optional(),
+  presentation: z.boolean().default(false),
+  bake: z.boolean().default(false),
+  integrate: z.boolean().default(false),
   kind: z.literal("render"),
   camera: cameraSchema,
   nodeIds: z.array(z.string()).min(1).optional(),
@@ -377,6 +422,8 @@ export const modelInputSchema = z.object({
   input: z.record(z.unknown()),
 });
 export const jobInputSchema = z.discriminatedUnion("kind", [
+  projectExportInputSchema,
+  moduleInputSchema,
   renderInputSchema,
   observeInputSchema,
   fitInputSchema,
@@ -395,6 +442,7 @@ export const jobInputSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("image"),
+    outputMode: z.enum(["asset", "reference", "pose"]).default("asset"),
     prompt: z.string().trim().min(1),
     model: z.enum(modelIds("create")).default(defaultImageModels.create),
     placement: cameraSchema,
@@ -566,7 +614,7 @@ export const workspaceSchema = z.object({
   selectionAnchor: z.string().nullable().default(null),
   undo: z.array(editSchema).max(100).default([]),
   redo: z.array(editSchema).max(100).default([]),
-  version: z.literal(5),
+  version: z.literal(6),
   revision: number.int().nonnegative(),
   name: z.string().min(1),
   imageDrafts: z.record(imageDraftSchema).default({}),
@@ -601,7 +649,7 @@ export function emptyWorkspace(): Workspace {
     selectionAnchor: null,
     undo: [],
     redo: [],
-    version: 5,
+    version: 6,
     revision: 0,
     name: "Untitled workspace",
     imageDrafts: {},
@@ -613,6 +661,8 @@ export function emptyWorkspace(): Workspace {
     jobs: {},
     selection: [],
     settings: {
+      art: artDirectionSchema.parse({}),
+      workflow: "references",
       layout: layoutSchema.parse({}),
       display: displaySchema.parse({}),
       collections: collectionSettingsSchema.parse({}),
@@ -683,6 +733,8 @@ const localEditSchema = z.discriminatedUnion("type", [
     patch: assetSchema
       .pick({
         name: true,
+        provenance: true,
+        sourceAssetIds: true,
         camera: true,
         depthAssetId: true,
         confidenceAssetId: true,
@@ -705,6 +757,8 @@ const localEditSchema = z.discriminatedUnion("type", [
 ]);
 
 export const generationSchema = z.discriminatedUnion("kind", [
+  projectExportInputSchema,
+  moduleInputSchema,
   modelInputSchema,
   renderInputSchema,
   observeInputSchema,
@@ -712,6 +766,7 @@ export const generationSchema = z.discriminatedUnion("kind", [
   maskInputSchema,
   z.object({
     kind: z.literal("image.create"),
+    outputMode: z.enum(["asset", "reference", "pose"]).default("asset"),
     prompt: z.string().trim().min(1),
     model: z.enum(modelIds("create")).default(defaultImageModels.create),
     placement: cameraSchema.optional(),
@@ -825,7 +880,7 @@ export const commandSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("assets.place"),
-    mode: z.enum(["individual", "reconstruct"]).optional(),
+    mode: z.enum(["reference", "individual", "reconstruct"]).optional(),
     assetIds: z.array(z.string()).min(1),
     camera: cameraSchema.optional(),
     parentId: z.string().nullable().optional(),
@@ -888,5 +943,10 @@ export type CommandResult = {
   jobId?: string;
   jobIds?: string[];
 };
-export const assetUrl = (asset: Asset) =>
+let locateAsset = (asset: Asset) =>
   `/api/assets/${encodeURIComponent(asset.id)}?v=${asset.modifiedAt}`;
+/** Standalone render hosts supply local asset paths; scene data still uses IDs. */
+export const setAssetLocation = (resolver: (asset: Asset) => string) => {
+  locateAsset = resolver;
+};
+export const assetUrl = (asset: Asset) => locateAsset(asset);

@@ -2,6 +2,8 @@ import {
   BoundingBox,
   Camera,
   Cube,
+  Code,
+  Sun,
   DotsNine,
   File,
   FrameCorners,
@@ -17,6 +19,9 @@ import { Hint } from "./ui";
 
 type Kind = SceneNode["kind"] | Asset["kind"];
 export const nodePresentation = {
+  primitive: { label: "Primitive", icon: Cube },
+  light: { label: "Light", icon: Sun },
+  procedural: { label: "Procedural", icon: Code },
   capture: { label: "Frame", icon: FrameCorners },
   camera: { label: "Camera", icon: Camera },
   points: { label: "Points", icon: DotsNine },

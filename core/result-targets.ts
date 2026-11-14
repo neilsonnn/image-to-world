@@ -17,6 +17,8 @@ export function resultTarget(
 }
 
 export function claimResultTargets(workspace: Workspace, job: Job) {
+  if (job.input.kind === "module")
+    workspace.resultOwners[`module:${job.input.nodeId}`] = job.id;
   for (const target of job.applyTargets ?? [])
     workspace.resultOwners[`node:${target.nodeId}`] = job.id;
   for (const root of job.applyRoots)
@@ -100,4 +102,31 @@ export function applyJobResult(
     : undefined;
   if (complete) workspace.jobs[job.id].applied = true;
   return changed;
+}
+
+export function applyModuleResult(
+  workspace: Workspace,
+  job: Job,
+  procedural: NonNullable<SceneNode["procedural"]>,
+) {
+  if (job.input.kind !== "module") throw new Error("Expected module build");
+  const current = workspace.jobs[job.id];
+  if (current.applied || current.status === "cancelled") return false;
+  if (workspace.resultOwners[`module:${job.input.nodeId}`] !== job.id) {
+    current.applied = true;
+    return false;
+  }
+  const node = workspace.nodes[job.input.nodeId];
+  if (!node || node.kind !== "procedural") {
+    current.applicationError = "Procedural destination was deleted or replaced";
+    current.applied = true;
+    return false;
+  }
+  applyCommand(workspace, {
+    type: "nodes.patch",
+    id: node.id,
+    patch: { procedural },
+  });
+  workspace.jobs[job.id].applied = true;
+  return true;
 }

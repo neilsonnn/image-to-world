@@ -6,7 +6,7 @@ import {
   actorColor,
   type Activity,
 } from "../../../core/activity";
-import { useClientState, useWorldbashClient } from "../lib/client";
+import { useClientState, useImageToWorldClient } from "../lib/client";
 import {
   Button,
   Checkbox,
@@ -22,7 +22,7 @@ const empty: Activity[] = [];
 export function ActivityFeed({ fallback }: { fallback: string }) {
   const events = useClientState((s) => s.activity ?? empty);
   const showPresence = useClientState((s) => s.showPresence !== false);
-  const client = useWorldbashClient();
+  const client = useImageToWorldClient();
   const [open, setOpen] = useState(false),
     [detail, setDetail] = useState("summary");
   const [actor, setActor] = useState(""),

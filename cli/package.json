@@ -1,8 +1,8 @@
 {
-  "name": "@worldbash/cli",
+  "name": "@image-to-world/cli",
   "private": true,
   "type": "module",
   "bin": {
-    "worldbash": "./index.ts"
+    "image-to-world": "./index.ts"
   }
 }

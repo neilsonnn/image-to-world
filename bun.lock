@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "worldbash",
+      "name": "image-to-world",
       "dependencies": {
         "@fal-ai/client": "^1.10.1",
         "@napi-rs/canvas": "^1.0.9",
@@ -34,13 +34,13 @@
       },
     },
     "cli": {
-      "name": "@worldbash/cli",
+      "name": "@image-to-world/cli",
       "bin": {
-        "worldbash": "./index.ts",
+        "image-to-world": "./index.ts",
       },
     },
     "web": {
-      "name": "@worldbash/web",
+      "name": "@image-to-world/web",
     },
   },
   "packages": {
@@ -442,9 +442,9 @@
 
     "@webgpu/types": ["@webgpu/types@0.1.72", "", {}, "sha512-0cF7RFM2edNoiIS1ODJp0/Gzv4/xSXhwoR0YCza+OWpJWtn4wmo9DvK91aLlH9+uUnwIriP7ZiC3WitmyhuzBw=="],
 
-    "@worldbash/cli": ["@worldbash/cli@workspace:cli"],
+    "@image-to-world/cli": ["@image-to-world/cli@workspace:cli"],
 
-    "@worldbash/web": ["@worldbash/web@workspace:web"],
+    "@image-to-world/web": ["@image-to-world/web@workspace:web"],
 
     "@worldlabsai/client": ["@worldlabsai/client@0.7.0", "", {}, "sha512-ffzHm3infXLZ0d+kj4iDC2+awSxUJf0oJFkpmYZdWVk1WVwwiJHONZkgpYi5W2pmWSJWNWzGyVrhiqkrs9q5rQ=="],
 

@@ -1,3 +1,7 @@
+import { exportSnapshot } from "./portable";
+import { applyModuleResult } from "../../../core/result-targets";
+import { proceduralSchema } from "../../../core/creation";
+import { renderInputSchema } from "../../../core/schema";
 import { loadImage } from "@napi-rs/canvas";
 import { captureRoot, sceneCamera } from "../../../core/captures";
 import { cameraFromWorld, cameraMatrix } from "../../../core/cameras";
@@ -99,7 +103,7 @@ export class JobRunner {
     const parsed = jobInputSchema.parse(input);
     if (parsed.kind === "image") {
       falClient();
-      worldLabs();
+      if (parsed.outputMode === "pose") worldLabs();
     }
     let snapshot = this.store.snapshot();
     const sheetItems =
@@ -308,10 +312,28 @@ export class JobRunner {
       throw new Error("Choose images or video to reconstruct");
     const pinnedAssets = await this.store.pinAssets(
       snapshot,
-      parsed,
-      ["atlas", "splats", "video", "render", "observe", "fit"].includes(
-        parsed.kind,
-      ),
+      parsed.kind === "project.export" && parsed.includeLibrary
+        ? {
+            assetIds: Object.values(snapshot.assets)
+              .filter(
+                (asset) =>
+                  !asset.missing &&
+                  !asset.trashedAt &&
+                  asset.role !== "raw-result",
+              )
+              .map((asset) => asset.id),
+          }
+        : parsed,
+      [
+        "atlas",
+        "splats",
+        "video",
+        "render",
+        "observe",
+        "fit",
+        "module",
+        "project.export",
+      ].includes(parsed.kind),
     );
     const index = imageIndex(snapshot);
     const sourceIds =
@@ -335,7 +357,10 @@ export class JobRunner {
       checkPreconditions(state, context);
       if (parentJob && state.jobs[parentJob.id]?.status === "cancelled")
         throw new Error("Parent generation was cancelled");
-      if (parsed.kind === "pose" || parsed.kind === "image") {
+      if (
+        parsed.kind === "pose" ||
+        (parsed.kind === "image" && parsed.outputMode === "pose")
+      ) {
         parsed.placement ??= snapshot.settings.viewportCamera;
         if (parentJob) {
           parsed.nodeIds = (parentJob.applyTargets ?? []).map(
@@ -384,7 +409,8 @@ export class JobRunner {
             ? []
             : resultTargets(
                 state,
-                parsed.kind === "pose" || parsed.kind === "image"
+                parsed.kind === "pose" ||
+                  (parsed.kind === "image" && parsed.outputMode === "pose")
                   ? parsed.nodeIds!.map((id) => state.nodes[id])
                   : targetIds.map((id) => snapshot.nodes[id]),
               )),
@@ -419,7 +445,7 @@ export class JobRunner {
     assetIds: string[],
     camera?: Camera,
     destination?: { parentId?: string | null; beforeId?: string | null },
-    mode: "individual" | "reconstruct" = "individual",
+    mode: "reference" | "individual" | "reconstruct" = "reference",
     context: CommandContext = {},
   ) {
     const snapshot = this.store.snapshot();
@@ -460,6 +486,34 @@ export class JobRunner {
     }
     for (const asset of assets) {
       if (reconstruct && asset.kind === "image") continue;
+      if (asset.kind === "image" && mode === "reference") {
+        const image = await loadImage(
+          (await this.store.assetFile(asset.id)).file,
+        );
+        const f =
+          (placement.intrinsics.fy / placement.intrinsics.height) *
+          image.height;
+        const camera = {
+          ...placement,
+          intrinsics: {
+            width: image.width,
+            height: image.height,
+            fx: f,
+            fy: f,
+            cx: image.width / 2,
+            cy: image.height / 2,
+          },
+        };
+        const id = `node_${randomUUID()}`;
+        const nodes = createCapture({ ...asset, camera }, id, camera).filter(
+          (node) => node.kind !== "points",
+        );
+        await this.store.update((state) =>
+          applyCommand(state, { type: "nodes.put", nodes }),
+        );
+        placed.push(id);
+        continue;
+      }
       if (asset.kind === "image" && !(asset.camera && asset.depthAssetId)) {
         const jobId = await this.submit(
           {
@@ -539,7 +593,7 @@ export class JobRunner {
       const task = this.store
         .withJobAssets(job, () => this.run(job.id, controller.signal))
         .catch((error) =>
-          console.error("worldbash job could not save its status:", error),
+          console.error("image-to-world job could not save its status:", error),
         )
         .finally(() => {
           this.active.delete(job.id);
@@ -615,8 +669,94 @@ export class JobRunner {
       let job = this.store.snapshot().jobs[id];
       signal.throwIfAborted();
       const assets: Asset[] = [];
-      if (job.input.kind === "render")
+      if (job.input.kind === "project.export")
+        assets.push(...(await exportSnapshot(this.store, job)));
+      if (job.input.kind === "module") {
+        const input = job.input,
+          snapshot = structuredClone(job.contextSnapshot!);
+        const node = snapshot.nodes[input.nodeId];
+        if (!node || node.kind !== "procedural")
+          throw new Error("Choose a procedural destination node");
+        const procedural = proceduralSchema.parse({
+          sourceAssetId: input.sourceAssetId,
+          bundleAssetId: input.bundleAssetId,
+          assetIds: input.assetIds,
+          parameters: input.parameters,
+          seed: input.seed,
+          fields: {},
+        });
+        node.procedural = procedural;
+        const outputs = await this.renderer.render(
+          {
+            ...job,
+            contextSnapshot: snapshot,
+            input: renderInputSchema.parse({
+              kind: "render",
+              camera: snapshot.settings.viewportCamera,
+              nodeIds: [node.id],
+              time: 0,
+            }),
+          },
+          signal,
+        );
+        assets.push(...outputs);
+        const manifest = outputs.find((asset) =>
+          asset.name.endsWith("-render.json"),
+        );
+        const detail = manifest
+          ? await Bun.file(
+              (await this.store.assetFile(manifest.id)).file,
+            ).json()
+          : {};
+        procedural.fields = detail.modules?.[node.id]?.fields ?? {};
+        await this.store.update((state) => {
+          applyModuleResult(state, job, procedural);
+        });
+      }
+      if (job.input.kind === "render") {
         assets.push(...(await this.renderer.render(job, signal)));
+        if (job.input.integrate) {
+          signal.throwIfAborted();
+          const color = assets.find((a) => a.name.endsWith("-color.png")),
+            depth = assets.find((a) => a.name.endsWith("-depth.exr"));
+          if (!color || !depth) throw new Error("RGBD render outputs missing");
+          const input = job.input;
+          await this.store.update((state) => {
+            const current = state.jobs[job.id];
+            if (current.applied || current.status === "cancelled") return;
+            const asset = {
+              ...state.assets[color.id],
+              camera: input.camera,
+              depthAssetId: depth.id,
+              depthEncoding: { type: "linear" as const },
+            };
+            applyCommand(state, {
+              type: "edit.batch",
+              commands: [
+                {
+                  type: "assets.update",
+                  id: color.id,
+                  patch: {
+                    camera: asset.camera,
+                    depthAssetId: depth.id,
+                    depthEncoding: asset.depthEncoding,
+                  },
+                },
+                {
+                  type: "nodes.put",
+                  nodes: createCapture(
+                    { ...asset, name: "Rendered RGBD context" },
+                    `node_${job.id}_capture`,
+                    undefined,
+                    job.id,
+                  ),
+                },
+              ],
+            });
+            state.jobs[job.id].applied = true;
+          });
+        }
+      }
       if (job.input.kind === "mask")
         assets.push(...(await composeMask(this.store, job, signal)));
       if (job.input.kind === "observe")
@@ -812,6 +952,14 @@ export class JobRunner {
         if (job.input.kind === "image") {
           const asset = assets.find((asset) => asset.kind === "image");
           if (!asset) throw new Error("Image generation returned no image");
+          if (job.input.outputMode === "reference")
+            await this.place(
+              [asset.id],
+              job.input.placement,
+              undefined,
+              "reference",
+              { actorId: job.actorId, interactive: job.interactive },
+            );
           signal.throwIfAborted();
           await this.store.update((state) => {
             signal.throwIfAborted();

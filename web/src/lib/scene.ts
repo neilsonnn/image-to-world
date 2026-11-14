@@ -1,3 +1,20 @@
+import { disposeObject } from "./resources";
+import {
+  makePrimitive,
+  makeSurface,
+  makeLight,
+  createProcedural,
+  declareSplatBounds,
+} from "./authored";
+import {
+  AnimationMixer,
+  LoopOnce,
+  LoopRepeat,
+  NearestFilter,
+  type WebGLRenderer,
+  type Camera as RuntimeCamera,
+} from "three";
+import type { ParameterField } from "../../../core/creation";
 import { validateGlb } from "../../../core/mesh";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { inspectScene } from "../../../core/inspection";
@@ -71,13 +88,18 @@ type Entry = {
   bounds?: Box3;
   spatial?: NodeSpatial;
   error?: string;
+  sample?: (time: number, camera?: RuntimeCamera) => void;
+  cleanup?: () => void;
+  moduleFields?: Record<string, ParameterField>;
+  animationClips?: string[];
 };
 
 type SceneWorkspace = Pick<
   Workspace,
   "revision" | "nodes" | "assets" | "selection" | "primaryId"
 > & {
-  settings: Pick<Workspace["settings"], "display" | "atlas">;
+  settings: Pick<Workspace["settings"], "display" | "atlas"> &
+    Partial<Pick<Workspace["settings"], "art">>;
 };
 
 type DisplaySettings = Workspace["settings"]["display"];
@@ -93,36 +115,6 @@ function applyTransform(object: Object3D, node: SceneNode) {
   object.scale.fromArray(node.transform.scale);
   object.visible = node.visible;
   object.updateMatrix();
-}
-
-function disposeObject(object: Object3D) {
-  const disposed = new Set<Texture>();
-  object.traverse((child) => {
-    if (child instanceof SplatMesh) child.dispose();
-    const video = child.userData.video as HTMLVideoElement | undefined;
-    if (video) {
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-    }
-    const mesh = child as Mesh;
-    mesh.geometry?.dispose();
-    const materials = Array.isArray(mesh.material)
-      ? mesh.material
-      : mesh.material
-        ? [mesh.material]
-        : [];
-    for (const material of materials) {
-      for (const value of Object.values(material)) {
-        if (!(value instanceof Texture) || disposed.has(value)) continue;
-        disposed.add(value);
-        const source = value.image as { close?: () => void } | undefined;
-        value.dispose();
-        source?.close?.();
-      }
-      material.dispose();
-    }
-  });
 }
 
 function tagPickables(object: Object3D, nodeId: string) {
@@ -141,6 +133,27 @@ function effectivelyVisible(object: Object3D) {
 }
 
 function resourceKey(node: SceneNode, workspace: SceneWorkspace) {
+  if (["primitive", "light", "procedural"].includes(node.kind))
+    return JSON.stringify([
+      node.kind,
+      node.primitive,
+      node.surface,
+      node.light,
+      node.procedural,
+      [
+        node.surface?.textureAssetId,
+        node.procedural?.bundleAssetId,
+        ...(node.procedural?.assetIds ?? []),
+      ].map((id) =>
+        id
+          ? [
+              id,
+              workspace.assets[id]?.modifiedAt,
+              workspace.assets[id]?.missing,
+            ]
+          : null,
+      ),
+    ]);
   const asset = nodeImageAsset(workspace, node);
   const depth = asset?.depthAssetId
     ? workspace.assets[asset.depthAssetId]
@@ -151,6 +164,12 @@ function resourceKey(node: SceneNode, workspace: SceneWorkspace) {
   if (node.kind === "points") {
     return JSON.stringify([
       node.kind,
+      node.imageSurface,
+      node.surface,
+      node.animation,
+      node.surface?.textureAssetId
+        ? workspace.assets[node.surface.textureAssetId]?.modifiedAt
+        : null,
       asset?.id,
       asset?.modifiedAt,
       asset?.missing,
@@ -169,6 +188,12 @@ function resourceKey(node: SceneNode, workspace: SceneWorkspace) {
     return JSON.stringify([
       node.kind,
       node.projection,
+      node.imageSurface,
+      node.surface,
+      node.animation,
+      node.surface?.textureAssetId
+        ? workspace.assets[node.surface.textureAssetId]?.modifiedAt
+        : null,
       asset?.id,
       asset?.modifiedAt,
       asset?.missing,
@@ -176,6 +201,12 @@ function resourceKey(node: SceneNode, workspace: SceneWorkspace) {
   if (node.kind === "splat" || node.kind === "mesh" || node.kind === "video")
     return JSON.stringify([
       node.kind,
+      node.imageSurface,
+      node.surface,
+      node.animation,
+      node.surface?.textureAssetId
+        ? workspace.assets[node.surface.textureAssetId]?.modifiedAt
+        : null,
       asset?.id,
       asset?.modifiedAt,
       asset?.missing,
@@ -351,6 +382,7 @@ export class SceneGraph {
     private readonly onError: (message: string) => void,
     private readonly helperColor: string,
     private readonly activeColor: string,
+    private readonly renderer?: WebGLRenderer,
   ) {
     scene.add(this.selectionOutline);
     const ambient = new AmbientLight(0xffffff, 2);
@@ -383,6 +415,19 @@ export class SceneGraph {
 
   sync(workspace: SceneWorkspace) {
     this.workspace = workspace;
+    if (workspace.settings.art) {
+      const art = workspace.settings.art;
+      (this.lights[0] as AmbientLight).intensity = art.ambient;
+      const sun = this.lights[1] as DirectionalLight;
+      sun.intensity = art.key;
+      sun.castShadow = art.shadows;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.camera.left = -12;
+      sun.shadow.camera.right = 12;
+      sun.shadow.camera.top = 12;
+      sun.shadow.camera.bottom = -12;
+      sun.shadow.bias = -0.0005;
+    }
     for (const [id, entry] of this.entries) {
       if (!workspace.nodes[id]) this.removeEntry(entry);
     }
@@ -444,7 +489,10 @@ export class SceneGraph {
     const signal = entry.abort.signal;
     entry.pickProxy.visible = true;
     entry.getSelectionTarget = undefined;
-    if (entry.content) {
+    if (entry.content && entry.node.kind !== "procedural") {
+      entry.cleanup?.();
+      entry.cleanup = undefined;
+      entry.sample = undefined;
       entry.root.remove(entry.content);
       disposeObject(entry.content);
       entry.content = undefined;
@@ -468,6 +516,13 @@ export class SceneGraph {
         disposeObject(content);
         return false;
       }
+      if (entry.content && entry.content !== content) {
+        entry.cleanup?.();
+        entry.cleanup = undefined;
+        entry.sample = undefined;
+        entry.root.remove(entry.content);
+        disposeObject(entry.content);
+      }
       tagPickables(content, entry.node.id);
       entry.content = content;
       entry.spatial = spatial;
@@ -487,6 +542,62 @@ export class SceneGraph {
       this.onError(entry.error);
     };
 
+    if (entry.node.kind === "primitive") {
+      this.track(
+        makePrimitive(entry.node, workspace.assets)
+          .then((object) => {
+            finish(object);
+          })
+          .catch(fail),
+      );
+      return;
+    }
+    if (entry.node.kind === "light") {
+      try {
+        const light = makeLight(entry.node);
+        finish(light, {
+          object: light,
+          getBounds: () => new Box3(new Vector3(), new Vector3()),
+        });
+      } catch (error) {
+        fail(error);
+      }
+      return;
+    }
+    if (entry.node.kind === "procedural") {
+      if (!entry.node.procedural?.enabled) {
+        if (entry.content) {
+          entry.cleanup?.();
+          disposeObject(entry.content);
+          entry.root.remove(entry.content);
+        }
+        entry.content = undefined;
+        entry.spatial = undefined;
+        entry.sample = undefined;
+        entry.cleanup = undefined;
+        return;
+      }
+      this.track(
+        createProcedural(entry.node, workspace.assets, signal, this.renderer)
+          .then((instance) => {
+            if (!instance) return;
+            if (!finish(instance.object, instance.spatial)) {
+              instance.dispose?.();
+              return;
+            }
+            entry.moduleFields = instance.fields;
+            entry.cleanup = instance.dispose;
+            entry.sample = (time, camera) => {
+              instance.sample?.({ time, camera });
+              declareSplatBounds(instance.object);
+              tagPickables(instance.object, entry.node.id);
+            };
+            entry.sample(this.time);
+          })
+          .catch(fail),
+      );
+      return;
+    }
     const asset = nodeImageAsset(workspace, entry.node);
     if (
       (entry.node.kind === "image" ||
@@ -519,7 +630,51 @@ export class SceneGraph {
             disposeObject(gltf.scene);
             return;
           }
-          finish(gltf.scene);
+          if (entry.node.surface) {
+            const material = await makeSurface(entry.node, workspace.assets);
+            gltf.scene.traverse((child) => {
+              if (child instanceof Mesh) {
+                for (const previous of Array.isArray(child.material)
+                  ? child.material
+                  : [child.material])
+                  previous.dispose();
+                child.material = material;
+              }
+            });
+          }
+          gltf.scene.traverse((child) => {
+            if (child instanceof Mesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+          if (!finish(gltf.scene)) return;
+          entry.animationClips = gltf.animations.map((clip) => clip.name);
+          if (entry.node.animation?.clip) {
+            const settings = entry.node.animation;
+            const clip = gltf.animations.find(
+              (clip) => clip.name === settings.clip,
+            );
+            if (!clip)
+              throw new Error(`Animation clip not found: ${settings.clip}`);
+            const mixer = new AnimationMixer(gltf.scene),
+              action = mixer.clipAction(clip);
+            action.setLoop(
+              settings.loop ? LoopRepeat : LoopOnce,
+              settings.loop ? Infinity : 1,
+            );
+            action.clampWhenFinished = true;
+            action.play();
+            entry.sample = (time) =>
+              mixer.setTime(
+                Math.max(0, time * settings.speed + settings.offset),
+              );
+            entry.cleanup = () => {
+              mixer.stopAllAction();
+              mixer.uncacheRoot(gltf.scene);
+            };
+            entry.sample(this.time);
+          }
         })().catch(fail),
       );
       return;
@@ -680,10 +835,41 @@ export class SceneGraph {
               texture,
               width,
               height,
-              entry.node.projection,
+              entry.node.imageSurface &&
+                entry.node.imageSurface.mode !== "reference"
+                ? undefined
+                : entry.node.projection,
             );
             if (!finish(plane)) return;
             entry.imagePlane = plane;
+            if (entry.node.imageSurface) {
+              const surface = entry.node.imageSurface;
+              const size = geometrySpatial(plane)
+                .getBounds()
+                .getSize(new Vector3());
+              plane.scale.multiplyScalar(
+                surface.width / Math.max(size.x, 0.0001),
+              );
+              (plane.material as MeshBasicMaterial).alphaTest =
+                surface.alphaTest;
+              if (surface.mode === "sprite")
+                entry.sample = (_time, camera) => {
+                  if (!camera) return;
+                  entry.root.updateWorldMatrix(true, false);
+                  plane.quaternion.copy(
+                    entry.root
+                      .getWorldQuaternion(new Quaternion())
+                      .invert()
+                      .multiply(camera.getWorldQuaternion(new Quaternion())),
+                  );
+                };
+              if (surface.nearest) {
+                texture.magFilter = NearestFilter;
+                texture.minFilter = NearestFilter;
+                texture.generateMipmaps = false;
+                texture.needsUpdate = true;
+              }
+            }
             if (this.display) this.applyDisplay(entry, this.display);
           })
           .catch(fail),
@@ -698,7 +884,10 @@ export class SceneGraph {
   }
 
   private applyDisplay(entry: Entry, display: DisplaySettings) {
-    if (entry.imagePlane) {
+    if (
+      entry.imagePlane &&
+      (!entry.node.imageSurface || entry.node.imageSurface.mode === "reference")
+    ) {
       entry.imagePlane.visible = display.showImages;
       const material = entry.imagePlane.material as MeshBasicMaterial;
       const transparent = display.imageOpacity < 1;
@@ -838,6 +1027,21 @@ export class SceneGraph {
     }
   }
 
+  private time = 0;
+  sample(time: number, camera?: RuntimeCamera) {
+    this.time = time;
+    for (const entry of this.entries.values()) {
+      try {
+        entry.sample?.(time, camera);
+      } catch (error) {
+        entry.error = String(error);
+        entry.sample = undefined;
+        this.onError(entry.error);
+      }
+    }
+    this.scene.updateMatrixWorld(true);
+  }
+
   update() {
     this.updateClips();
     for (const marker of this.selectionOutline.children) {
@@ -969,6 +1173,7 @@ export class SceneGraph {
     entry.generation += 1;
     for (const { edit } of entry.clipEdits?.values() ?? [])
       edit.removeFromParent();
+    entry.cleanup?.();
     entry.root.removeFromParent();
     disposeObject(entry.root);
     this.entries.delete(entry.node.id);

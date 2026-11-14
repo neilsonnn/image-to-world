@@ -19,7 +19,7 @@ afterEach(async () => {
     await rm(root, { recursive: true, force: true });
 });
 async function setup() {
-  const root = await mkdtemp(path.join(tmpdir(), "worldbash-store-"));
+  const root = await mkdtemp(path.join(tmpdir(), "image-to-world-store-"));
   roots.push(root);
   const store = await new WorkspaceStore(root).init();
   stores.push(store);

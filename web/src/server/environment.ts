@@ -12,7 +12,7 @@ import {
 export function configFile() {
   return path.join(
     process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"),
-    "worldbash",
+    "image-to-world",
     "env",
   );
 }
@@ -22,7 +22,7 @@ function configText() {
     return readFileSync(configFile(), "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
-    throw new Error("Could not read the worldbash user configuration");
+    throw new Error("Could not read the image-to-world user configuration");
   }
 }
 
@@ -86,7 +86,7 @@ export function saveEnvironment(input: Record<string, string | null>) {
         await rename(temporary, file);
       } catch {
         throw new Error(
-          "Could not save environment variables. Check permissions on the worldbash configuration folder.",
+          "Could not save environment variables. Check permissions on the image-to-world configuration folder.",
         );
       } finally {
         await rm(temporary, { force: true });

@@ -174,7 +174,15 @@ export class GizmoHandles {
         index >= 0 &&
         handle.mode === "rotate" &&
         Math.abs(eye.getComponent(index)) < 0.12;
-      handle.mesh.visible = supported[handle.mode] && !edgeOn && !flatArc;
+      handle.mesh.visible =
+        supported[handle.mode] &&
+        !(
+          handle.mode === "scale" &&
+          supported.uniformScale &&
+          handle.axis !== "XYZ"
+        ) &&
+        !edgeOn &&
+        !flatArc;
       const material = handle.mesh.material as MeshBasicMaterial;
       material.color.set(
         this.colors[

@@ -3,8 +3,8 @@ import { Window } from "happy-dom";
 import { act, memo } from "react";
 import { emptyWorkspace, identity } from "../../../core/schema";
 import {
-  WorldbashProvider,
-  useWorldbashClient,
+  ImageToWorldProvider,
+  useImageToWorldClient,
   useClientState,
   useWorkspace,
   useWorkspaceData,
@@ -78,7 +78,7 @@ test("React subscribers skip unrelated snapshots and reconnects discard old resp
     ),
   );
   const renders = { camera: 0, assets: 0, collections: 0 };
-  let client!: ReturnType<typeof useWorldbashClient>;
+  let client!: ReturnType<typeof useImageToWorldClient>;
   const Camera = memo(function Camera() {
     const camera = useWorkspace((workspace) => workspace.nodes.camera);
     renders.camera++;
@@ -95,7 +95,7 @@ test("React subscribers skip unrelated snapshots and reconnects discard old resp
     return <span>{settings.collections.assetSearch}</span>;
   });
   function Panels() {
-    client = useWorldbashClient();
+    client = useImageToWorldClient();
     const ready = useClientState((state) => state.workspace !== null);
     return ready ? (
       <>
@@ -113,9 +113,9 @@ test("React subscribers skip unrelated snapshots and reconnects discard old resp
   try {
     await act(async () => {
       root.render(
-        <WorldbashProvider>
+        <ImageToWorldProvider>
           <Panels />
-        </WorldbashProvider>,
+        </ImageToWorldProvider>,
       );
     });
     expect(renders).toEqual({ camera: 1, assets: 1, collections: 1 });

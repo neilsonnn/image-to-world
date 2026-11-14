@@ -3,7 +3,7 @@ node_modules/
 dist/
 .tanstack/
 .vite/
-.worldbash/
+.image-to-world/
 /claude-plans/
 coverage/
 playwright-report/
@@ -16,4 +16,8 @@ test-results/
 *.tsbuildinfo
 
 /web/public/render-worker.js
+/.image-to-world-demos/
+
 /.worldbash-demos/
+/.worldbash/
+/web/public/scene-player.js

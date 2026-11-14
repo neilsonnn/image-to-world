@@ -1,118 +1,42 @@
-import {
-  CaretLeft,
-  CaretRight,
-  Lock,
-  Pause,
-  Play,
-} from "@phosphor-icons/react";
-import { Dialog, Select } from "@radix-ui/themes";
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ATLAS_FORMATS,
-  closestFormat,
-  importCropRect,
-  lockedFormat,
-  type CropPosition,
-  type Resolution,
-} from "../../../core/formats";
+import { useCallback, useState } from "react";
+import { Button, Dialog, Flex, Text } from "@radix-ui/themes";
 import { assetUrl, type Asset, type Camera } from "../../../core/schema";
-import { useWorldbashClient, useWorkspace } from "../lib/client";
+import { useImageToWorldClient } from "../lib/client";
 
-export const ASSET_CLIPBOARD_TYPE = "application/x-worldbash-assets+json";
-
+export const ASSET_CLIPBOARD_TYPE = "application/x-image-to-world-assets+json";
 export type PlacementDestination = {
   parentId?: string | null;
   beforeId?: string | null;
 };
-
 export type RequestPlacement = (
   assets: Asset[],
   camera?: Camera,
   destination?: PlacementDestination,
 ) => void;
-
-type PendingPlacement = {
-  images: Asset[];
-  camera?: Camera;
-  destination?: PlacementDestination;
-};
-
-type PreviewImage = {
-  asset: Asset;
-  url: string;
-  width: number;
-  height: number;
-};
-
-async function loadPreview(asset: Asset): Promise<PreviewImage> {
-  const image = new Image();
-  image.src = assetUrl(asset);
-  await image.decode();
-  return {
-    asset,
-    url: image.src,
-    width: image.naturalWidth,
-    height: image.naturalHeight,
-  };
+export function clipboardAssetIds(data: DataTransfer): string[] {
+  try {
+    const ids = JSON.parse(data.getData(ASSET_CLIPBOARD_TYPE));
+    return Array.isArray(ids)
+      ? ids.filter((id): id is string => typeof id === "string")
+      : [];
+  } catch {
+    return [];
+  }
 }
-
-/** Crop an image to the session grid at its chosen position, as posing expects. */
-async function cropToFormat(
-  image: PreviewImage,
-  format: Resolution,
-  position?: CropPosition,
-): Promise<File> {
-  const source = new Image();
-  source.src = image.url;
-  await source.decode();
-  const crop = importCropRect(image, format, position);
-  const canvas = document.createElement("canvas");
-  canvas.width = format.width;
-  canvas.height = format.height;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Could not prepare the imported image");
-  context.imageSmoothingQuality = "high";
-  context.drawImage(
-    source,
-    crop.x,
-    crop.y,
-    crop.width,
-    crop.height,
-    0,
-    0,
-    format.width,
-    format.height,
-  );
-  const blob = await new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob(
-      (value) =>
-        value
-          ? resolve(value)
-          : reject(new Error("Could not encode the image")),
-      "image/jpeg",
-      0.95,
-    ),
-  );
-  const stem = image.asset.name.replace(/\.[^.]+$/, "");
-  return new File([blob], `${stem}-${format.width}x${format.height}.jpg`, {
-    type: "image/jpeg",
-  });
-}
-
 export function useImageImport() {
-  const client = useWorldbashClient();
-  const locked = useWorkspace(lockedFormat);
-  const [pending, setPending] = useState<PendingPlacement[]>([]);
-  const active = pending[0];
-
+  const client = useImageToWorldClient();
+  const [pending, setPending] = useState<{
+    assets: Asset[];
+    camera?: Camera;
+    destination?: PlacementDestination;
+  } | null>(null);
   const place = useCallback(
     async (
       assets: Asset[],
-      mode: "individual" | "reconstruct",
+      mode: "reference" | "individual" | "reconstruct",
       camera?: Camera,
       destination?: PlacementDestination,
     ) => {
-      if (!assets.length) return;
       await client.command({
         type: "assets.place",
         assetIds: assets.map((asset) => asset.id),
@@ -123,428 +47,88 @@ export function useImageImport() {
     },
     [client],
   );
-
-  const requestPlacement = useCallback<RequestPlacement>(
+  const requestPlacement: RequestPlacement = useCallback(
     (assets, camera, destination) => {
       const unique = [
         ...new Map(assets.map((asset) => [asset.id, asset])).values(),
       ];
-      const others = unique.filter((asset) => asset.kind !== "image");
-      const images = unique.filter(
-        (asset) =>
-          asset.kind === "image" && !(asset.camera && asset.depthAssetId),
+      if (unique.filter((asset) => asset.kind === "image").length > 1) {
+        setPending({ assets: unique, camera, destination });
+        return;
+      }
+      void place(unique, "reference", camera, destination).catch((cause) =>
+        client.setError(String(cause)),
       );
-      const posed = unique.filter(
-        (asset) => asset.kind === "image" && asset.camera && asset.depthAssetId,
-      );
-      void place(
-        [...others, ...posed],
-        "individual",
-        camera,
-        destination,
-      ).catch((cause) =>
-        client.setError(cause instanceof Error ? cause.message : String(cause)),
-      );
-      if (images.length)
-        setPending((queue) => [...queue, { images, camera, destination }]);
     },
     [client, place],
   );
-
-  const choose = async (
-    mode: "individual" | "reconstruct",
-    images: PreviewImage[],
-    format: Resolution,
-    crops: ReadonlyMap<string, CropPosition>,
-  ) => {
-    if (!active) return;
-    const { camera, destination } = active;
-    setPending((queue) => queue.slice(1));
-    try {
-      if (!locked)
-        await client.command({
-          type: "workspace.update",
-          settings: { format: { width: format.width, height: format.height } },
-        });
-      const files = await Promise.all(
-        images.map((image) =>
-          cropToFormat(image, format, crops.get(image.asset.id)),
-        ),
-      );
-      await place(await client.upload(files), mode, camera, destination);
-    } catch (cause) {
-      client.setError(cause instanceof Error ? cause.message : String(cause));
-    }
-  };
-
-  const dialog = (
-    <Dialog.Root
-      open={Boolean(active)}
-      onOpenChange={(open) => {
-        if (!open) setPending((queue) => queue.slice(1));
-      }}
-    >
-      <Dialog.Content className="image-import-dialog" maxWidth="720px">
-        <Dialog.Title className="image-import-title">Add images</Dialog.Title>
-        <Dialog.Description className="image-import-description">
-          {active?.images.length === 1
-            ? "Review the image format, then choose Image to import."
-            : `Review the image format, then choose how to import these ${active?.images.length ?? 0} images.`}
-        </Dialog.Description>
-        {pending.length > 1 && (
-          <p className="image-import-queued">
-            {pending.length - 1} more import
-            {pending.length === 2 ? " is" : "s are"} waiting.
-          </p>
-        )}
-        {active && (
-          <ImportBody
-            key={active.images.map((asset) => asset.id).join()}
-            assets={active.images}
-            locked={locked}
-            onChoose={(mode, images, format, crops) =>
-              void choose(mode, images, format, crops)
-            }
-          />
-        )}
-      </Dialog.Content>
-    </Dialog.Root>
-  );
-
-  return { requestPlacement, dialog };
-}
-
-function ImportBody({
-  assets,
-  locked,
-  onChoose,
-}: {
-  assets: Asset[];
-  locked: Resolution | null;
-  onChoose: (
-    mode: "individual" | "reconstruct",
-    images: PreviewImage[],
-    format: Resolution,
-    crops: ReadonlyMap<string, CropPosition>,
-  ) => void;
-}) {
-  const [images, setImages] = useState<PreviewImage[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [chosen, setChosen] = useState<Resolution | null>(null);
-  const [crops, setCrops] = useState<ReadonlyMap<string, CropPosition>>(
-    new Map(),
-  );
-  useEffect(() => {
-    let active = true;
-    Promise.all(assets.map(loadPreview)).then(
-      (loaded) => active && setImages(loaded),
-      (cause) =>
-        active &&
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Could not open these images",
-        ),
-    );
-    return () => {
-      active = false;
-    };
-  }, [assets]);
-  const format =
-    locked ?? chosen ?? (images?.[0] ? closestFormat(images[0]) : null);
-  const count = assets.length;
-  return (
-    <div className="image-import-body">
-      <div className="image-import-preview-shell">
-        {images && format ? (
-          <ImportPreview
-            images={images}
-            format={format}
-            locked={Boolean(locked)}
-            crops={crops}
-            onFormat={setChosen}
-            onCrop={(id, position) =>
-              setCrops((previous) => new Map([...previous, [id, position]]))
-            }
-          />
-        ) : error ? (
-          <p className="image-import-error" role="alert">
-            {error}
-          </p>
-        ) : (
-          <p className="image-import-status" role="status">
-            Reading image formats
-          </p>
-        )}
-      </div>
-      <div className="image-import-choices">
-        <button
-          className="image-import-choice"
-          type="button"
-          disabled={!images || !format || count < 2}
-          onClick={() =>
-            images && format && onChoose("reconstruct", images, format, crops)
-          }
-        >
-          <span className="image-import-art is-stack" aria-hidden>
-            {assets.slice(0, 3).map((asset) => (
-              <img
-                key={asset.id}
-                src={assetUrl(asset)}
-                alt=""
-                draggable={false}
-              />
-            ))}
-          </span>
-          <strong>Reconstruct</strong>
-          <span>
-            {count === 1
-              ? "Reconstruct needs at least two overlapping photos."
-              : "Overlapping photos of one place"}
-          </span>
-        </button>
-        <button
-          className="image-import-choice"
-          type="button"
-          disabled={!images || !format || count > 1}
-          onClick={() =>
-            images && format && onChoose("individual", images, format, crops)
-          }
-        >
-          <span className="image-import-art is-single" aria-hidden>
-            <img src={assetUrl(assets[0])} alt="" draggable={false} />
-          </span>
-          <strong>Image</strong>
-          <span>
-            {count > 1
-              ? "Upload one image to use this option."
-              : "Build a scene from one image at a time"}
-          </span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ImportPreview({
-  images,
-  format,
-  locked,
-  crops,
-  onFormat,
-  onCrop,
-}: {
-  images: PreviewImage[];
-  format: Resolution;
-  locked: boolean;
-  crops: ReadonlyMap<string, CropPosition>;
-  onFormat: (format: Resolution) => void;
-  onCrop: (assetId: string, position: CropPosition) => void;
-}) {
-  const [index, setIndex] = useState(0);
-  const [playing, setPlaying] = useState(images.length > 1);
-  const drag = useRef<{
-    pointerId: number;
-    x: number;
-    y: number;
-    position: CropPosition;
-    scale: number;
-  } | null>(null);
-  const image = images[index];
-  const aspect = closestFormat(format).aspectRatio;
-  const position = crops.get(image.asset.id) ?? { x: 0.5, y: 0.5 };
-  const crop = importCropRect(image, format, position);
-  const travelX = Math.max(0, image.width - crop.width);
-  const travelY = Math.max(0, image.height - crop.height);
-  const movable = travelX > 0 || travelY > 0;
-  useEffect(() => {
-    if (!playing || images.length < 2) return;
-    const timer = window.setTimeout(
-      () => setIndex((current) => (current + 1) % images.length),
-      1000,
-    );
-    return () => window.clearTimeout(timer);
-  }, [images.length, index, playing]);
-  const move = (x: number, y: number) =>
-    onCrop(image.asset.id, {
-      x: Math.max(0, Math.min(1, x)),
-      y: Math.max(0, Math.min(1, y)),
-    });
-  const step = (direction: number) => {
-    setPlaying(false);
-    setIndex(
-      (current) => (current + direction + images.length) % images.length,
+  const choose = (mode: "reference" | "individual" | "reconstruct") => {
+    if (!pending) return;
+    const { assets, camera, destination } = pending;
+    setPending(null);
+    void place(assets, mode, camera, destination).catch((cause) =>
+      client.setError(String(cause)),
     );
   };
-  return (
-    <section className="image-import-preview" aria-label="Import preview">
-      <div className="image-import-formats">
-        <span className="format-pill">
-          {image.width} × {image.height}
-        </span>
-        <span aria-hidden>→</span>
-        {locked ? (
-          <span
-            className="format-pill"
-            title="The output format is locked while the spatial context contains images."
-          >
-            <Lock size={11} />
-            {aspect} · {format.width} × {format.height}
-          </span>
-        ) : (
-          <Select.Root
-            size="1"
-            value={aspect}
-            onValueChange={(value) => {
-              const next = ATLAS_FORMATS.find((f) => f.aspectRatio === value);
-              if (next) onFormat(next);
-            }}
-          >
-            <Select.Trigger
-              className="format-pill"
-              variant="ghost"
-              aria-label="Output aspect ratio"
-            />
-            <Select.Content position="popper">
-              {ATLAS_FORMATS.map((option) => (
-                <Select.Item
-                  key={option.aspectRatio}
-                  value={option.aspectRatio}
-                >
-                  {option.aspectRatio} · {option.width} × {option.height}
-                </Select.Item>
+  return {
+    requestPlacement,
+    dialog: (
+      <Dialog.Root
+        open={!!pending}
+        onOpenChange={(open) => {
+          if (!open) setPending(null);
+        }}
+      >
+        <Dialog.Content maxWidth="580px">
+          <Dialog.Title size="3">Bring images into your scene</Dialog.Title>
+          <Dialog.Description size="1">
+            Place references immediately, or use World Labs to estimate depth
+            and camera alignment. Original images keep their resolution.
+          </Dialog.Description>
+          <Flex gap="2" my="3" wrap="wrap">
+            {pending?.assets
+              .filter((a) => a.kind === "image")
+              .map((asset) => (
+                <img
+                  key={asset.id}
+                  src={assetUrl(asset)}
+                  alt={asset.name}
+                  style={{ width: 100, height: 72, objectFit: "contain" }}
+                />
               ))}
-            </Select.Content>
-          </Select.Root>
-        )}
-      </div>
-      <div className="image-import-frame">
-        <img src={image.url} alt={image.asset.name} draggable={false} />
-        <svg viewBox={`0 0 ${image.width} ${image.height}`}>
-          <path
-            d={`M0 0H${image.width}V${image.height}H0Z M${crop.x} ${crop.y}h${crop.width}v${crop.height}h${-crop.width}Z`}
-            fill="black"
-            fillOpacity={0.5}
-            fillRule="evenodd"
-          />
-          <rect
-            aria-label="Crop position"
-            role={movable ? "slider" : undefined}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(
-              (travelX > 0 ? position.x : position.y) * 100,
-            )}
-            tabIndex={movable ? 0 : undefined}
-            className={movable ? "is-movable" : undefined}
-            x={crop.x}
-            y={crop.y}
-            width={crop.width}
-            height={crop.height}
-            fill="transparent"
-            stroke="white"
-            strokeWidth={1}
-            vectorEffect="non-scaling-stroke"
-            onPointerDown={(event) => {
-              const bounds =
-                event.currentTarget.ownerSVGElement?.getBoundingClientRect();
-              if (!movable || event.button !== 0 || !bounds) return;
-              drag.current = {
-                pointerId: event.pointerId,
-                x: event.clientX,
-                y: event.clientY,
-                position,
-                scale: Math.min(
-                  bounds.width / image.width,
-                  bounds.height / image.height,
-                ),
-              };
-              event.currentTarget.setPointerCapture(event.pointerId);
-              setPlaying(false);
-              event.preventDefault();
-            }}
-            onPointerMove={(event) => {
-              const start = drag.current;
-              if (!start || start.pointerId !== event.pointerId) return;
-              move(
-                travelX
-                  ? start.position.x +
-                      (event.clientX - start.x) / start.scale / travelX
-                  : 0.5,
-                travelY
-                  ? start.position.y +
-                      (event.clientY - start.y) / start.scale / travelY
-                  : 0.5,
-              );
-            }}
-            onLostPointerCapture={() => {
-              drag.current = null;
-            }}
-            onKeyDown={(event) => {
-              const delta = {
-                ArrowLeft: -0.05,
-                ArrowRight: 0.05,
-                ArrowUp: -0.05,
-                ArrowDown: 0.05,
-              }[event.key];
-              if (!movable || !delta) return;
-              event.preventDefault();
-              event.stopPropagation();
-              setPlaying(false);
-              move(
-                travelX ? position.x + delta : position.x,
-                travelY ? position.y + delta : position.y,
-              );
-            }}
-          />
-        </svg>
-        {images.length > 1 && (
-          <div className="image-import-nav">
-            <button
-              type="button"
-              aria-label="Previous image"
-              onClick={() => step(-1)}
+          </Flex>
+          <Flex gap="2" wrap="wrap">
+            <Button
+              size="1"
+              variant="surface"
+              color="gray"
+              onClick={() => choose("reference")}
             >
-              <CaretLeft size={12} />
-            </button>
-            <button
-              type="button"
-              aria-label="Next image"
-              onClick={() => step(1)}
+              Place references
+            </Button>
+            <Button
+              size="1"
+              variant="surface"
+              color="gray"
+              onClick={() => choose("individual")}
             >
-              <CaretRight size={12} />
-            </button>
-            <button
-              type="button"
-              aria-label={
-                playing ? "Pause import preview" : "Play import preview"
-              }
-              onClick={() => setPlaying(!playing)}
+              Pose individually
+            </Button>
+            <Button
+              size="1"
+              variant="surface"
+              color="gray"
+              onClick={() => choose("reconstruct")}
             >
-              {playing ? <Pause size={12} /> : <Play size={12} />}
-            </button>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-export function clipboardAssetIds(data: DataTransfer) {
-  const value = data.getData(ASSET_CLIPBOARD_TYPE);
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value) as { assetIds?: unknown };
-    return Array.isArray(parsed.assetIds)
-      ? [
-          ...new Set(
-            parsed.assetIds.filter(
-              (id): id is string => typeof id === "string",
-            ),
-          ),
-        ]
-      : [];
-  } catch {
-    return [];
-  }
+              Reconstruct together
+            </Button>
+          </Flex>
+          <Text as="p" size="1" color="gray" mt="3">
+            Reference placement is local. Reconstruction uses your configured
+            provider.
+          </Text>
+        </Dialog.Content>
+      </Dialog.Root>
+    ),
+  };
 }

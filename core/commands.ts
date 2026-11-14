@@ -1,7 +1,9 @@
+import { primitiveSchema, lightSchema, resolveParameters } from "./creation";
 import { frameAt } from "./frames";
 import { activateImage } from "./images";
 import { currentCamera } from "./generation";
 import {
+  uniformScale,
   worldMatrix,
   transformCamera,
   cameraNodeData,
@@ -361,6 +363,7 @@ function mutate(workspace: Workspace, input: Command) {
         command.patch.depthAssetId,
         command.patch.confidenceAssetId,
         command.patch.maskAssetId,
+        ...(command.patch.sourceAssetIds ?? []),
       ]) {
         if (id && !workspace.assets[id]) throw new Error(`Unknown asset ${id}`);
       }
@@ -422,6 +425,37 @@ export function applyCommand(
       for (const key of ["order", "excludedIds", "soloIds"] as const)
         node.context[key] = node.context[key].filter((id) => next.nodes[id]);
   validateScene(next.nodes);
+  for (const node of Object.values(next.nodes)) {
+    if (transformCapabilities([node]).uniformScale)
+      uniformScale(worldMatrix(node, next.nodes));
+    if (node.kind === "primitive") primitiveSchema.parse(node.primitive);
+    if (node.kind === "light") lightSchema.parse(node.light);
+    if (node.procedural && Object.keys(node.procedural.fields).length) {
+      const params = resolveParameters(
+        node.procedural.fields,
+        node.procedural.parameters,
+      );
+      for (const [key, field] of Object.entries(node.procedural.fields))
+        if (
+          field.type === "asset" &&
+          params[key] &&
+          !next.assets[String(params[key])]
+        )
+          throw new Error(`Unknown module parameter asset ${params[key]}`);
+    }
+    for (const id of [
+      node.surface?.textureAssetId,
+      node.procedural?.sourceAssetId,
+      node.procedural?.bundleAssetId,
+      ...(node.procedural?.assetIds ?? []),
+    ])
+      if (id && !next.assets[id]) throw new Error(`Unknown asset ${id}`);
+  }
+  if (
+    next.settings.art.environmentAssetId &&
+    !next.assets[next.settings.art.environmentAssetId]
+  )
+    throw new Error("Unknown environment map asset");
   for (const node of Object.values(next.nodes))
     for (const id of [node.assetId, node.geometryAssetId])
       if (id && !next.assets[id]) throw new Error(`Unknown asset ${id}`);

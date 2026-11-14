@@ -99,7 +99,7 @@ export class RenderWorker {
     });
     await this.page.goto(String(this.server.url));
     await this.page.waitForFunction(
-      () => "worldbashRender" in globalThis,
+      () => "imageToWorldRender" in globalThis,
       {},
       { timeout: 30000 },
     );
@@ -113,6 +113,15 @@ export class RenderWorker {
     if (job.input.kind !== "render")
       throw new Error("Expected a render request");
     const input = job.input;
+    if (
+      input.integrate &&
+      (input.presentation ||
+        !input.passes.includes("color") ||
+        !input.passes.includes("depth"))
+    )
+      throw new Error(
+        "RGBD capture requires color and depth passes without presentation effects",
+      );
     if (
       input.camera.intrinsics.width * input.camera.intrinsics.height >
         16_000_000 ||
@@ -134,17 +143,18 @@ export class RenderWorker {
       this.page = undefined;
     };
     signal.addEventListener("abort", abort, { once: true });
+    const renderTimeout = setTimeout(abort, 60000);
     try {
       const result = await this.page!.evaluate(
         async ({ workspace, input }) => {
           return (
             globalThis as unknown as {
-              worldbashRender: (
+              imageToWorldRender: (
                 w: unknown,
                 i: unknown,
               ) => Promise<RenderResult>;
             }
-          ).worldbashRender(workspace, input);
+          ).imageToWorldRender(workspace, input);
         },
         { workspace: snapshot, input },
       );
@@ -152,7 +162,12 @@ export class RenderWorker {
       const outputs: Asset[] = [];
       for (const [pass, data] of Object.entries(result.outputs)) {
         let blob = new Blob([Buffer.from(data, "base64")], {
-          type: "image/png",
+          type:
+            pass === "mesh"
+              ? "model/gltf-binary"
+              : pass === "splats"
+                ? "application/octet-stream"
+                : "image/png",
         });
         if (pass === "depth") {
           const { width, height } = input.camera.intrinsics;
@@ -180,15 +195,17 @@ export class RenderWorker {
         outputs.push(
           await this.store.importFile(
             blob,
-            `${job.id}-${pass}.${pass === "depth" ? "exr" : "png"}`,
+            `${job.id}-${pass}.${pass === "depth" ? "exr" : pass === "mesh" ? "glb" : pass === "splats" ? "ply" : "png"}`,
             {
               jobId: job.id,
               role:
-                pass === "depth"
-                  ? "depth"
-                  : pass === "mask"
-                    ? "mask"
-                    : "render",
+                pass === "mesh"
+                  ? "mesh"
+                  : pass === "depth"
+                    ? "depth"
+                    : pass === "mask"
+                      ? "mask"
+                      : "render",
               camera: input.camera,
             },
           ),
@@ -255,6 +272,7 @@ export class RenderWorker {
       );
       return outputs;
     } finally {
+      clearTimeout(renderTimeout);
       signal.removeEventListener("abort", abort);
       this.active = undefined;
     }

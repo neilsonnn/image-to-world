@@ -31,6 +31,7 @@ export const inspectionSchema = z.object({
         translate: z.boolean(),
         rotate: z.boolean(),
         scale: z.boolean(),
+        uniformScale: z.boolean().optional(),
       }),
       camera: cameraSchema.optional(),
       frame: z
@@ -75,7 +76,13 @@ export function inspectScene(
     const matrix = worldMatrix(node, workspace.nodes);
     const issues: string[] = [];
     for (const id of new Set(
-      [node.assetId, node.geometryAssetId].filter((id): id is string => !!id),
+      [
+        node.assetId,
+        node.geometryAssetId,
+        node.surface?.textureAssetId,
+        node.procedural?.bundleAssetId,
+        ...(node.procedural?.assetIds ?? []),
+      ].filter((id): id is string => !!id),
     )) {
       const asset = workspace.assets[id];
       if (!asset || asset.missing || asset.trashedAt)

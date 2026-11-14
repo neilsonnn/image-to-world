@@ -28,7 +28,7 @@ export async function createService(root: string) {
       const host = request.headers.get("host")?.split(":")[0];
       if (host && !["127.0.0.1", "localhost"].includes(host))
         return Response.json(
-          { error: "worldbash serves loopback requests only" },
+          { error: "image-to-world serves loopback requests only" },
           { status: 403 },
         );
       if (origin && origin !== url.origin)
@@ -38,10 +38,10 @@ export async function createService(root: string) {
         );
       if (
         request.method !== "GET" &&
-        !request.headers.get("x-worldbash-client")
+        !request.headers.get("x-image-to-world-client")
       )
         return Response.json(
-          { error: "X-Worldbash-Client header is required" },
+          { error: "X-Image-To-World-Client header is required" },
           { status: 403 },
         );
       try {
@@ -89,7 +89,7 @@ export async function createService(root: string) {
         }
         if (request.method === "GET" && route === "status")
           return Response.json({
-            application: "worldbash",
+            application: "image-to-world",
             workspacePath: store.root,
             worldLabsConfigured: !!environmentValue("WLT_API_KEY"),
             falConfigured: !!environmentValue("FAL_KEY"),
@@ -143,12 +143,34 @@ export async function createService(root: string) {
         }
         if (request.method === "POST" && route === "commands") {
           const context = commandContextSchema.parse({
-            ...JSON.parse(request.headers.get("X-Worldbash-Context") ?? "{}"),
-            interactive: request.headers.get("X-Worldbash-Client") === "web",
+            ...JSON.parse(
+              request.headers.get("X-Image-To-World-Context") ?? "{}",
+            ),
+            interactive:
+              request.headers.get("X-Image-To-World-Client") === "web",
           });
           return Response.json(
             await commands.execute(await request.json(), context),
           );
+        }
+        const exported = /^exports\/([^/]+)\/([^/]+)$/.exec(route);
+        if (request.method === "GET" && exported) {
+          const [, jobId, assetId] = exported,
+            job = store.snapshot().jobs[jobId];
+          if (
+            !job ||
+            job.input.kind !== "project.export" ||
+            !job.pinnedAssets?.[assetId]
+          )
+            return new Response("Asset is not in this export snapshot", {
+              status: 404,
+            });
+          return store.withJobAssets(job, async () => {
+            const { asset, file } = await store.assetFile(assetId);
+            return new Response(Bun.file(file), {
+              headers: { "Content-Type": asset.mimeType },
+            });
+          });
         }
         if (request.method === "GET" && route.startsWith("assets/")) {
           const id = decodeURIComponent(route.slice(7));
@@ -312,18 +334,18 @@ export async function createService(root: string) {
   };
 }
 const singleton = globalThis as typeof globalThis & {
-  worldbashService?: ReturnType<typeof createService>;
-  worldbashClosing?: Promise<void>;
+  imageToWorldService?: ReturnType<typeof createService>;
+  imageToWorldClosing?: Promise<void>;
 };
 export function service() {
-  singleton.worldbashService ??= (async () => {
-    await singleton.worldbashClosing;
+  singleton.imageToWorldService ??= (async () => {
+    await singleton.imageToWorldClosing;
     return createService(
-      process.env.WORLDBASH_WORKSPACE ||
-        path.resolve(process.cwd(), "../.worldbash"),
+      process.env.IMAGE_TO_WORLD_WORKSPACE ||
+        path.resolve(process.cwd(), "../.image-to-world"),
     );
   })();
-  return singleton.worldbashService;
+  return singleton.imageToWorldService;
 }
 export async function handleRequest(request: Request) {
   return (await service()).handle(request);
@@ -331,8 +353,8 @@ export async function handleRequest(request: Request) {
 
 if (import.meta.hot)
   import.meta.hot.dispose(() => {
-    singleton.worldbashClosing = singleton.worldbashService?.then((instance) =>
-      instance.close(),
+    singleton.imageToWorldClosing = singleton.imageToWorldService?.then(
+      (instance) => instance.close(),
     );
-    singleton.worldbashService = undefined;
+    singleton.imageToWorldService = undefined;
   });

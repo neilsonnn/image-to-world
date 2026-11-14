@@ -1,3 +1,4 @@
+import { inspectScene } from "../../../core/inspection";
 import { isVisible } from "../../../core/captures";
 import { nodeImageAsset } from "../../../core/images";
 import {
@@ -65,11 +66,12 @@ type Entry = {
   clipEdits?: Map<SplatMesh | null, { edit: SplatEdit; sdf: SplatEditSdf }>;
   bounds?: Box3;
   spatial?: NodeSpatial;
+  error?: string;
 };
 
 type SceneWorkspace = Pick<
   Workspace,
-  "nodes" | "assets" | "selection" | "primaryId"
+  "revision" | "nodes" | "assets" | "selection" | "primaryId"
 > & {
   settings: Pick<Workspace["settings"], "display" | "atlas">;
 };
@@ -326,6 +328,7 @@ function makeClip(entry: Entry, color: string) {
 }
 
 export class SceneGraph {
+  spatialVersion = 0;
   readonly entries = new Map<string, Entry>();
   readonly selectionOutline = new Group();
   private selection: string[] = [];
@@ -419,6 +422,7 @@ export class SceneGraph {
 
   private loadEntry(entry: Entry, workspace: SceneWorkspace) {
     entry.generation += 1;
+    entry.error = undefined;
     const generation = entry.generation;
     entry.abort?.abort();
     entry.abort = new AbortController();
@@ -452,6 +456,7 @@ export class SceneGraph {
       tagPickables(content, entry.node.id);
       entry.content = content;
       entry.spatial = spatial;
+      this.spatialVersion++;
       entry.pickProxy.visible = false;
       entry.root.add(content);
       if (this.display) this.applyDisplay(entry, this.display);
@@ -463,7 +468,8 @@ export class SceneGraph {
         (error instanceof DOMException && error.name === "AbortError")
       )
         return;
-      this.onError(error instanceof Error ? error.message : String(error));
+      entry.error = error instanceof Error ? error.message : String(error);
+      this.onError(entry.error);
     };
 
     const asset = nodeImageAsset(workspace, entry.node);
@@ -474,7 +480,10 @@ export class SceneGraph {
         entry.node.kind === "video") &&
       !asset
     ) {
-      fail(new Error(`${entry.node.name} has no asset`));
+      // An unbound node has no geometry yet (for example a generation placeholder).
+      // A binding to an unavailable asset is a real load error.
+      if (entry.node.assetId || entry.node.geometryAssetId)
+        fail(new Error(`${entry.node.name} references an unavailable asset`));
       return;
     }
     if (asset?.missing) {
@@ -795,6 +804,18 @@ export class SceneGraph {
         return entry.getSelectionTarget?.() ?? entry.node.id;
     }
     return undefined;
+  }
+
+  inspect(nodeIds?: string[]) {
+    if (!this.workspace) throw new Error("Scene is not loaded");
+    const report = inspectScene(this.workspace, nodeIds, (ids) =>
+      this.bounds(ids),
+    );
+    for (const node of report.nodes) {
+      const error = this.entries.get(node.id)?.error;
+      if (error) node.issues.push(`Renderer: ${error}`);
+    }
+    return report;
   }
 
   bounds(ids: string[], relativeTo?: Object3D) {

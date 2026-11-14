@@ -2,7 +2,6 @@ import { imageIndex } from "../../../core/images";
 import type { SceneNode, Camera } from "../../../core/schema";
 import { applyCommand } from "../../../core/commands";
 import { createCapture } from "../../../core/captures";
-import { fitCaptureClip } from "./depth";
 import type { WorkspaceStore } from "./store";
 
 export async function integrateAssets(
@@ -36,14 +35,6 @@ export async function integrateAssets(
       undefined,
       origin,
     );
-    for (const node of capture) snapshot.nodes[node.id] = node;
-    const clip = asset.depthAssetId
-      ? await fitCaptureClip(store, snapshot, id)
-      : undefined;
-    if (clip) {
-      capture.push(clip);
-      capture[0].clipInitialized = true;
-    }
     captures.push(capture);
   }
   signal?.throwIfAborted();

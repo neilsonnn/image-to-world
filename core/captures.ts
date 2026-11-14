@@ -236,7 +236,7 @@ export function atlasContext(...args: Parameters<typeof atlasContextNodes>) {
 }
 
 export function createCapture(
-  asset: Asset,
+  asset: Pick<Asset, "name" | "camera" | "depthAssetId"> & { id?: string },
   id: string,
   placement?: Camera,
   jobId?: string,
@@ -396,13 +396,22 @@ export function pathFromCameras(
   };
 }
 
-/** Whether a capture's pixels came from Atlas generation or from an imported image. */
+/** Follow image provenance so posed generated images keep their generated origin. */
 export function captureOrigin(
   workspace: Pick<Workspace, "assets" | "jobs" | "nodes">,
   id: string,
 ): "imported" | "generated" {
-  const assetId = workspace.nodes[id]?.assetId;
-  const jobId = assetId ? workspace.assets[assetId]?.jobId : undefined;
-  const kind = jobId ? workspace.jobs[jobId]?.input.kind : undefined;
-  return kind === "atlas" || kind === "video" ? "generated" : "imported";
+  let assetId = workspace.nodes[id]?.assetId;
+  const seen = new Set<string>();
+  while (assetId && !seen.has(assetId)) {
+    seen.add(assetId);
+    const asset = workspace.assets[assetId];
+    const kind = asset?.jobId
+      ? workspace.jobs[asset.jobId]?.input.kind
+      : undefined;
+    if (kind === "atlas" || kind === "video" || kind === "image")
+      return "generated";
+    assetId = asset?.parentAssetId;
+  }
+  return "imported";
 }

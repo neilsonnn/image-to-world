@@ -1,3 +1,4 @@
+import { imageModels } from "../../../core/models";
 import { useWorldbashClient, useWorkspaceData } from "../lib/client";
 import { Button } from "@radix-ui/themes";
 import {
@@ -12,6 +13,10 @@ import { assetUrl } from "../../../core/schema";
 import { Hint } from "./ui";
 
 function jobLabel(job: Job) {
+  if (job.input.kind === "image")
+    return `${imageModels[job.input.model].label} → Frame`;
+  if (job.input.kind === "nano")
+    return imageModels[job.input.settings.model].label;
   return job.input.kind === "fal" ? job.input.model : job.input.kind;
 }
 

@@ -1,4 +1,8 @@
+import { previewItems } from "../../../core/previews";
+import { renderContactSheet } from "./previews";
+import { imageModels } from "../../../core/models";
 import {
+  applyJobResult,
   claimResultTargets,
   resultTargets,
 } from "../../../core/result-targets";
@@ -10,7 +14,6 @@ import { reconstructFrames } from "./reconstruction";
 import { integrateAssets } from "./integration";
 import { extractVideoFrames } from "./video";
 import type { z } from "zod";
-import { fitCaptureClip } from "./depth";
 import { applyCommand } from "../../../core/commands";
 import { atlasContext, createCapture } from "../../../core/captures";
 import { identity, type Camera } from "../../../core/schema";
@@ -54,7 +57,7 @@ export class JobRunner {
       for (const job of Object.values(state.jobs)) {
         if (job.status !== "running") continue;
         if (
-          ["fal", "nano"].includes(job.input.kind) &&
+          ["fal", "nano", "image"].includes(job.input.kind) &&
           !job.remoteId &&
           job.submittedAt
         ) {
@@ -76,7 +79,19 @@ export class JobRunner {
   ) {
     if (this.store.snapshot().jobs[id]) return id;
     const parsed = jobInputSchema.parse(input);
+    if (parsed.kind === "image") {
+      falClient();
+      worldLabs();
+    }
     let snapshot = this.store.snapshot();
+    const sheetItems =
+      parsed.kind === "contactSheet"
+        ? previewItems(snapshot, parsed)
+        : undefined;
+    if (parsed.kind === "inspect")
+      for (const id of parsed.nodeIds ?? []) {
+        if (!snapshot.nodes[id]) throw new Error(`Node does not exist: ${id}`);
+      }
     let cameras: Camera[] | undefined,
       frameIndices: number[] | undefined,
       sourceFrameAssetIds: string[] | undefined;
@@ -255,27 +270,40 @@ export class JobRunner {
       ),
     ];
     await this.store.update((state) => {
-      if (parsed.kind === "pose") {
+      if (parentJob && state.jobs[parentJob.id]?.status === "cancelled")
+        throw new Error("Parent generation was cancelled");
+      if (parsed.kind === "pose" || parsed.kind === "image") {
         parsed.placement ??= snapshot.settings.viewportCamera;
-        parsed.nodeIds = parsed.assetIds.map(() => `node_${randomUUID()}`);
-        applyCommand(state, {
-          type: "nodes.put",
-          nodes: parsed.assetIds.flatMap((assetId, index) =>
-            createCapture(
-              state.assets[assetId],
-              parsed.nodeIds![index],
-              parsed.placement,
-              id,
+        if (parentJob) {
+          parsed.nodeIds = (parentJob.applyTargets ?? []).map(
+            (target) => target.nodeId,
+          );
+        } else {
+          const sources =
+            parsed.kind === "pose"
+              ? parsed.assetIds.map((assetId) => state.assets[assetId])
+              : [{ name: parsed.prompt.slice(0, 80) }];
+          parsed.nodeIds = sources.map(() => `node_${randomUUID()}`);
+          applyCommand(state, {
+            type: "nodes.put",
+            nodes: sources.flatMap((asset, index) =>
+              createCapture(
+                asset,
+                parsed.nodeIds![index],
+                parsed.placement,
+                id,
+              ),
             ),
-          ),
-        });
-        applyCommand(state, { type: "selection.set", ids: parsed.nodeIds });
+          });
+          applyCommand(state, { type: "selection.set", ids: parsed.nodeIds });
+        }
       }
       if (["atlas", "video", "reconstruct"].includes(parsed.kind))
         state.settings.atlasPanel.jobId = id;
       state.jobs[id] = {
         id,
         input: parsed,
+        previewItems: sheetItems,
         cameras,
         frameIndices,
         applyTargets:
@@ -284,7 +312,7 @@ export class JobRunner {
             ? []
             : resultTargets(
                 state,
-                parsed.kind === "pose"
+                parsed.kind === "pose" || parsed.kind === "image"
                   ? parsed.nodeIds!.map((id) => state.nodes[id])
                   : targetIds.map((id) => snapshot.nodes[id]),
               )),
@@ -299,7 +327,8 @@ export class JobRunner {
         parsed.kind === "video" ||
         parsed.kind === "splats" ||
         parsed.kind === "reconstruct" ||
-        parsed.kind === "nano"
+        parsed.kind === "nano" ||
+        parsed.kind === "contactSheet"
           ? {
               contextSnapshot: {
                 nodes: snapshot.nodes,
@@ -311,8 +340,9 @@ export class JobRunner {
         status: "queued",
         createdAt: Date.now(),
         updatedAt: Date.now(),
-        message:
-          parsed.kind === "capture" ? "Waiting for an open viewport" : "Queued",
+        message: ["capture", "inspect"].includes(parsed.kind)
+          ? "Waiting for an open viewport"
+          : "Queued",
         outputAssetIds: [],
       };
       if (!parentJob) claimResultTargets(state, state.jobs[id]);
@@ -386,15 +416,6 @@ export class JobRunner {
                   transform: identity(),
                 },
               ];
-        if (asset.kind === "image") {
-          const preview = this.store.snapshot();
-          for (const node of nodes) preview.nodes[node.id] = node;
-          const clip = await fitCaptureClip(this.store, preview, id);
-          if (clip) {
-            nodes.push(clip);
-            Object.assign(nodes[0], { clipInitialized: true });
-          }
-        }
         await this.store.update((state) => {
           applyCommand(state, { type: "nodes.put", nodes });
           applyCommand(state, { type: "selection.set", ids: [id] });
@@ -422,7 +443,7 @@ export class JobRunner {
       if (this.active.size >= 3) break;
       if (
         job.status !== "queued" ||
-        job.input.kind === "capture" ||
+        ["capture", "inspect"].includes(job.input.kind) ||
         this.active.has(job.id)
       )
         continue;
@@ -453,6 +474,8 @@ export class JobRunner {
       let job = this.store.snapshot().jobs[id];
       signal.throwIfAborted();
       const assets: Asset[] = [];
+      if (job.input.kind === "contactSheet")
+        assets.push(...(await renderContactSheet(this.store, job, signal)));
       if (
         job.input.kind === "reconstruct" &&
         job.input.videoAssetId &&
@@ -475,9 +498,15 @@ export class JobRunner {
           contextSnapshot: job.contextSnapshot,
         });
       }
-      if (job.input.kind === "fal" || job.input.kind === "nano") {
+      if (
+        job.input.kind === "fal" ||
+        job.input.kind === "nano" ||
+        job.input.kind === "image"
+      ) {
         const model =
-          job.input.kind === "fal" ? job.input.model : job.input.settings.model;
+          job.input.kind === "nano"
+            ? job.input.settings.model
+            : job.input.model;
         const fal = falClient();
         if (!job.remoteId) {
           let input: Record<string, unknown>;
@@ -514,6 +543,13 @@ export class JobRunner {
                 ? { seed: edit.settings.seed }
                 : {}),
             };
+          } else if (job.input.kind === "image") {
+            input = {
+              ...imageModels[job.input.model].defaults,
+              prompt: job.input.prompt,
+              image_size: { width: 1280, height: 720 },
+              ...(job.input.seed !== undefined ? { seed: job.input.seed } : {}),
+            };
           } else
             input = (await resolveFalInput(
               this.store,
@@ -532,7 +568,11 @@ export class JobRunner {
           await this.patch(id, { remoteId: request.request_id });
           job = this.store.snapshot().jobs[id];
         }
-        if (job.input.kind !== "fal" && job.input.kind !== "nano")
+        if (
+          job.input.kind !== "fal" &&
+          job.input.kind !== "nano" &&
+          job.input.kind !== "image"
+        )
           throw new Error("FAL job input changed");
         for (;;) {
           signal.throwIfAborted();
@@ -593,6 +633,37 @@ export class JobRunner {
                 },
               )),
           );
+        }
+        if (job.input.kind === "image") {
+          const asset = assets.find((asset) => asset.kind === "image");
+          if (!asset) throw new Error("Image generation returned no image");
+          signal.throwIfAborted();
+          await this.store.update((state) => {
+            signal.throwIfAborted();
+            applyJobResult(state, job, (targets) => {
+              const nodes = targets.flatMap((target) =>
+                [target.nodeId, target.imageId, target.pointsId].map((id) => ({
+                  ...state.nodes[id],
+                  assetId: asset.id,
+                })),
+              );
+              return nodes.length ? [{ type: "nodes.put", nodes }] : [];
+            });
+          });
+          const current = this.store.snapshot().jobs[id];
+          if (current.appliedTargets.length) {
+            const childJobId = await this.submit(
+              {
+                kind: "pose",
+                assetIds: [asset.id],
+                canonicalize: false,
+                placement: job.input.placement,
+              },
+              `${id}-pose`,
+              job,
+            );
+            await this.patch(id, { childJobId });
+          }
         }
         if (job.input.kind === "nano" && assets[0]) {
           const reconstruct = await applyNanoResult(
@@ -681,6 +752,26 @@ export class JobRunner {
           throw new Error(completed.error.message ?? "World Labs task failed");
         if (!completed.response)
           throw new Error("World Labs returned no result");
+        if (job.input.kind === "atlas" || job.input.kind === "video") {
+          const response = completed.response as AtlasGenerateResponse;
+          const request = this.store.snapshot().jobs[id].request as
+            AtlasGenerateRequest | undefined;
+          const prompt = job.input.prompt;
+          if (request?.enhancePrompt && response.promptUsed?.trim()) {
+            const text = response.promptUsed;
+            await this.store.update((state) => {
+              if (state.jobs[id].status === "cancelled") return;
+              if (
+                state.settings.prompt !== prompt ||
+                (state.settings.captionEpoch ?? 0) !==
+                  (job.contextSnapshot?.settings.captionEpoch ?? 0)
+              )
+                return;
+              // Keep the first caption for this description until it is explicitly cleared.
+              state.settings.enhancedCaption ??= { prompt, text };
+            });
+          }
+        }
         if (job.input.kind === "splats")
           assets.push(
             await this.saveSplats(
@@ -851,13 +942,20 @@ export class JobRunner {
       });
     });
     this.active.get(id)?.abort(new Error("Cancelled"));
-    const childId = job.childJobId ?? `${id}-reconstruct`;
+    const childId =
+      job.childJobId ??
+      `${id}-${job.input.kind === "image" ? "pose" : "reconstruct"}`;
     const child = this.store.snapshot().jobs[childId];
     if (child && ["queued", "running"].includes(child.status))
       await this.cancel(childId);
-    if ((job.input.kind === "fal" || job.input.kind === "nano") && job.remoteId)
+    if (
+      (job.input.kind === "fal" ||
+        job.input.kind === "nano" ||
+        job.input.kind === "image") &&
+      job.remoteId
+    )
       await falClient().queue.cancel(
-        job.input.kind === "fal" ? job.input.model : job.input.settings.model,
+        job.input.kind === "nano" ? job.input.settings.model : job.input.model,
         { requestId: job.remoteId },
       );
   }
@@ -866,7 +964,9 @@ export class JobRunner {
     if (!job || !["failed", "cancelled"].includes(job.status))
       throw new Error("Only failed or cancelled jobs can be retried");
     if (
-      (job.input.kind === "fal" || job.input.kind === "nano") &&
+      (job.input.kind === "fal" ||
+        job.input.kind === "nano" ||
+        job.input.kind === "image") &&
       job.submittedAt &&
       !job.remoteId
     )

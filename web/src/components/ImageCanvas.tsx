@@ -5,6 +5,8 @@ import {
   PencilSimple,
   Plus,
   SelectionBackground,
+  SpinnerGap,
+  WarningCircle,
 } from "@phosphor-icons/react";
 import {
   useCallback,
@@ -23,6 +25,7 @@ type Tool = "pan" | "draw" | "erase";
 
 type ImageCanvasProps = {
   source: Asset | null;
+  operation?: { pending: boolean; message?: string; error?: string } | null;
   parent: Asset | null;
   assets: Record<string, Asset>;
   draft: ImageDraft;
@@ -50,6 +53,7 @@ async function loadBitmap(asset: Asset): Promise<ImageBitmap> {
 
 export function ImageCanvas({
   source,
+  operation,
   parent,
   assets,
   draft,
@@ -527,6 +531,13 @@ export function ImageCanvas({
               <span className="ie-before-badge">Before</span>
             )}
           </>
+        ) : operation ? (
+          !operation.pending &&
+          !operation.error && (
+            <div className="ie-empty-canvas" role="status">
+              <span>This Frame has no image.</span>
+            </div>
+          )
         ) : (
           <div className="ie-empty-canvas">
             <div className="ie-empty-mark">
@@ -537,6 +548,22 @@ export function ImageCanvas({
             <button className="ie-button ie-button-primary" onClick={onImport}>
               Import image
             </button>
+          </div>
+        )}
+        {operation?.pending && (
+          <div
+            className="ie-operation-overlay"
+            role="status"
+            aria-label="Pending image operation"
+          >
+            <SpinnerGap className="spin" size={28} />
+            <span>{operation.message || "Generating image"}</span>
+          </div>
+        )}
+        {!operation?.pending && operation?.error && (
+          <div className="ie-operation-overlay is-error" role="status">
+            <WarningCircle size={24} />
+            <span>{operation.error}</span>
           </div>
         )}
       </div>

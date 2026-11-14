@@ -4,6 +4,7 @@ import { constants } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { parseEnv } from "node:util";
+import { environmentValue } from "../web/src/server/environment";
 
 const root = path.resolve(import.meta.dir, "..");
 
@@ -21,12 +22,16 @@ async function launchEnvironment() {
       return {};
     }
   };
+  const inheritedEnv = {
+    ...(await read(path.join(root, ".env"))),
+    ...process.env,
+  };
   return {
     config,
+    inheritedEnv,
     env: {
+      ...inheritedEnv,
       ...(await read(config)),
-      ...(await read(path.join(root, ".env"))),
-      ...process.env,
     },
   };
 }
@@ -100,13 +105,13 @@ export async function doctor(project?: string) {
     },
     {
       name: "worldLabs",
-      ok: !!env.WLT_API_KEY,
+      ok: !!environmentValue("WLT_API_KEY") || !!env.WLT_API_KEY,
       optional: true,
       fix: `Set WLT_API_KEY in ${config} or .env for posing and Atlas.`,
     },
     {
       name: "fal",
-      ok: !!env.FAL_KEY,
+      ok: !!environmentValue("FAL_KEY") || !!env.FAL_KEY,
       optional: true,
       fix: `Set FAL_KEY in ${config} or .env for image edits.`,
     },
@@ -135,7 +140,7 @@ export async function openProject(
   project?: string,
   options: { port?: string; noBrowser?: boolean } = {},
 ) {
-  const { env } = await launchEnvironment();
+  const { env, inheritedEnv } = await launchEnvironment();
   const port = Number(options.port ?? 4310);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("Port must be an integer from 1 to 65535");
@@ -214,7 +219,13 @@ export async function openProject(
   }
   const child = Bun.spawn([process.execPath, "server.ts"], {
     cwd: path.join(root, "web"),
-    env: { ...env, WORLDBASH_WORKSPACE: canonical, PORT: String(port) },
+    // Runtime config is read from the file. Do not promote saved overrides into
+    // inherited values, or removing an override would revive its old value.
+    env: {
+      ...inheritedEnv,
+      WORLDBASH_WORKSPACE: canonical,
+      PORT: String(port),
+    },
     stdout: "inherit",
     stderr: "inherit",
   });

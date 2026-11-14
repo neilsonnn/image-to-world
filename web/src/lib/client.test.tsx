@@ -63,6 +63,7 @@ test("React subscribers skip unrelated snapshots and reconnects discard old resp
             worldLabsConfigured: false,
             falConfigured: false,
             ffmpegAvailable: false,
+            environment: {},
             workspacePath: "/test",
           });
         if (holdNext) {

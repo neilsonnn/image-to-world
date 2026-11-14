@@ -1,5 +1,5 @@
 import { applyJobResult } from "../../../core/result-targets";
-import { fitCaptureClip, prepareContext } from "./depth";
+import { prepareContext } from "./depth";
 import { applyCommand } from "../../../core/commands";
 import {
   captureFrame,
@@ -28,18 +28,20 @@ import {
   type Workspace,
 } from "../../../core/schema";
 import type { WorkspaceStore } from "./store";
+import { environmentValue } from "./environment";
 
 export const worldLabs = () =>
   createClient({
     apiKey: required("WLT_API_KEY"),
-    baseUrl: process.env.WLT_API_BASE_URL || undefined,
+    baseUrl: environmentValue("WLT_API_BASE_URL") || undefined,
   });
 
 export const falClient = () =>
   createFalClient({ credentials: required("FAL_KEY") });
 function required(name: string) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Set ${name} on the worldbash server`);
+  const value = environmentValue(name);
+  if (!value)
+    throw new Error(`Add ${name} in Settings → Environment variables`);
   return value;
 }
 
@@ -138,11 +140,19 @@ export async function buildWorldLabsRequest(
       depth: { depthAsset: await uploadPrepared(prepared.depth, "depth") },
     });
   }
+  const enhance =
+    job.input.kind === "video"
+      ? snapshot.settings.enhancePrompt
+      : job.input.enhancePrompt;
+  const cached = snapshot.settings.enhancedCaption;
+  const reuse = enhance && cached?.prompt === job.input.prompt;
+  const prompt = reuse ? cached.text : job.input.prompt || null;
+  const enhancePrompt = enhance && !reuse;
   if (job.input.kind === "splats")
     return {
       posedFrames: contextFrames,
-      prompt: job.input.prompt || null,
-      enhancePrompt: job.input.enhancePrompt,
+      prompt,
+      enhancePrompt,
       refine: job.input.refine,
     };
   const cameras =
@@ -154,10 +164,8 @@ export async function buildWorldLabsRequest(
     targetCameras: cameras.map((camera) =>
       atlasCamera(camera, sessionFormat(snapshot)),
     ),
-    prompt: job.input.prompt || null,
-    ...(job.input.kind === "atlas"
-      ? { enhancePrompt: job.input.enhancePrompt }
-      : {}),
+    prompt,
+    enhancePrompt,
     returnDepth: job.input.returnDepth,
     modelParameters: { seed: job.input.seed },
   };
@@ -283,7 +291,6 @@ async function integrateFrame(
   const targets = (job.applyTargets ?? []).filter(
     (target) => target.nodeId === input.nodeIds?.[index],
   );
-  const clips = new Map<string, Awaited<ReturnType<typeof fitCaptureClip>>>();
   const changes = (
     state: Workspace,
     owned: NonNullable<Job["applyTargets"]>,
@@ -297,40 +304,11 @@ async function integrateFrame(
         input.placement,
         job.poseOrigin,
       );
-      const clip = clips.get(target.nodeId);
-      if (clip && !next.nodes[target.nodeId].clipInitialized) {
-        next.nodes[clip.id] = clip;
-        next.nodes[target.nodeId] = {
-          ...next.nodes[target.nodeId],
-          clipInitialized: true,
-        };
-      }
     }
     return Object.values(next.nodes).filter(
       (node) => JSON.stringify(node) !== JSON.stringify(state.nodes[node.id]),
     );
   };
-  const snapshot = store.snapshot();
-  const previewApplied = applyJobResult(
-    snapshot,
-    job,
-    (owned) => {
-      const nodes = changes(snapshot, owned);
-      return nodes.length ? [{ type: "nodes.put", nodes }] : [];
-    },
-    targets,
-    false,
-  );
-  if (previewApplied && asset.depthAssetId)
-    for (const target of targets)
-      if (
-        snapshot.jobs[job.id].appliedTargets.includes(target.nodeId) &&
-        !snapshot.nodes[target.nodeId]?.clipInitialized
-      )
-        clips.set(
-          target.nodeId,
-          await fitCaptureClip(store, snapshot, target.nodeId),
-        );
   await store.update((state) => {
     applyJobResult(
       state,

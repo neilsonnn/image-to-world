@@ -113,6 +113,7 @@ export async function reconstructFrames(
   const sourceIndex = imageIndex({ ...store.snapshot(), ...snapshot });
   const expectedByRoot = new Map<string, NonNullable<Job["applyTargets"]>>();
   for (const target of job.applyTargets ?? []) {
+    if (!target.assetId) continue;
     const root = sourceIndex.roots.get(target.assetId)!;
     expectedByRoot.set(root, [...(expectedByRoot.get(root) ?? []), target]);
   }
@@ -128,7 +129,8 @@ export async function reconstructFrames(
       for (let i = 0; i < assets.length; i++) {
         const root = sourceIndex.roots.get(sources[i].id)!;
         const targets = ownedTargets.filter(
-          (target) => sourceIndex.roots.get(target.assetId) === root,
+          (target) =>
+            target.assetId && sourceIndex.roots.get(target.assetId) === root,
         );
         commands.push(
           ...imageReplacementCommands(

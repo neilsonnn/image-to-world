@@ -1,7 +1,7 @@
 ---
 name: worldbash
 description: >-
-  Control an worldbash spatial studio workspace through its CLI: edit images with Nano Banana via FAL, explore branching image history, activate image versions in posed captures, reconstruct images and video, arrange and clip scenes, generate Atlas views, and render camera-path video through keyframes.
+  Control a worldbash spatial studio workspace through its CLI: inspect scenes, plan cameras with look-at targets, build contact sheets, edit images with Nano Banana via FAL, explore branching image history, activate image versions in posed captures, reconstruct images and video, arrange and clip scenes, generate Atlas views, and render camera-path video through keyframes.
 ---
 
 # worldbash
@@ -25,6 +25,52 @@ commands, write JSON to a file and use `bun run worldbash command @file.json`; t
 avoids shell quoting problems. Do not replace the entire workspace to change one
 object. Read the affected object, change its fields, and send `nodes.put`,
 `assets.update`, `image.draft`, or `workspace.update`.
+
+## Plan and review scenes
+
+These helpers support the agent's visual judgment. Inspect the images and viewport,
+choose positions and look-at targets yourself, and visually evaluate the results.
+`camera solve` calculates orientation from your supplied choices; `camera place`
+records a chosen camera as an undoable scene edit. Neither chooses viewpoints,
+optimizes coverage, or generates images. Inspection reports structural validity,
+not visual quality; contact sheets provide images for you to review. Choose the
+order and combination of tools to suit the scene, without a fixed building sequence.
+
+Use `scene inspect` for compact JSON with world poses, calibrated cameras,
+transform capabilities, scene/subtree bounds, and usable or broken Atlas inputs.
+It waits for an open viewport so bounds come from the same NodeSpatial providers
+as framing and selection. `scene inspect --headless` works without a browser and
+explicitly returns null bounds. Optional node IDs limit either report to subtrees.
+Bounds include hidden content and framing boxes for empty nodes; they are not a
+coverage score and do not reflect clipping. Review actual images before splatting.
+
+```sh
+bun run worldbash scene inspect --out inspection.json
+bun run worldbash camera solve --position 2,1.6,3 --look-at 0,1,-4 --fov 65 --out target-camera.json
+bun run worldbash camera place --position 2,1.6,3 --look-at 0,1,-4 --relative-to <node-id> --name 'Window aisle'
+bun run worldbash scene preview --out room.png
+bun run worldbash scene preview --jobs <job-id>,<job-id> --columns 3 --out round.png
+```
+
+`camera solve` is read-only and returns normal camera JSON. Pass it to existing
+`atlas --camera`, `capture --camera`, image creation, or placement commands.
+Position, target, and optional `--up` are interpreted in world coordinates unless
+`--relative-to` names a node. Its current transform and ancestors are respected,
+including scale. The resulting camera is world-space, not parented. Vertical FOV
+is optional; default intrinsics come from the current camera. Coincident targets
+and an up vector parallel to the viewing direction are rejected explicitly.
+`camera place` with these flags makes one undoable camera through `camera.aim`.
+
+`scene preview` defaults to every Frame's current participating image. Supply
+Frame IDs, `--jobs id,id` for completed rounds, or `--assets id,id`; choose one
+selector. This local `contactSheet` job snapshots bindings/labels and produces a
+PNG and JSON manifest. It needs no browser or provider key and does not move the
+viewport or add scene nodes. `--out` exports a copy without overwriting a file.
+
+Discover exact interfaces with `schema aim`, `schema inspection`, `schema jobs`,
+and `schema commands`. Inspection and contact sheets are local jobs, not generation
+requests; they do not authorize subsequent paid Atlas generation. Use the returned
+job ID to inspect/retry a timed-out viewport operation instead of blindly duplicating it.
 
 ## Place multiple images
 
@@ -106,7 +152,8 @@ bun run worldbash camera free
 bun run worldbash atlas <capture-id> --camera target-camera.json --prompt 'Sunlight through the windows'
 ```
 
-A `capture` parent contains a camera, camera-local points, and a local clip box.
+A `capture` parent (Frame in the UI) contains a camera and camera-local points.
+No clip boxes are created automatically; add them explicitly when needed.
 The image plane is a child of the camera. Move the capture parent to keep these
 components aligned. Camera/points transforms are locked in the UI by default.
 The asset owns the immutable RGB/depth and estimated calibration. Pose completion
@@ -145,7 +192,10 @@ whole scene. `invert:true` retains the inside of the box. Spark renders clipping
 Atlas receives a matching binary mask. Source files are preserved.
 
 Hover the viewport for WASD/QE flight, right-drag or two-finger swipe to look,
-Shift for speed, and pinch to change FOV. Gizmo modes use 1/2/3. `camera --file`
+Shift for speed, and pinch to change FOV. The combined gizmo shows supported move/rotate/scale handles together.
+Center uses combined bounds; Origin uses average selected origins. World/Object
+chooses world axes or the primary selected object’s axes. Frames and cameras
+cannot be scaled; per-node `transformPermissions` can further restrict operations. `camera --file`
 writes the persisted viewport camera; `camera view` resolves a node's world camera.
 
 ## Layout, ordered edits, and undo
@@ -241,7 +291,7 @@ captures keep their placement. Saved camera extrinsics anchor the solve; a singl
 view needs source depth for scale. Intrinsics are re-estimated. Large image changes
 can reduce registration accuracy. Inspect the result before using it as context.
 
-All generation intent passes through `generation.submit`: `image.edit`, `pose`,
+All generation intent passes through `generation.submit`: `image.create`, `image.edit`, `pose`,
 `view`, `splats`, `video`, or `reconstruct`. `splats [capture-id...] [--refine]`
 reconstructs a splat node at the scene root from the Atlas context captures. Use `schema commands` for exact fields and
 `command @file.json` for options beyond the CLI flags. UI and CLI share its defaults.

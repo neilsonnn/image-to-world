@@ -78,6 +78,14 @@ export function generationInput(
   const r = generationSchema.parse(request);
   const s = workspace.settings;
   switch (r.kind) {
+    case "image.create":
+      return {
+        kind: "image",
+        prompt: r.prompt,
+        model: r.model,
+        seed: r.seed,
+        placement: r.placement ?? currentCamera(workspace),
+      };
     case "image.edit": {
       const sourceAssetId = r.sourceAssetId ?? s.editor2d.activeAssetId;
       if (!sourceAssetId) throw new Error("Choose an image to edit");

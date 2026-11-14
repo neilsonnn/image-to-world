@@ -71,6 +71,7 @@ function useDockWorkspace() {
       "seed",
       "seedMode",
       "enhancePrompt",
+      "enhancedCaption",
       "atlasReturnDepth",
       "format",
       "viewingCameraId",
@@ -139,10 +140,7 @@ function SpatialContext({
   const generating = Object.values(workspace.jobs)
     .filter((job) => job.input.kind === "atlas" && isActive(job))
     .sort((a, b) => a.createdAt - b.createdAt);
-  const posing = captures.filter(
-    (node) => node.jobId && isActive(workspace.jobs[node.jobId]),
-  ).length;
-  const inputCount = context.length + posing;
+  const inputCount = context.length;
   const locked = lockedFormat(workspace);
   const full = inputCount >= MAX_CONTEXT_FRAMES;
 
@@ -315,7 +313,10 @@ function CaptureTile({
   const { safeCommand } = useWorldbashClient();
   const node = workspace.nodes[id];
   const asset = node.assetId ? workspace.assets[node.assetId] : undefined;
-  const job = node.jobId ? workspace.jobs[node.jobId] : undefined;
+  const sourceJob = node.jobId ? workspace.jobs[node.jobId] : undefined;
+  const job =
+    (sourceJob?.childJobId && workspace.jobs[sourceJob.childJobId]) ||
+    sourceJob;
   const pending = isActive(job) ? job : undefined;
   const failed = job?.status === "failed" && !asset?.camera ? job : undefined;
   const visible = isVisible(workspace, node);
@@ -371,7 +372,7 @@ function CaptureTile({
       )}
       <div className={`context-tile-actions${failed ? " is-pinned" : ""}`}>
         {failed && (
-          <Hint label="Retry posing">
+          <Hint label="Retry generation">
             <button
               aria-label={`Retry ${node.name}`}
               onClick={() =>
@@ -403,7 +404,7 @@ function CaptureTile({
             </button>
           </Hint>
         )}
-        <Hint label={pending || failed ? "Remove image" : "Delete capture"}>
+        <Hint label={pending || failed ? "Remove image" : "Delete Frame"}>
           <button
             aria-label={`Remove ${node.name}`}
             onClick={() => {
@@ -490,6 +491,11 @@ function NewFrames({ workspace }: { workspace: DockWorkspace }) {
   return (
     <section className="new-frames" aria-label="New frames">
       <PromptButton
+        indicator={
+          workspace.settings.enhancedCaption ? (
+            <Lightning weight="fill" aria-label="Enhanced caption cached" />
+          ) : undefined
+        }
         label="Describe the scene"
         hint="Describe the scene for Atlas and splats"
         placeholder="Add details that are not obvious in the photos, such as a 3D CGI scene with hand-painted textures"
@@ -498,7 +504,25 @@ function NewFrames({ workspace }: { workspace: DockWorkspace }) {
         onChange={(prompt) =>
           void safeCommand({ type: "workspace.update", settings: { prompt } })
         }
-      />
+      >
+        <Flex align="center" justify="between" gap="2">
+          <Text size="1" color="gray">
+            {workspace.settings.enhancedCaption
+              ? "Enhanced caption cached"
+              : "No enhanced caption cached"}
+          </Text>
+          {workspace.settings.enhancedCaption && (
+            <Button
+              size="1"
+              variant="surface"
+              color="gray"
+              onClick={() => void safeCommand({ type: "caption.clear" })}
+            >
+              Clear
+            </Button>
+          )}
+        </Flex>
+      </PromptButton>
       <Hint label={blocked ?? "Render the current view (Shift+Enter)"}>
         <Button
           size="1"

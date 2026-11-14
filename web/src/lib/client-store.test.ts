@@ -25,6 +25,48 @@ function project() {
   return workspace;
 }
 
+test("saving provider keys refreshes readiness without putting secrets in client state", async () => {
+  const client = createWorldbashClient();
+  const original = project();
+  client.acceptWorkspace(original);
+  const requests: string[] = [];
+  const network = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(
+      async (input: RequestInfo | URL) => {
+        requests.push(String(input));
+        return Response.json(
+          input === "/api/commands"
+            ? { revision: original.revision }
+            : {
+                workspacePath: "/temporary-project",
+                worldLabsConfigured: true,
+                falConfigured: false,
+                ffmpegAvailable: true,
+                environment: {
+                  WLT_API_KEY: { configured: true, source: "saved" },
+                },
+              },
+        );
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  );
+  try {
+    await client.command({
+      type: "environment.configure",
+      values: { WLT_API_KEY: "private-test-key" },
+    });
+    expect(requests).toEqual(["/api/commands", "/api/status"]);
+    expect(client.store.getState().status?.worldLabsConfigured).toBe(true);
+    expect(client.getWorkspace()).toBe(original);
+    expect(JSON.stringify(client.store.getState())).not.toContain(
+      "private-test-key",
+    );
+  } finally {
+    network.mockRestore();
+  }
+});
+
 test("a refreshed snapshot changes only edited branches, including removal and array order", () => {
   const client = createWorldbashClient();
   const original = project();
@@ -74,6 +116,7 @@ test("editor instances do not share their workspace or errors", () => {
     workspace: null,
     status: null,
     loading: true,
+    connected: false,
     error: null,
   });
 });

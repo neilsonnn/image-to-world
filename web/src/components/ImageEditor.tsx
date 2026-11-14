@@ -1,5 +1,11 @@
+import {
+  imageModels,
+  modelIds,
+  imageEditRatios,
+  imageEditResolutions,
+} from "../../../core/models";
 import { useWorldbashClient, useWorkspaceData } from "../lib/client";
-import { captureRoot, captureNodes } from "../../../core/captures";
+import { selectedImageOperation } from "../../../core/image-operation";
 import { selectedCaptureMask } from "../lib/clip-mask";
 import {
   ArrowCounterClockwise,
@@ -63,27 +69,6 @@ type NanoJob = Job & { input: Extract<Job["input"], { kind: "nano" }> };
 
 const EMPTY_DRAFT: ImageDraft = { strokes: [], layers: [] };
 
-function selectedImageId(
-  workspace: Pick<Workspace, "assets" | "nodes" | "primaryId" | "selection">,
-) {
-  const id = workspace.primaryId ?? workspace.selection.at(-1);
-  if (!id) return null;
-  const asset = workspace.assets[id];
-  if (asset?.kind === "image") return asset.id;
-  const capture = captureRoot(workspace, id);
-  if (capture) {
-    try {
-      return captureNodes(workspace, capture.id).image.assetId ?? null;
-    } catch {
-      return capture.assetId ?? null;
-    }
-  }
-  const nodeAssetId = workspace.nodes[id]?.assetId;
-  if (nodeAssetId && workspace.assets[nodeAssetId]?.kind === "image")
-    return nodeAssetId;
-  return null;
-}
-
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -102,6 +87,8 @@ export function ImageEditor({
   const workspace = useWorkspaceData(
     [
       "nodes",
+      "jobs",
+      "resultOwners",
       "assets",
       "selection",
       "primaryId",
@@ -145,12 +132,18 @@ export function ImageEditor({
   onErrorRef.current = onError;
   workspaceRef.current = workspace;
 
-  const activeAsset = editor.activeAssetId
-    ? workspace.assets[editor.activeAssetId]
+  const selectedOperation = selectedImageOperation(workspace);
+  const displayedAssetId = selectedOperation
+    ? selectedOperation.assetId
+    : editor.activeAssetId;
+  const activeAsset = displayedAssetId
+    ? workspace.assets[displayedAssetId]
     : undefined;
   const source = activeAsset?.kind === "image" ? activeAsset : null;
   const sourceId = source?.id;
   const maskState = useMemo(() => {
+    if (selectedOperation?.pending || !sourceId)
+      return { mask: null, error: undefined };
     try {
       return {
         mask: selectedCaptureMask(
@@ -179,6 +172,7 @@ export function ImageEditor({
     workspace.selection,
     previewNodes,
     sourceId,
+    selectedOperation?.pending,
   ]);
   const { mask, error: maskError } = maskState;
   const parent =
@@ -193,8 +187,12 @@ export function ImageEditor({
       ),
     [workspace.assets],
   );
-  const selectedImage = selectedImageId(workspace);
-  const selectionKey = workspace.selection.join("\u001f");
+  const selectedImage = selectedOperation?.assetId;
+  const selectionKey = JSON.stringify([
+    workspace.primaryId,
+    workspace.selection,
+    selectedImage,
+  ]);
   const serverSettingsJson = JSON.stringify(workspace.settings.editor2d);
   const serverDraft = source
     ? (workspace.imageDrafts[source.id] ?? EMPTY_DRAFT)
@@ -574,9 +572,11 @@ export function ImageEditor({
         title={
           <span className="ie-title">
             <strong>Image</strong>
-            {source && (
-              <Hint label={source.name}>
-                <span className="quiet">{source.name}</span>
+            {(selectedOperation || source) && (
+              <Hint label={selectedOperation?.name ?? source!.name}>
+                <span className="quiet">
+                  {selectedOperation?.name ?? source!.name}
+                </span>
               </Hint>
             )}
           </span>
@@ -681,6 +681,7 @@ export function ImageEditor({
         <div className="ie-stage-column">
           <ImageCanvas
             source={source}
+            operation={selectedOperation}
             parent={parent}
             assets={workspace.assets}
             draft={draft}
@@ -977,12 +978,11 @@ export function ImageEditor({
                         )
                       }
                     >
-                      <option value="fal-ai/nano-banana-2/edit">
-                        Nano Banana 2
-                      </option>
-                      <option value="fal-ai/nano-banana-pro/edit">
-                        Nano Banana Pro
-                      </option>
+                      {modelIds("edit").map((id) => (
+                        <option key={id} value={id}>
+                          {imageModels[id].label}
+                        </option>
+                      ))}
                     </select>
                   </Field>
                   <Field label="Resolution">
@@ -996,9 +996,9 @@ export function ImageEditor({
                         )
                       }
                     >
-                      <option>1K</option>
-                      <option>2K</option>
-                      <option>4K</option>
+                      {imageEditResolutions.map((value) => (
+                        <option key={value}>{value}</option>
+                      ))}
                     </select>
                   </Field>
                   <Field label="Aspect ratio">
@@ -1012,7 +1012,7 @@ export function ImageEditor({
                         )
                       }
                     >
-                      {ASPECT_RATIOS.map((value) => (
+                      {imageEditRatios.map((value) => (
                         <option key={value}>{value}</option>
                       ))}
                     </select>
@@ -1099,20 +1099,6 @@ export function ImageEditor({
     </div>
   );
 }
-
-const ASPECT_RATIOS = [
-  "auto",
-  "21:9",
-  "16:9",
-  "3:2",
-  "4:3",
-  "5:4",
-  "1:1",
-  "4:5",
-  "3:4",
-  "2:3",
-  "9:16",
-] as const;
 
 /** A square icon button that opens a popover of secondary edit inputs. */
 function ToolPopover({

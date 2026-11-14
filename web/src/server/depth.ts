@@ -1,8 +1,7 @@
 import { EXRExporter } from "three/examples/jsm/exporters/EXRExporter.js";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { Box3, Vector3, DataTexture, FloatType, RGBAFormat } from "three";
-import { worldMatrix, atlasCamera } from "../../../core/cameras";
-import { captureClip } from "../../../core/clips";
+import { DataTexture, FloatType, RGBAFormat } from "three";
+import { atlasCamera } from "../../../core/cameras";
 import { captureFrame } from "../../../core/captures";
 import { sessionFormat } from "../../../core/formats";
 import {
@@ -31,71 +30,6 @@ export async function readDepth(
   for (let i = 0; i < data.length; i++)
     data[i] = Math.exp(b + (pixels[i * 4] / 255) * (a - b));
   return { data, width: image.width, height: image.height, stride: 1 };
-}
-
-async function readConfidence(store: WorkspaceStore, asset: Asset) {
-  if (!asset.confidenceAssetId) return;
-  const { file, asset: confidence } = await store.assetFile(
-    asset.confidenceAssetId,
-  );
-  if (confidence.mimeType.includes("exr"))
-    return linearDepth(await Bun.file(file).arrayBuffer());
-  const image = await loadImage(file),
-    canvas = createCanvas(image.width, image.height),
-    context = canvas.getContext("2d");
-  context.drawImage(image, 0, 0);
-  const pixels = context.getImageData(0, 0, image.width, image.height).data;
-  const data = Float32Array.from(
-    { length: image.width * image.height },
-    (_, index) => pixels[index * 4] / 255,
-  );
-  return { data, width: image.width, height: image.height, stride: 1 };
-}
-
-export async function fitCaptureClip(
-  store: WorkspaceStore,
-  workspace: Workspace,
-  id: string,
-) {
-  const frame = captureFrame(workspace, id);
-  const depth = await readDepth(store, frame.asset);
-  const confidence = await readConfidence(store, frame.asset);
-  if (
-    confidence &&
-    (confidence.width !== depth.width || confidence.height !== depth.height)
-  )
-    throw new Error("Confidence and depth grids have different dimensions");
-  const intrinsics = depthIntrinsics(
-    frame.asset.camera!,
-    depth.width,
-    depth.height,
-  );
-  const matrix = worldMatrix(frame.node, workspace.nodes)
-    .invert()
-    .multiply(worldMatrix(frame.points, workspace.nodes));
-  const box = new Box3(),
-    point = new Vector3();
-  for (let y = 0; y < depth.height; y++)
-    for (let x = 0; x < depth.width; x++) {
-      const z = depth.data[(y * depth.width + x) * depth.stride];
-      if (
-        !Number.isFinite(z) ||
-        z <= 0 ||
-        (confidence &&
-          confidence.data[(y * depth.width + x) * confidence.stride] < 0.5)
-      )
-        continue;
-      point
-        .set(
-          ((x + 0.5 - intrinsics.cx) / intrinsics.fx) * z,
-          (-(y + 0.5 - intrinsics.cy) / intrinsics.fy) * z,
-          -z,
-        )
-        .applyMatrix4(matrix);
-      box.expandByPoint(point);
-    }
-  if (box.isEmpty()) throw new Error("Posed depth contains no finite points");
-  return captureClip(id, box.min.toArray(), box.max.toArray());
 }
 
 export async function prepareContext(

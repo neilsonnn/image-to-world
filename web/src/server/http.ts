@@ -1,9 +1,11 @@
+import { inspectScene, inspectionSchema } from "../../../core/inspection";
 import path from "node:path";
 import { CommandService } from "./commands";
 import { cameraSchema } from "../../../core/schema";
 import { JobRunner } from "./jobs";
 import { WorkspaceStore } from "./store";
 import { ffmpegPath } from "./video";
+import { environmentValue, environmentStatus } from "./environment";
 
 export async function createService(root: string) {
   const store = await new WorkspaceStore(root).init();
@@ -40,13 +42,20 @@ export async function createService(root: string) {
         const route = url.pathname.replace(/^\/api\/?/, "");
         if (request.method === "GET" && route === "workspace")
           return Response.json(store.snapshot());
+        if (request.method === "GET" && route === "scene/inspect") {
+          const ids = url.searchParams.getAll("nodeId");
+          return Response.json(
+            inspectScene(store.snapshot(), ids.length ? ids : undefined),
+          );
+        }
         if (request.method === "GET" && route === "status")
           return Response.json({
             application: "worldbash",
             workspacePath: store.root,
-            worldLabsConfigured: !!process.env.WLT_API_KEY,
-            falConfigured: !!process.env.FAL_KEY,
+            worldLabsConfigured: !!environmentValue("WLT_API_KEY"),
+            falConfigured: !!environmentValue("FAL_KEY"),
             ffmpegAvailable: !!ffmpegPath(),
+            environment: environmentStatus(),
           });
         if (request.method === "GET" && route === "events") {
           const encoder = new TextEncoder();
@@ -145,13 +154,15 @@ export async function createService(root: string) {
             assets.push(await store.importFile(file, file.name));
           return Response.json(assets);
         }
-        const capture = /^captures\/([^/]+)(?:\/(claim|fail))?$/.exec(route);
+        const capture = /^viewport-jobs\/([^/]+)(?:\/(claim|fail))?$/.exec(
+          route,
+        );
         if (request.method === "POST" && capture) {
           const [, id, action] = capture;
           const job = store.snapshot().jobs[id];
           if (
             !job ||
-            job.input.kind !== "capture" ||
+            !["capture", "inspect"].includes(job.input.kind) ||
             !["queued", "running"].includes(job.status)
           )
             throw new Error("Capture job is not active");
@@ -166,7 +177,10 @@ export async function createService(root: string) {
             await store.update((state) => {
               if (state.jobs[id].status === "cancelled") return;
               state.jobs[id].status = "running";
-              state.jobs[id].message = "Capturing viewport";
+              state.jobs[id].message =
+                job.input.kind === "inspect"
+                  ? "Inspecting scene"
+                  : "Capturing viewport";
               state.jobs[id].updatedAt = Date.now();
             });
             return Response.json({ claimed: true });
@@ -183,6 +197,36 @@ export async function createService(root: string) {
           }
           const form = await request.formData();
           const file = form.get("files");
+          if (job.input.kind === "inspect") {
+            if (
+              !(file instanceof File) ||
+              file.type.split(";")[0] !== "application/json"
+            )
+              throw new Error("Inspection must be JSON");
+            const report = inspectionSchema.parse(
+              JSON.parse(await file.text()),
+            );
+            if (report.source !== "viewport")
+              throw new Error("Expected a viewport inspection");
+            const asset = await store.importFile(
+              new Blob([JSON.stringify(report, null, 2)], {
+                type: "application/json",
+              }),
+              `${id}-inspection.json`,
+              { jobId: id, name: "Scene inspection" },
+            );
+            await store.update((state) => {
+              if (state.jobs[id].status === "cancelled") return;
+              Object.assign(state.jobs[id], {
+                status: "succeeded",
+                outputAssetIds: [asset.id],
+                message: "Saved scene inspection",
+                updatedAt: Date.now(),
+              });
+            });
+            claims.delete(id);
+            return Response.json(asset);
+          }
           if (!(file instanceof File) || file.type !== "image/png")
             throw new Error("Capture must be a PNG file");
           const camera = cameraSchema.parse(

@@ -1,4 +1,5 @@
 import { createStore } from "zustand/vanilla";
+import type { EnvironmentStatus } from "../../../core/environment";
 import type {
   Asset,
   Command,
@@ -11,12 +12,14 @@ export type Status = {
   worldLabsConfigured: boolean;
   falConfigured: boolean;
   ffmpegAvailable: boolean;
+  environment: EnvironmentStatus;
 };
 
 export type ClientState = {
   workspace: Workspace | null;
   status: Status | null;
   loading: boolean;
+  connected: boolean;
   error: string | null;
 };
 
@@ -78,6 +81,7 @@ export function createWorldbashClient() {
     workspace: null,
     status: null,
     loading: true,
+    connected: false,
     error: null,
   }));
   const setError = (error: string | null) => store.setState({ error });
@@ -126,6 +130,11 @@ export function createWorldbashClient() {
     }
     return refreshing;
   };
+  const refreshStatus = async () => {
+    const epoch = connection;
+    const status = await readJson<Status>(await fetch("/api/status"));
+    if (epoch === connection) store.setState({ status });
+  };
   const command = async (value: Command) => {
     setError(null);
     const result = await readJson<CommandResult>(
@@ -138,7 +147,8 @@ export function createWorldbashClient() {
         body: JSON.stringify(value),
       }),
     );
-    await refresh();
+    if (value.type === "environment.configure") await refreshStatus();
+    else await refresh();
     return result;
   };
   const safeCommand = async (value: Command) => {
@@ -172,6 +182,13 @@ export function createWorldbashClient() {
       })
       .catch(() => undefined);
     const events = new EventSource("/api/events");
+    events.addEventListener("open", () => {
+      if (epoch !== connection) return;
+      store.setState({ connected: true });
+      if (store.getState().error === "Live updates disconnected")
+        setError(null);
+      void refresh();
+    });
     events.addEventListener("change", (event) => {
       // Commands already fetch their own result; skip revisions the client has.
       const current = store.getState().workspace?.revision;
@@ -179,6 +196,8 @@ export function createWorldbashClient() {
       void refresh();
     });
     events.addEventListener("error", (event) => {
+      if (epoch !== connection) return;
+      store.setState({ connected: false });
       setError(
         event instanceof MessageEvent && event.data
           ? String(event.data)
@@ -187,6 +206,7 @@ export function createWorldbashClient() {
     });
     return () => {
       events.close();
+      store.setState({ connected: false });
       connection++;
       requested = false;
       refreshing = undefined;

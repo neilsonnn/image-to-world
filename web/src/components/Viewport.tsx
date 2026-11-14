@@ -1,3 +1,4 @@
+import { NewImagePrompt } from "./NewImagePrompt";
 import { useWorldbashClient, useWorkspaceData } from "../lib/client";
 import { NodeIcon } from "./NodeIcon";
 import { ViewportPathActions } from "./ViewportPathActions";
@@ -10,6 +11,10 @@ import {
   Camera as CameraIcon,
   Crosshair,
   ImageSquare,
+  Globe,
+  Cube,
+  BoundingBox,
+  CrosshairSimple,
   SlidersHorizontal,
 } from "@phosphor-icons/react";
 import {
@@ -48,18 +53,15 @@ import {
 } from "three";
 import { FlyControls } from "../lib/fly";
 import { CameraTransition } from "../lib/camera-transition";
-import { ToolbarIconButton } from "./ui";
-import {
-  ArrowsOutCardinal,
-  ArrowClockwise,
-  CornersOut,
-} from "@phosphor-icons/react";
+
 import { selectedNodes, selectedRoots } from "../../../core/scene";
 import { transformCapabilities } from "../../../core/node-capabilities";
+import { CombinedTransformControls } from "../lib/combined-transform";
 import {
-  TransformControls,
-  type TransformControlsMode,
-} from "three/examples/jsm/controls/TransformControls.js";
+  selectionPivot,
+  type PivotPlacement,
+  type GizmoSpace,
+} from "../../../core/gizmo";
 import { cameraMatrix, transformNodes } from "../../../core/cameras";
 import {
   type Camera,
@@ -84,7 +86,7 @@ type Runtime = {
   camera: PerspectiveCamera;
   cameraTransition: CameraTransition;
   fly: FlyControls;
-  transform: TransformControls;
+  transform: CombinedTransformControls;
   spark: SparkRenderer;
   graph: SceneGraph;
   grid: GridHelper;
@@ -266,6 +268,7 @@ export function Viewport({
   const { command, upload, setError: onError } = useWorldbashClient();
   const source = useWorkspaceData(
     [
+      "revision",
       "nodes",
       "assets",
       "jobs",
@@ -320,9 +323,9 @@ export function Viewport({
   const captureAttempts = useRef(new Map<string, number>());
   const [captureTick, setCaptureTick] = useState(0);
   const [syncTick, setSyncTick] = useState(0);
-  const [mode, setMode] = useState<TransformControlsMode>("translate");
-  const capabilities = transformCapabilities(selectedNodes(workspace));
-  const activeMode = capabilities[mode] ? mode : "translate";
+  const [pivotPlacement, setPivotPlacement] =
+    useState<PivotPlacement>("center");
+  const [gizmoSpace, setGizmoSpace] = useState<GizmoSpace>("world");
   const [draggingFiles, setDraggingFiles] = useState(false);
   useEffect(
     () =>
@@ -366,7 +369,6 @@ export function Viewport({
         event.preventDefault();
         const runtime = runtimeRef.current;
         runtime.transform.reset();
-        runtime.transform.dragging = false;
         runtime.dragging = false;
         runtime.transformPointer = false;
         onPreviewNodes(null);
@@ -429,16 +431,7 @@ export function Viewport({
         return;
       }
       if (runtime?.fly.keyDown(event)) return;
-      const next = ({ "1": "translate", "2": "rotate", "3": "scale" } as const)[
-        event.key as "1" | "2" | "3"
-      ];
-      if (next) {
-        event.preventDefault();
-        if (!transformCapabilities(selectedNodes(workspaceRef.current))[next])
-          return;
-        runtimeRef.current?.transform.setMode(next);
-        setMode(next);
-      } else if (event.key.toLowerCase() === "f") {
+      if (event.key.toLowerCase() === "f") {
         event.preventDefault();
         focusRef.current();
       }
@@ -475,8 +468,10 @@ export function Viewport({
     const camera = new PerspectiveCamera(50, 1, 0.01, 10_000);
     applyCamera(camera, workspaceRef.current.settings.viewportCamera);
 
-    const transform = new TransformControls(camera, renderer.domElement);
-    transform.setMode(activeMode);
+    const transform = new CombinedTransformControls(
+      camera,
+      renderer.domElement,
+    );
     transform.setSpace("world");
     transform.setColors(
       color("axis-x"),
@@ -555,6 +550,11 @@ export function Viewport({
     transform.addEventListener("dragging-changed", (event) => {
       runtime.dragging = Boolean(event.value);
       if (runtime.dragging) runtime.fly.stop();
+    });
+    transform.addEventListener("cancel", () => {
+      runtime.transformPointer = false;
+      onPreviewNodes(null);
+      setSyncTick((value) => value + 1);
     });
     transform.addEventListener("mouseDown", () => {
       runtime.transformPointer = true;
@@ -724,6 +724,7 @@ export function Viewport({
 
     let animation = 0;
     let lastFrame = performance.now();
+    let spatialVersion = graph.spatialVersion;
     const render = () => {
       const now = performance.now();
       const seconds = (now - lastFrame) / 1000;
@@ -739,6 +740,14 @@ export function Viewport({
       runtime.cameraTransition.update(now);
       runtime.fly.update(seconds);
       graph.update();
+      if (
+        graph.spatialVersion !== spatialVersion &&
+        !runtime.dragging &&
+        !runtime.fly.active
+      ) {
+        spatialVersion = graph.spatialVersion;
+        setSyncTick((value) => value + 1);
+      }
       renderer.render(scene, camera);
     };
     render();
@@ -824,7 +833,10 @@ export function Viewport({
       runtime.lastCamera = incomingCamera;
     }
 
-    runtime.transform.setMode(activeMode);
+    runtime.transform.setSpace(gizmoSpace === "object" ? "local" : "world");
+    runtime.transform.setCapabilities(
+      transformCapabilities(selectedNodes(workspace)),
+    );
     runtime.transform.detach();
     runtime.pivot.removeFromParent();
     const topLevel = selectedRoots(
@@ -835,11 +847,18 @@ export function Viewport({
     ).filter((id) => runtime.graph.entries.has(id));
     runtime.selectedRoots = topLevel;
     if (topLevel.length) {
-      const center = new Vector3();
-      for (const id of topLevel) center.add(runtime.graph.center(id)!);
-      center.multiplyScalar(1 / topLevel.length);
-      runtime.pivot.position.copy(center);
-      runtime.pivot.quaternion.identity();
+      const pivot = selectionPivot(
+        workspace.nodes,
+        topLevel,
+        workspace.primaryId,
+        pivotPlacement,
+        gizmoSpace,
+        pivotPlacement === "center"
+          ? runtime.graph.bounds(topLevel)
+          : undefined,
+      );
+      runtime.pivot.position.copy(pivot.position);
+      runtime.pivot.quaternion.copy(pivot.quaternion);
       runtime.pivot.scale.set(1, 1, 1);
       runtime.scene.add(runtime.pivot);
       runtime.pivot.updateMatrixWorld(true);
@@ -858,7 +877,8 @@ export function Viewport({
     workspace.settings.viewingCameraId,
     syncTick,
     previewCamera,
-    activeMode,
+    pivotPlacement,
+    gizmoSpace,
   ]);
 
   useEffect(() => {
@@ -867,7 +887,8 @@ export function Viewport({
     const now = Date.now();
     let nextRetry = Number.POSITIVE_INFINITY;
     for (const job of Object.values(workspace.jobs)) {
-      if (job.input.kind !== "capture") continue;
+      if (job.input.kind !== "capture" && job.input.kind !== "inspect")
+        continue;
       if (job.status !== "queued" && job.status !== "running") {
         captureAttempts.current.delete(job.id);
         continue;
@@ -894,7 +915,7 @@ export function Viewport({
         let claimed = false;
         try {
           const claimResponse = await fetch(
-            `/api/captures/${encodeURIComponent(job.id)}/claim`,
+            `/api/viewport-jobs/${encodeURIComponent(job.id)}/claim`,
             {
               method: "POST",
               headers: { "X-Worldbash-Client": "web" },
@@ -908,6 +929,34 @@ export function Viewport({
           );
           if (!claimed) return;
 
+          if (captureInput.kind === "inspect") {
+            if (runtime.dragging || runtime.fly.active)
+              throw new Error(
+                "Finish the viewport gesture and retry scene inspection",
+              );
+            runtime.graph.sync(workspaceRef.current);
+            await runtime.graph.ready(controller.signal);
+            const report = runtime.graph.inspect(captureInput.nodeIds);
+            const form = new FormData();
+            form.append(
+              "files",
+              new File([JSON.stringify(report, null, 2)], "inspection.json", {
+                type: "application/json",
+              }),
+            );
+            const response = await fetch(
+              `/api/viewport-jobs/${encodeURIComponent(job.id)}`,
+              {
+                method: "POST",
+                headers: { "X-Worldbash-Client": "web" },
+                body: form,
+                signal: controller.signal,
+              },
+            );
+            if (!response.ok)
+              throw new Error(`Inspection upload failed (${response.status})`);
+            return;
+          }
           await runtime.graph.ready(controller.signal);
           const originalSize = runtime.renderer.getSize(new Vector2());
           const originalPixelRatio = runtime.renderer.getPixelRatio();
@@ -1010,7 +1059,7 @@ export function Viewport({
           );
           form.append("camera", JSON.stringify(capturedCamera));
           const uploadResponse = await fetch(
-            `/api/captures/${encodeURIComponent(job.id)}`,
+            `/api/viewport-jobs/${encodeURIComponent(job.id)}`,
             {
               method: "POST",
               headers: { "X-Worldbash-Client": "web" },
@@ -1025,15 +1074,18 @@ export function Viewport({
           const detail = message(error);
           errorRef.current(detail);
           if (claimed) {
-            await fetch(`/api/captures/${encodeURIComponent(job.id)}/fail`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Worldbash-Client": "web",
+            await fetch(
+              `/api/viewport-jobs/${encodeURIComponent(job.id)}/fail`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Worldbash-Client": "web",
+                },
+                body: JSON.stringify({ error: detail }),
+                signal: controller.signal,
               },
-              body: JSON.stringify({ error: detail }),
-              signal: controller.signal,
-            }).catch(() => undefined);
+            ).catch(() => undefined);
           }
         } finally {
           captureControllers.current.delete(job.id);
@@ -1048,13 +1100,6 @@ export function Viewport({
     );
     return () => window.clearTimeout(timer);
   }, [workspace.jobs, captureTick]);
-
-  const changeMode = (next: TransformControlsMode) => {
-    if (!capabilities[next]) return;
-    runtimeRef.current?.transform.setMode(next);
-    setMode(next);
-    runtimeRef.current?.renderer.domElement.focus({ preventScroll: true });
-  };
 
   const placementCamera = () => {
     const runtime = runtimeRef.current;
@@ -1204,36 +1249,46 @@ export function Viewport({
           role="toolbar"
           aria-label="Transform tools"
         >
-          <ToolbarIconButton
-            label="Move selection (1)"
-            aria-pressed={activeMode === "translate"}
-            disabled={!capabilities.translate}
-            onClick={() => changeMode("translate")}
+          <Tooltip
+            delayDuration={0}
+            content="Center: combined bounds. Origin: average of selected object origins."
           >
-            <ArrowsOutCardinal />
-          </ToolbarIconButton>
-          <ToolbarIconButton
-            label="Rotate selection (2)"
-            aria-pressed={activeMode === "rotate"}
-            disabled={!capabilities.rotate}
-            onClick={() => changeMode("rotate")}
+            <label className="gizmo-select">
+              {pivotPlacement === "center" ? (
+                <BoundingBox />
+              ) : (
+                <CrosshairSimple />
+              )}
+              <select
+                aria-label="Gizmo placement"
+                value={pivotPlacement}
+                onChange={(e) =>
+                  setPivotPlacement(e.target.value as PivotPlacement)
+                }
+              >
+                <option value="center">Center</option>
+                <option value="origin">Origin</option>
+              </select>
+            </label>
+          </Tooltip>
+          <Tooltip
+            delayDuration={0}
+            content="World axes or the primary selected object's axes."
           >
-            <ArrowClockwise />
-          </ToolbarIconButton>
-          <ToolbarIconButton
-            label={
-              capabilities.scale
-                ? "Scale selection (3)"
-                : "Selection does not support scaling"
-            }
-            aria-pressed={activeMode === "scale"}
-            disabled={!capabilities.scale}
-            onClick={() => changeMode("scale")}
-          >
-            <CornersOut />
-          </ToolbarIconButton>
+            <label className="gizmo-select">
+              {gizmoSpace === "world" ? <Globe /> : <Cube />}
+              <select
+                aria-label="Gizmo space"
+                value={gizmoSpace}
+                onChange={(e) => setGizmoSpace(e.target.value as GizmoSpace)}
+              >
+                <option value="world">World</option>
+                <option value="object">Object</option>
+              </select>
+            </label>
+          </Tooltip>
         </div>
-        <span className="viewport-overlay-spacer" />
+        <NewImagePrompt camera={placementCamera} />
         <div className="viewport-tools" role="toolbar" aria-label="View">
           <Tooltip delayDuration={0} content="Focus selection (F)">
             <IconButton

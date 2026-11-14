@@ -2,7 +2,9 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import type { Asset } from "../../../core/schema";
 import type { WorkspaceStore } from "./store";
-export const ffmpegPath = () => Bun.which(process.env.FFMPEG_PATH || "ffmpeg");
+import { environmentValue } from "./environment";
+export const ffmpegPath = () =>
+  Bun.which(environmentValue("FFMPEG_PATH") || "ffmpeg");
 export async function encodeVideo(
   store: WorkspaceStore,
   frames: Asset[],
@@ -79,7 +81,7 @@ export async function extractVideoFrames(
   const { asset, file } = await store.assetFile(videoAssetId);
   if (asset.kind !== "video") throw new Error("Choose a video asset");
   const ffmpeg = ffmpegPath();
-  const ffprobe = Bun.which(process.env.FFPROBE_PATH || "ffprobe");
+  const ffprobe = Bun.which(environmentValue("FFPROBE_PATH") || "ffprobe");
   if (!ffmpeg || !ffprobe)
     throw new Error("Install FFmpeg and ffprobe to reconstruct video");
   const run = async (args: string[]) => {

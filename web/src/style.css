@@ -44,7 +44,7 @@ button {
   z-index: 20;
   grid-column: 1/-1;
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr) auto;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
   align-items: center;
   height: 40px;
   padding: 0 8px 0 12px;
@@ -59,6 +59,7 @@ button {
   letter-spacing: 0.17em;
 }
 .wordmark svg {
+  flex-shrink: 0;
   width: 16px;
   height: 16px;
   color: var(--accent);
@@ -91,15 +92,8 @@ button {
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
-.connection i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--status-live);
-  box-shadow: 0 0 0 3px var(--focus-shadow);
-}
-.connection.offline i {
-  background: var(--danger);
+.connection.offline {
+  color: var(--danger);
 }
 .icon-button {
   width: 24px;
@@ -274,6 +268,7 @@ button {
   background: var(--viewport-background);
 }
 .viewport-panel {
+  container: viewport / inline-size;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -1386,4 +1381,69 @@ button {
 }
 .prompt-button.is-empty {
   color: var(--muted);
+}
+
+.viewport-prompt {
+  display: flex;
+  flex: 1;
+  min-width: 100px;
+  max-width: 520px;
+  margin: 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  pointer-events: auto;
+  background: var(--surface-overlay-soft);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.viewport-prompt .rt-TextFieldRoot {
+  flex: 1;
+  min-width: 0;
+}
+.viewport-prompt .rt-TextFieldInput {
+  min-width: 0;
+}
+.connection svg {
+  width: 15px;
+  height: 15px;
+}
+.prompt-button > svg {
+  flex-shrink: 0;
+}
+
+.gizmo-select {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 3px;
+}
+.gizmo-select svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+.gizmo-select select {
+  min-width: 0;
+  width: auto;
+  padding: 3px 2px;
+  font-size: 10px;
+  background: transparent;
+  border: 0;
+}
+
+@container viewport (max-width: 640px) {
+  .viewport-overlay {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .viewport-tools[aria-label="View"] {
+    margin-left: auto;
+  }
+  .viewport-prompt {
+    order: 1;
+    flex-basis: 100%;
+    min-width: 0;
+    max-width: none;
+  }
 }

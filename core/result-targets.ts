@@ -7,7 +7,6 @@ export function resultTarget(
   nodeId: string,
 ) {
   const { root, camera, image, points } = captureNodes(workspace, nodeId);
-  if (!image.assetId) throw new Error(`${root.name}: image has no asset`);
   return {
     nodeId: root.id,
     assetId: image.assetId,
@@ -75,7 +74,7 @@ export function applyJobResult(
         throw new Error(
           "Posed-image components changed while generation was running",
         );
-      valid.push(target);
+      valid.push({ ...target, assetId: target.assetId });
     } catch (error) {
       errors.add(
         `${target.nodeId}: ${error instanceof Error ? error.message : String(error)}`,

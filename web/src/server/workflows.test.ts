@@ -1,10 +1,11 @@
+import { selectedImageOperation } from "../../../core/image-operation";
 import { applyCommand } from "../../../core/commands";
 import { createCapture } from "../../../core/captures";
 import { claimResultTargets, resultTarget } from "../../../core/result-targets";
 import { DataTexture, FloatType, RGBAFormat } from "three";
 import { EXRExporter } from "three/examples/jsm/exporters/EXRExporter.js";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,6 +16,14 @@ import { JobRunner } from "./jobs";
 import { WorkspaceStore } from "./store";
 
 const cleanups: (() => Promise<unknown>)[] = [];
+beforeEach(async () => {
+  const previous = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = await directory();
+  cleanups.push(async () => {
+    if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = previous;
+  });
+});
 afterEach(async () => {
   for (const clean of cleanups.splice(0).reverse()) await clean();
 });
@@ -446,11 +455,9 @@ test("placing images poses in the background, preserves edits, and feeds moved c
   expect(poseRequest.targetResolution).toEqual([20, 20]);
   const workspace = store.snapshot();
   expect(workspace.nodes[rootId].transform.position).toEqual([10, 0, -6]);
-  expect(workspace.nodes[`${rootId}_clip`].clip).toEqual({
-    scope: "local",
-    invert: true,
-    softness: 0,
-  });
+  expect(
+    Object.values(workspace.nodes).some((node) => node.kind === "clip"),
+  ).toBe(false);
   expect(sceneCamera(workspace, rootId)!.extrinsics.position).toEqual([
     10, 1.8, -6,
   ]);
@@ -736,7 +743,14 @@ test("video extraction samples a saved binary into ordered frame assets with pro
   expect(frames[1].frameTime).toBe(0.5);
 });
 
-async function generatedSceneFixture(includeDepth = true) {
+async function generatedSceneFixture(
+  includeDepth = true,
+  hooks: {
+    beforeFal?: () => Promise<void>;
+    beforeAtlas?: () => Promise<void>;
+    beforePose?: () => Promise<void>;
+  } = {},
+) {
   const { createCapture } = await import("../../../core/captures");
   const { applyCommand } = await import("../../../core/commands");
   const previous = { wlt: process.env.WLT_API_KEY, fal: process.env.FAL_KEY };
@@ -771,6 +785,7 @@ async function generatedSceneFixture(includeDepth = true) {
     }),
   );
   const requests: any[] = [];
+  const falRequests: any[] = [];
   let uploads = 0,
     poses = 0;
   const network = spyOn(globalThis, "fetch").mockImplementation(
@@ -792,10 +807,12 @@ async function generatedSceneFixture(includeDepth = true) {
         if (url.includes("atlasGenerate")) {
           const body = (await request.json()) as any;
           requests.push(body);
+          await hooks.beforeAtlas?.();
           return Response.json({
             id: `atlas-${requests.length}`,
             done: true,
             response: {
+              promptUsed: "Enhanced scene description",
               frames: body.targetCameras.map((camera: any) => ({
                 camera,
                 imageAsset: { url: "https://fixture.example/frame.png" },
@@ -815,6 +832,7 @@ async function generatedSceneFixture(includeDepth = true) {
         if (url.includes("images2PosedRGBD")) {
           const body = (await request.json()) as any;
           poses++;
+          await hooks.beforePose?.();
           return Response.json({
             id: `pose-${poses}`,
             done: true,
@@ -838,8 +856,11 @@ async function generatedSceneFixture(includeDepth = true) {
             upload_url: "https://fixture.example/upload",
             file_url: "https://fixture.example/input.png",
           });
-        if (url.includes("queue.fal.run") && request.method === "POST")
+        if (url.includes("queue.fal.run") && request.method === "POST") {
+          falRequests.push({ model: url, input: await request.json() });
+          await hooks.beforeFal?.();
           return Response.json({ request_id: "fal-saved" });
+        }
         if (url.includes("/status?"))
           return Response.json({ status: "COMPLETED" });
         if (url.includes("/requests/fal-saved"))
@@ -865,6 +886,7 @@ async function generatedSceneFixture(includeDepth = true) {
     camera,
     requests,
     poseCount: () => poses,
+    falRequests,
   };
 }
 
@@ -1248,3 +1270,373 @@ for (const kind of ["nano", "reconstruct"] as const)
       if (healthySibling)
         expect(state.nodes.sibling_points.assetId).toBe(output);
     });
+
+test("create image reserves a Frame immediately and reuses posing with yaw, grounding, and edited parents", async () => {
+  const gate = Promise.withResolvers<void>();
+  const { store, commands, camera, falRequests, poseCount } =
+    await generatedSceneFixture(true, { beforeFal: () => gate.promise });
+  cleanups.push(async () => gate.resolve());
+  const placement = structuredClone(camera);
+  placement.extrinsics.position = [6, 9, -4];
+  placement.extrinsics.quaternion = [0, Math.sin(0.45), 0, Math.cos(0.45)];
+  const { jobId } = await commands.execute({
+    type: "generation.submit",
+    request: {
+      kind: "image.create",
+      prompt: "An abandoned lab",
+      placement,
+      seed: 17,
+    },
+  });
+  let state = store.snapshot();
+  const input = state.jobs[jobId!].input;
+  if (input.kind !== "image") throw new Error("Expected image job");
+  const rootId = input.nodeIds![0];
+  expect(state.nodes[rootId].transform.position).toEqual([6, 0, -4]);
+  expect(state.nodes[rootId].transform.quaternion[1]).toBeCloseTo(
+    Math.sin(0.45),
+  );
+  expect(state.nodes[`${rootId}_camera`].projection).toBeDefined();
+  expect(state.nodes[`${rootId}_image`].assetId).toBeUndefined();
+  expect(state.selection).toEqual([rootId]);
+  expect(selectedImageOperation(state)).toMatchObject({
+    pending: true,
+    assetId: null,
+    id: rootId,
+  });
+  await commands.execute({
+    type: "nodes.put",
+    nodes: [
+      {
+        id: "container",
+        name: "Container",
+        kind: "group",
+        parentId: null,
+        visible: true,
+        transform: {
+          position: [3, 2, 1],
+          quaternion: [0, Math.sin(0.2), 0, Math.cos(0.2)],
+          scale: [2, 2, 2],
+        },
+      },
+    ],
+  });
+  await commands.execute({
+    type: "nodes.move",
+    ids: [rootId],
+    parentId: "container",
+  });
+  const moved = store.snapshot().nodes[rootId].transform;
+  gate.resolve();
+  const imageJob = await done(store, jobId!);
+  expect(imageJob.status).toBe("succeeded");
+  expect(imageJob.childJobId).toBeDefined();
+  const posed = await done(store, imageJob.childJobId!);
+  expect(posed.status).toBe("succeeded");
+  expect(posed.applicationError).toBeUndefined();
+  state = store.snapshot();
+  expect(selectedImageOperation(state)).toMatchObject({
+    pending: false,
+    assetId: state.nodes[`${rootId}_image`].assetId,
+  });
+  expect(state.nodes[rootId].parentId).toBe("container");
+  expect(state.nodes[rootId].transform).toEqual(moved);
+  expect(state.nodes[`${rootId}_camera`].transform.position[1]).toBe(1.5);
+  expect(state.nodes[`${rootId}_points`].assetId).toBe(
+    state.nodes[`${rootId}_image`].assetId,
+  );
+  const { captureFrame } = await import("../../../core/captures");
+  expect(captureFrame(state, rootId).camera.extrinsics.position[0]).toBeCloseTo(
+    6,
+  );
+  expect(captureFrame(state, rootId).camera.extrinsics.position[1]).toBeCloseTo(
+    1.5,
+  );
+  expect(falRequests).toHaveLength(1);
+  expect(falRequests[0].model).toContain("fal-ai/flux/schnell");
+  expect(falRequests[0].input.prompt).toBe("An abandoned lab");
+  expect(falRequests[0].input.seed).toBe(17);
+  expect(poseCount()).toBe(1);
+  expect(
+    Object.values(state.nodes).filter((n) => n.kind === "capture"),
+  ).toHaveLength(2);
+});
+
+for (const action of ["delete", "undo", "replace"] as const) {
+  test(`image creation respects placeholder ${action}`, async () => {
+    const gate = Promise.withResolvers<void>();
+    const { store, commands, poseCount } = await generatedSceneFixture(true, {
+      beforeFal: () => gate.promise,
+    });
+    cleanups.push(async () => gate.resolve());
+    const { jobId } = await commands.execute({
+      type: "generation.submit",
+      request: { kind: "image.create", prompt: "Room" },
+    });
+    const state = store.snapshot(),
+      input = state.jobs[jobId!].input;
+    if (input.kind !== "image") throw new Error("Expected image job");
+    const id = input.nodeIds![0];
+    if (action === "undo") await commands.execute({ type: "history.undo" });
+    else if (action === "delete")
+      await commands.execute({ type: "nodes.remove", ids: [id] });
+    else {
+      await commands.execute({ type: "nodes.remove", ids: [`${id}_camera`] });
+      await commands.execute({
+        type: "nodes.put",
+        nodes: [
+          { ...state.nodes[`${id}_camera`], id: "replacement-camera" },
+          {
+            ...state.nodes[`${id}_image`],
+            id: "replacement-image",
+            parentId: "replacement-camera",
+          },
+        ],
+      });
+    }
+    gate.resolve();
+    const job = await done(store, jobId!);
+    expect(job.status).toBe("succeeded");
+    expect(job.applicationError).toBeDefined();
+    expect(job.childJobId).toBeUndefined();
+    expect(job.outputAssetIds.length).toBeGreaterThan(0);
+    expect(poseCount()).toBe(0);
+    expect(store.snapshot().nodes[`${id}_camera`]).toBeUndefined();
+  });
+}
+
+test("enhanced captions are cached, reused, cleared, and invalidated by prompt edits", async () => {
+  const { store, commands, camera, requests } = await generatedSceneFixture();
+  camera.extrinsics.position[0] = 1;
+  await commands.execute({
+    type: "workspace.update",
+    settings: { prompt: "Quiet laboratory" },
+  });
+  const render = async () => {
+    const { jobId } = await commands.execute({
+      type: "generation.submit",
+      request: { kind: "view", nodeIds: ["source-capture"], camera },
+    });
+    expect((await done(store, jobId!)).status).toBe("succeeded");
+  };
+  await render();
+  expect(requests[0].enhancePrompt).toBe(true);
+  expect(store.snapshot().settings.enhancedCaption).toEqual({
+    prompt: "Quiet laboratory",
+    text: "Enhanced scene description",
+  });
+  await render();
+  expect(requests[1].prompt).toBe("Enhanced scene description");
+  expect(requests[1].enhancePrompt).toBe(false);
+  await commands.execute({ type: "caption.clear" });
+  expect(store.snapshot().settings.enhancedCaption).toBeNull();
+  await render();
+  expect(requests[2].prompt).toBe("Quiet laboratory");
+  expect(requests[2].enhancePrompt).toBe(true);
+  await commands.execute({
+    type: "workspace.update",
+    settings: { prompt: "Sunlit kitchen" },
+  });
+  expect(store.snapshot().settings.enhancedCaption).toBeNull();
+});
+
+test("clearing a caption during generation prevents the old response from restoring it", async () => {
+  const gate = Promise.withResolvers<void>();
+  const { store, commands, camera } = await generatedSceneFixture(true, {
+    beforeAtlas: () => gate.promise,
+  });
+  cleanups.push(async () => gate.resolve());
+  camera.extrinsics.position[0] = 1;
+  const { jobId } = await commands.execute({
+    type: "generation.submit",
+    request: { kind: "view", nodeIds: ["source-capture"], camera },
+  });
+  await commands.execute({ type: "caption.clear" });
+  gate.resolve();
+  expect((await done(store, jobId!)).status).toBe("succeeded");
+  expect(store.snapshot().settings.enhancedCaption).toBeNull();
+});
+
+test("resuming image creation keeps its placeholder and remote request, then poses exactly once", async () => {
+  const { store, runner, camera, falRequests, poseCount } =
+    await generatedSceneFixture();
+  const { jobSchema } = await import("../../../core/schema");
+  await store.update((state) => {
+    applyCommand(state, {
+      type: "nodes.put",
+      nodes: createCapture(
+        { name: "Pending image" },
+        "pending",
+        camera,
+        "resume-image",
+      ),
+    });
+    state.jobs["resume-image"] = jobSchema.parse({
+      id: "resume-image",
+      input: {
+        kind: "image",
+        prompt: "Lab",
+        model: "fal-ai/flux/schnell",
+        placement: camera,
+        nodeIds: ["pending"],
+      },
+      status: "running",
+      createdAt: 1,
+      updatedAt: 1,
+      message: "Interrupted",
+      outputAssetIds: [],
+      submittedAt: 1,
+      remoteId: "fal-saved",
+      request: { prompt: "Lab" },
+      applyTargets: [resultTarget(state, "pending")],
+    });
+    claimResultTargets(state, state.jobs["resume-image"]);
+  });
+  await runner.init();
+  const job = await done(store, "resume-image");
+  expect(job.status).toBe("succeeded");
+  const child = await done(store, job.childJobId!);
+  expect(child.status).toBe("succeeded");
+  expect(child.resultOwnerId).toBe(job.id);
+  expect(falRequests).toHaveLength(0);
+  expect(poseCount()).toBe(1);
+  expect(
+    Object.values(store.snapshot().nodes)
+      .filter((n) => n.jobId === job.id && n.kind === "capture")
+      .map((n) => n.id),
+  ).toEqual(["pending"]);
+});
+
+test("cancelling automatic posing keeps the generated image without applying late depth", async () => {
+  const gate = Promise.withResolvers<void>(),
+    entered = Promise.withResolvers<void>();
+  const { store, commands, runner } = await generatedSceneFixture(true, {
+    beforePose: async () => {
+      entered.resolve();
+      await gate.promise;
+    },
+  });
+  cleanups.push(async () => gate.resolve());
+  const { jobId } = await commands.execute({
+    type: "generation.submit",
+    request: { kind: "image.create", prompt: "Laboratory" },
+  });
+  const parent = await done(store, jobId!);
+  await entered.promise;
+  await runner.cancel(parent.childJobId!);
+  gate.resolve();
+  await runner.close();
+  const state = store.snapshot();
+  expect(state.jobs[parent.childJobId!].status).toBe("cancelled");
+  const target = parent.applyTargets![0];
+  expect(state.nodes[target.nodeId].geometryAssetId).toBeUndefined();
+  expect(state.nodes[target.nodeId].assetId).toBeDefined();
+  expect(
+    parent.outputAssetIds.some((id) => state.assets[id].kind === "image"),
+  ).toBe(true);
+});
+
+test("contact sheets run headlessly from frozen image bindings without changing scene nodes", async () => {
+  const store = await new WorkspaceStore(await directory()).init();
+  cleanups.push(() => store.close());
+  const runner = new JobRunner(store);
+  cleanups.push(() => runner.close());
+  const red = await store.importFile(png("red"), "red.png");
+  const blue = await store.importFile(png("blue"), "blue.png");
+  await store.update((state) => {
+    applyCommand(state, {
+      type: "nodes.put",
+      nodes: createCapture(red, "frame"),
+    });
+    state.nodes.frame_image.assetId = blue.id;
+  });
+  const before = store.snapshot().nodes;
+  const jobId = await runner.submit({
+    kind: "contactSheet",
+    width: 320,
+    columns: 2,
+  });
+  const job = await done(store, jobId);
+  expect(job.status).toBe("succeeded");
+  expect(job.previewItems![0].assetId).toBe(blue.id);
+  expect(store.snapshot().nodes).toEqual(before);
+  const { file } = await store.assetFile(job.outputAssetIds[0]);
+  const image = await loadImage(file);
+  expect(image.width).toBe(320);
+  expect(image.height).toBe(224);
+  const canvas = createCanvas(image.width, image.height),
+    ctx = canvas.getContext("2d");
+  ctx.drawImage(image, 0, 0);
+  expect(Array.from(ctx.getImageData(160, 90, 1, 1).data)).toEqual([
+    0, 0, 255, 255,
+  ]);
+  const manifest = await store.assetFile(job.outputAssetIds[1]);
+  expect((await Bun.file(manifest.file).json()).items[0].nodeId).toBe("frame");
+  await expect(
+    runner.submit({ kind: "contactSheet", assetIds: ["missing"] }),
+  ).rejects.toThrow("unavailable");
+});
+
+test("inspection uses the viewport job lease and stores a validated report; headless reads need no job", async () => {
+  const service = await createService(await directory());
+  cleanups.push(() => service.close());
+  const { inspectScene } = await import("../../../core/inspection");
+  const metadata = await service.handle(
+    new Request("http://127.0.0.1:4310/api/scene/inspect"),
+  );
+  expect((await metadata.json()).source).toBe("headless");
+  expect(Object.keys(service.store.snapshot().jobs)).toHaveLength(0);
+  const jobId = await service.jobs.submit({ kind: "inspect" });
+  const post = (suffix: string, body?: BodyInit) =>
+    service.handle(
+      new Request(`http://127.0.0.1:4310/api/viewport-jobs/${jobId}${suffix}`, {
+        method: "POST",
+        headers: { "X-Worldbash-Client": "test" },
+        body,
+      }),
+    );
+  expect((await (await post("/claim")).json()).claimed).toBe(true);
+  expect((await (await post("/claim")).json()).claimed).toBe(false);
+  const report = inspectScene(
+    service.store.snapshot(),
+    undefined,
+    () => undefined,
+  );
+  const form = new FormData();
+  form.append(
+    "files",
+    new File([JSON.stringify(report)], "inspection.json", {
+      type: "application/json",
+    }),
+  );
+  const response = await post("", form);
+  if (!response.ok) throw new Error(await response.text());
+  expect(response.status).toBe(200);
+  const job = service.store.snapshot().jobs[jobId];
+  expect(job.status).toBe("succeeded");
+  const { file } = await service.store.assetFile(job.outputAssetIds[0]);
+  expect(await Bun.file(file).json()).toEqual(report);
+});
+
+test("already posed imports and Atlas view integration create no automatic clips", async () => {
+  const { store, commands, camera, image } = await generatedSceneFixture();
+  await commands.execute({
+    type: "assets.place",
+    assetIds: [image.id],
+    camera,
+  });
+  camera.extrinsics.position[0] = 1;
+  const { jobId } = await commands.execute({
+    type: "generation.submit",
+    request: { kind: "view", nodeIds: ["source-capture"], camera },
+  });
+  expect((await done(store, jobId!)).status).toBe("succeeded");
+  expect(
+    Object.values(store.snapshot().nodes).filter(
+      (node) => node.kind === "capture",
+    ),
+  ).toHaveLength(3);
+  expect(
+    Object.values(store.snapshot().nodes).some((node) => node.kind === "clip"),
+  ).toBe(false);
+});

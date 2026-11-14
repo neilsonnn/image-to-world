@@ -1,3 +1,10 @@
+import {
+  defaultImageModels,
+  modelIds,
+  imageEditResolutions,
+  imageEditRatios,
+} from "./models";
+import { environmentPatchSchema } from "./environment";
 import { z } from "zod";
 
 const number = z.number().finite();
@@ -28,6 +35,18 @@ export const cameraSchema = z.object({
   intrinsics: projectionSchema,
 });
 export type Camera = z.infer<typeof cameraSchema>;
+export const cameraAimSchema = z
+  .object({
+    position: vec3,
+    target: vec3,
+    up: vec3.default([0, 1, 0]),
+    frameId: z.string().nullable().default(null),
+    projection: projectionSchema.optional(),
+    fov: number.min(10).max(120).optional(),
+  })
+  .strict();
+export type CameraAim = z.input<typeof cameraAimSchema>;
+
 export const transformSchema = z.object({
   position: vec3,
   quaternion,
@@ -76,25 +95,9 @@ export const imageDraftSchema = z.object({
 });
 export type ImageDraft = z.infer<typeof imageDraftSchema>;
 export const nanoSettingsSchema = z.object({
-  model: z
-    .enum(["fal-ai/nano-banana-2/edit", "fal-ai/nano-banana-pro/edit"])
-    .default("fal-ai/nano-banana-2/edit"),
-  resolution: z.enum(["1K", "2K", "4K"]).default("1K"),
-  aspectRatio: z
-    .enum([
-      "auto",
-      "21:9",
-      "16:9",
-      "3:2",
-      "4:3",
-      "5:4",
-      "1:1",
-      "4:5",
-      "3:4",
-      "2:3",
-      "9:16",
-    ])
-    .default("auto"),
+  model: z.enum(modelIds("edit")).default(defaultImageModels.edit),
+  resolution: z.enum(imageEditResolutions).default("1K"),
+  aspectRatio: z.enum(imageEditRatios).default("auto"),
   numImages: number.int().min(1).max(4).default(1),
   seed: number.int().optional(),
 });
@@ -158,6 +161,14 @@ export const nodeSchema = z
     transform: transformSchema.default(identity),
     assetId: z.string().optional(),
     locked: z.boolean().optional(),
+    transformPermissions: z
+      .object({
+        translate: z.boolean().optional(),
+        rotate: z.boolean().optional(),
+        scale: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
     geometryAssetId: z.string().optional(),
     jobId: z.string().optional(),
     clipInitialized: z.boolean().optional(),
@@ -231,6 +242,11 @@ export const settingsSchema = z.object({
   seed: number.int().nonnegative().default(42),
   seedMode: z.enum(["auto", "locked"]).default("auto"),
   enhancePrompt: z.boolean().default(true),
+  enhancedCaption: z
+    .object({ prompt: z.string(), text: z.string() })
+    .nullable()
+    .optional(),
+  captionEpoch: z.number().int().nonnegative().optional(),
   layout: layoutSchema.default({}),
   display: displaySchema.default({}),
   collections: collectionSettingsSchema.default({}),
@@ -252,7 +268,7 @@ export const settingsSchema = z.object({
       referenceAssetIds: [],
       prompt: "",
       settings: {
-        model: "fal-ai/nano-banana-2/edit",
+        model: defaultImageModels.edit,
         resolution: "1K",
         aspectRatio: "auto",
         numImages: 1,
@@ -277,6 +293,26 @@ export const settingsSchema = z.object({
   targetFrameCount: number.int().min(2).max(600),
 });
 export const jobInputSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("inspect"),
+    nodeIds: z.array(z.string()).min(1).optional(),
+  }),
+  z.object({
+    kind: z.literal("contactSheet"),
+    nodeIds: z.array(z.string()).min(1).optional(),
+    jobIds: z.array(z.string()).min(1).optional(),
+    assetIds: z.array(z.string()).min(1).optional(),
+    columns: number.int().min(1).max(8).default(3),
+    width: number.int().min(160).max(1024).default(384),
+  }),
+  z.object({
+    kind: z.literal("image"),
+    prompt: z.string().trim().min(1),
+    model: z.enum(modelIds("create")).default(defaultImageModels.create),
+    placement: cameraSchema,
+    seed: number.int().optional(),
+    nodeIds: z.array(z.string()).optional(),
+  }),
   z.object({
     kind: z.literal("pose"),
     assetIds: z.array(z.string()).min(1),
@@ -356,12 +392,23 @@ export const jobSchema = z.object({
   error: z.string().optional(),
   request: z.unknown().optional(),
   poseOrigin: vec3.optional(),
+  previewItems: z
+    .array(
+      z.object({
+        assetId: z.string(),
+        label: z.string(),
+        nodeId: z.string().optional(),
+        jobId: z.string().optional(),
+        status: z.string().optional(),
+      }),
+    )
+    .optional(),
   applyTargets: z
     .array(
       z.union([
         z.object({
           nodeId: z.string(),
-          assetId: z.string(),
+          assetId: z.string().optional(),
           cameraId: z.string(),
           imageId: z.string(),
           pointsId: z.string(),
@@ -472,7 +519,7 @@ export function emptyWorkspace(): Workspace {
       seedMode: "auto",
       enhancePrompt: true,
       prompt: "",
-      falModel: "fal-ai/flux/dev",
+      falModel: defaultImageModels.create,
       falInput: '{"prompt":"A sunlit architectural courtyard"}',
       fps: 12,
       targetFrameCount: 36,
@@ -525,6 +572,13 @@ const localEditSchema = z.discriminatedUnion("type", [
 ]);
 
 export const generationSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("image.create"),
+    prompt: z.string().trim().min(1),
+    model: z.enum(modelIds("create")).default(defaultImageModels.create),
+    placement: cameraSchema.optional(),
+    seed: number.int().optional(),
+  }),
   z.object({
     kind: z.literal("image.edit"),
     sourceAssetId: z.string().optional(),
@@ -584,6 +638,16 @@ export const generationSchema = z.discriminatedUnion("kind", [
 export type Generation = z.input<typeof generationSchema>;
 
 export const commandSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("camera.aim"),
+    aim: cameraAimSchema,
+    name: z.string().trim().min(1).optional(),
+  }),
+  z.object({ type: z.literal("caption.clear") }),
+  z.object({
+    type: z.literal("environment.configure"),
+    values: environmentPatchSchema,
+  }),
   z.object({ type: z.literal("selection.visibility") }),
   z.object({
     type: z.literal("assets.trash"),
@@ -629,6 +693,7 @@ export const commandSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("camera.place"),
+    name: z.string().trim().min(1).optional(),
     camera: cameraSchema.optional(),
   }),
   z.object({ type: z.literal("camera.view"), nodeId: z.string() }),

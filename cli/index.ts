@@ -1,4 +1,9 @@
 #!/usr/bin/env bun
+import { resolveImageModel, type ImageModelFor } from "../core/models";
+import { writeFile } from "node:fs/promises";
+import { aimCamera } from "../core/cameras";
+import { currentCamera } from "../core/generation";
+import { inspectionSchema } from "../core/inspection";
 import { doctor, openProject } from "./launch";
 import { collectionMatches } from "../core/collections";
 import { frameAssets } from "../core/frames";
@@ -14,6 +19,8 @@ import { moveNodes } from "../core/scene";
 import { imageHistory } from "../core/history";
 import {
   cameraSchema,
+  cameraAimSchema,
+  jobInputSchema,
   commandSchema,
   identity,
   imageDraftSchema,
@@ -30,7 +37,7 @@ const HELP = `worldbash controls the same filesystem workspace as the browser.
 
   bun run worldbash open [project] [--port 4310] [--no-browser]  Build and launch locally
   bun run worldbash doctor [project]                Check local setup without API requests
-  bun run worldbash schema commands|workspace|draft|camera  JSON Schema for agents
+  bun run worldbash schema commands|jobs|workspace|draft|camera|aim|inspection  JSON Schema for agents
   bun run worldbash status                         Provider configuration and workspace path
   bun run worldbash state                          Full workspace JSON
   bun run worldbash import <file>...                Import binary files
@@ -40,6 +47,7 @@ const HELP = `worldbash controls the same filesystem workspace as the browser.
   bun run worldbash image open <asset-id>           Open an image in the bottom editor
   bun run worldbash image activate <asset-id> [node-id...]  Use this version in scene captures
   bun run worldbash image history <asset-id>        Branching assets, prompts, and jobs
+  bun run worldbash image create --prompt '...' [--model schnell] [--camera camera.json]
   bun run worldbash image edit <asset-id> --prompt '...' [--reference id,id]
                    [--model 2|pro] [--resolution 1K|2K|4K] [--ratio auto|16:9]
                    [--count 1] [--seed 42] [--draft draft.json]
@@ -47,6 +55,10 @@ const HELP = `worldbash controls the same filesystem workspace as the browser.
   bun run worldbash image undo|redo <asset-id>       Undo/redo this image's draft
   bun run worldbash export <asset-id> <file>        Write binary output to a local file
   bun run worldbash scene                          List scene objects
+  bun run worldbash scene inspect [node-id...] [--headless] [--out report.json]
+                   Inspect cameras, context, errors and renderer bounds (open viewport required)
+  bun run worldbash scene preview [node-id...] [--jobs id,id | --assets id,id]
+                   [--columns 3] [--width 384] [--out preview.png]  Headless contact sheet
   bun run worldbash scene add image --asset <id> [--name 'Image'] [--parent id]
   bun run worldbash scene add camera|group|path|clip [--name '...'] [--parent id]
   bun run worldbash scene put --file nodes.json    Create/update complete node records
@@ -61,7 +73,10 @@ const HELP = `worldbash controls the same filesystem workspace as the browser.
   bun run worldbash path update <path-id> [--fov 60] [--target-frames 36]
   bun run worldbash path keyframe <path-id> [--index 0] [--file camera.json] [--id keyframe-id] [--remove]
   bun run worldbash scene place <asset-id>... [--camera camera.json] [--reconstruct]  Place images individually or reconstruct together
-  bun run worldbash camera place [--file camera.json]  Place a camera and extend selection (viewport C)
+  bun run worldbash camera solve --position x,y,z --look-at x,y,z [--relative-to node-id]
+                   [--up x,y,z] [--fov 60] [--out camera.json]  Calculate orientation from your position/target; no scene edit
+  bun run worldbash camera place [--position x,y,z --look-at x,y,z --relative-to node-id]
+                   [--name 'Camera'] [--file camera.json]  Record your chosen camera, undoably; extend selection (viewport C)
   bun run worldbash camera view <node-id> | camera free
   bun run worldbash context [list|include|exclude|solo|show|hide|order] <capture-id>...
   bun run worldbash path create <camera-id>... [--target-frames 36]
@@ -83,6 +98,9 @@ const HELP = `worldbash controls the same filesystem workspace as the browser.
   bun run worldbash command '<JSON>'|@file.json    Every UI command, including panel/settings changes
   bun run worldbash events                        Stream workspace revisions as JSON lines
 
+Planning helpers leave viewpoint selection and visual review to the user or agent.
+They do not choose shots, assess visual quality, or prescribe a scene-building sequence.
+
 All responses are JSON. Errors use stderr and exit 1. Generation returns a job ID
 immediately; --wait waits for completion. --url defaults to http://127.0.0.1:4310
 (or WORLDBASH_URL). No API credentials are needed by the CLI.
@@ -94,6 +112,15 @@ export async function run(argv: string[]) {
     allowPositionals: true,
     strict: true,
     options: {
+      out: { type: "string" },
+      "look-at": { type: "string" },
+      "relative-to": { type: "string" },
+      up: { type: "string" },
+      headless: { type: "boolean" },
+      jobs: { type: "string" },
+      assets: { type: "string" },
+      columns: { type: "string" },
+      width: { type: "string" },
       port: { type: "string" },
       "no-browser": { type: "boolean" },
       trash: { type: "boolean" },
@@ -186,8 +213,8 @@ export async function run(argv: string[]) {
         body: JSON.stringify(commandSchema.parse(input)),
       })
     ).json() as Promise<{ jobId?: string; revision: number }>;
-  const wait = async (id: string) => {
-    const deadline = Date.now() + finite(values.timeout, 300) * 1000;
+  const wait = async (id: string, defaultTimeout = 300) => {
+    const deadline = Date.now() + finite(values.timeout, defaultTimeout) * 1000;
     for (;;) {
       const job = (await state()).jobs[id];
       if (!job) throw new Error(`Unknown job ${id}`);
@@ -232,13 +259,16 @@ export async function run(argv: string[]) {
   } else if (action === "schema") {
     const schemas = {
       commands: commandSchema,
+      jobs: jobInputSchema,
+      aim: cameraAimSchema,
+      inspection: inspectionSchema,
       workspace: workspaceSchema,
       draft: imageDraftSchema,
       camera: cameraSchema,
     };
     const schema = schemas[sub as keyof typeof schemas];
     if (!schema)
-      throw new Error("Choose schema commands, workspace, draft, or camera");
+      throw new Error(`Choose schema ${Object.keys(schemas).join(", ")}`);
     output(zodToJsonSchema(schema));
   } else if (action === "status")
     output(await (await request("status")).json());
@@ -291,6 +321,19 @@ export async function run(argv: string[]) {
             },
       ),
     );
+  } else if (action === "image" && sub === "create") {
+    await generate({
+      kind: "image.create",
+      prompt: need(values.prompt, "--prompt"),
+      model: resolveImageModel(
+        values.model,
+        "create",
+      ) as ImageModelFor<"create">,
+      ...(values.camera
+        ? { placement: cameraSchema.parse(await jsonFile(values.camera)) }
+        : {}),
+      ...(values.seed ? { seed: finite(values.seed, 42) } : {}),
+    });
   } else if (action === "image") {
     const id = need(rest[0], "asset ID");
     const workspace = await state();
@@ -331,12 +374,7 @@ export async function run(argv: string[]) {
       );
     else if (sub === "edit") {
       const settings = nanoSettingsSchema.parse({
-        model:
-          values.model === "pro"
-            ? "fal-ai/nano-banana-pro/edit"
-            : values.model === "2" || !values.model
-              ? "fal-ai/nano-banana-2/edit"
-              : values.model,
+        model: resolveImageModel(values.model, "edit"),
         resolution: values.resolution ?? "1K",
         aspectRatio: values.ratio ?? "auto",
         numImages: finite(values.count, 1),
@@ -358,10 +396,44 @@ export async function run(argv: string[]) {
   } else if (action === "select")
     output(await command({ type: "selection.set", ids: positionals.slice(1) }));
   else if (action === "camera") {
-    if (sub === "place")
+    if (
+      sub === "solve" ||
+      (sub === "place" &&
+        (values.position ||
+          values["look-at"] ||
+          values["relative-to"] ||
+          values.up ||
+          values.fov))
+    ) {
+      if (values.file) throw new Error("Choose aim flags or --file, not both");
+      const aim = cameraAimSchema.parse({
+        position: need(values.position, "--position").split(",").map(Number),
+        target: need(values["look-at"], "--look-at").split(",").map(Number),
+        frameId: values["relative-to"] ?? null,
+        ...(values.up ? { up: values.up.split(",").map(Number) } : {}),
+        ...(values.fov ? { fov: finite(values.fov, 60) } : {}),
+      });
+      if (sub === "solve") {
+        const workspace = await state();
+        const camera = aimCamera(
+          workspace,
+          aim,
+          currentCamera(workspace).intrinsics,
+        );
+        if (values.out)
+          await writeFile(
+            path.resolve(values.out),
+            JSON.stringify(camera, null, 2) + "\n",
+            { flag: "wx" },
+          );
+        output(camera);
+      } else
+        output(await command({ type: "camera.aim", aim, name: values.name }));
+    } else if (sub === "place")
       output(
         await command({
           type: "camera.place",
+          name: values.name,
           ...(values.file
             ? { camera: cameraSchema.parse(await jsonFile(values.file)) }
             : {}),
@@ -394,7 +466,64 @@ export async function run(argv: string[]) {
   } else if (action === "scene") {
     const workspace = await state();
     if (!sub) output(Object.values(workspace.nodes));
-    else if (sub === "place") {
+    else if (sub === "inspect") {
+      if (values.out && (await Bun.file(values.out).exists()))
+        throw new Error(`Output already exists: ${values.out}`);
+      let report;
+      if (values.headless) {
+        const query = new URLSearchParams(rest.map((id) => ["nodeId", id]));
+        report = await (await request(`scene/inspect?${query}`)).json();
+      } else {
+        const submitted = await command({
+          type: "jobs.submit",
+          input: { kind: "inspect", ...(rest.length ? { nodeIds: rest } : {}) },
+        });
+        const job = await wait(submitted.jobId!, 30);
+        report = await (
+          await request(`assets/${encodeURIComponent(job.outputAssetIds[0])}`)
+        ).json();
+      }
+      const parsed = inspectionSchema.parse(report);
+      if (values.out)
+        await writeFile(
+          path.resolve(values.out),
+          JSON.stringify(parsed, null, 2) + "\n",
+          { flag: "wx" },
+        );
+      output(parsed);
+    } else if (sub === "preview") {
+      if (values.out && (await Bun.file(values.out).exists()))
+        throw new Error(`Output already exists: ${values.out}`);
+      const submitted = await command({
+        type: "jobs.submit",
+        input: {
+          kind: "contactSheet",
+          ...(rest.length ? { nodeIds: rest } : {}),
+          ...(values.jobs ? { jobIds: values.jobs.split(",") } : {}),
+          ...(values.assets ? { assetIds: values.assets.split(",") } : {}),
+          columns: finite(values.columns, 3),
+          width: finite(values.width, 384),
+        },
+      });
+      const job = await wait(submitted.jobId!);
+      const assetId = job.outputAssetIds[0];
+      if (values.out)
+        await writeFile(
+          path.resolve(values.out),
+          new Uint8Array(
+            await (
+              await request(`assets/${encodeURIComponent(assetId)}`)
+            ).arrayBuffer(),
+          ),
+          { flag: "wx" },
+        );
+      output({
+        jobId: job.id,
+        assetId,
+        manifestAssetId: job.outputAssetIds[1],
+        ...(values.out ? { file: path.resolve(values.out) } : {}),
+      });
+    } else if (sub === "place") {
       output(
         await command({
           type: "assets.place",
@@ -489,7 +618,7 @@ export async function run(argv: string[]) {
       );
     } else
       throw new Error(
-        "Use scene add, put, move, duplicate, transform, or remove",
+        "Use scene inspect, preview, add, put, move, duplicate, transform, or remove",
       );
   } else if (action === "context") {
     const workspace = await state();

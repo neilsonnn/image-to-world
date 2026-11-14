@@ -1,7 +1,12 @@
 import { frameAt } from "./frames";
 import { activateImage } from "./images";
 import { currentCamera } from "./generation";
-import { worldMatrix, transformCamera, cameraNodeData } from "./cameras";
+import {
+  worldMatrix,
+  transformCamera,
+  cameraNodeData,
+  aimCamera,
+} from "./cameras";
 import { sceneCamera, pathFromCameras, cameraNode } from "./captures";
 import { moveNodes, orderedChildren, selectedRoots } from "./scene";
 import { editChanges, editSelection, restoreEdit } from "./undo";
@@ -103,6 +108,17 @@ function mutate(workspace: Workspace, input: Command) {
       node.keyframes = frames;
       break;
     }
+    case "camera.aim":
+      mutate(workspace, {
+        type: "camera.place",
+        name: command.name,
+        camera: aimCamera(
+          workspace,
+          command.aim,
+          currentCamera(workspace).intrinsics,
+        ),
+      });
+      break;
     case "camera.place": {
       const id = `node_${crypto.randomUUID()}`;
       mutate(workspace, {
@@ -110,7 +126,7 @@ function mutate(workspace: Workspace, input: Command) {
         nodes: [
           {
             id,
-            name: "Camera",
+            name: command.name ?? "Camera",
             kind: "camera",
             parentId: null,
             visible: true,
@@ -169,6 +185,14 @@ function mutate(workspace: Workspace, input: Command) {
       if (command.name !== undefined) workspace.name = command.name;
       if (command.settings) {
         const { collections, ...settings } = command.settings;
+        if (
+          settings.prompt !== undefined &&
+          settings.prompt !== workspace.settings.prompt
+        ) {
+          workspace.settings.enhancedCaption = null;
+          workspace.settings.captionEpoch =
+            (workspace.settings.captionEpoch ?? 0) + 1;
+        }
         Object.assign(workspace.settings, settings);
         if (collections)
           Object.assign(workspace.settings.collections, collections);
@@ -199,14 +223,25 @@ function mutate(workspace: Workspace, input: Command) {
     case "nodes.put": {
       const nodes = { ...workspace.nodes };
       for (const node of command.nodes) {
-        const previousScale = nodes[node.id]?.transform.scale ?? [1, 1, 1];
-        if (
-          !transformCapabilities([node]).scale &&
-          node.transform.scale.some(
-            (value, index) => Math.abs(value - previousScale[index]) > 1e-8,
+        const previous = nodes[node.id];
+        const supported = transformCapabilities([node]);
+        for (const [operation, field, label] of [
+          ["translate", "position", "translation"],
+          ["rotate", "quaternion", "rotation"],
+          ["scale", "scale", "scaling"],
+        ] as const) {
+          // Initial placement can establish a pose; disabled scaling always starts at unity.
+          const baseline =
+            previous?.transform[field] ??
+            (operation === "scale" ? [1, 1, 1] : node.transform[field]);
+          if (
+            !supported[operation] &&
+            node.transform[field].some(
+              (value, index) => Math.abs(value - baseline[index]) > 1e-8,
+            )
           )
-        )
-          throw new Error(`${node.name} does not support scaling`);
+            throw new Error(`${node.name} does not support ${label}`);
+        }
         if (workspace.assets[node.id])
           throw new Error("Node IDs cannot collide with asset IDs");
         if (node.assetId && !workspace.assets[node.assetId])

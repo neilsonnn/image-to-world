@@ -53,6 +53,7 @@ export function ToolbarIconButton({
     <Hint label={label}>
       <RadixIconButton
         aria-label={label}
+        type="button"
         size="1"
         variant="surface"
         color="gray"
@@ -81,6 +82,7 @@ export function ToolbarPopover({
         <Popover.Trigger>
           <RadixIconButton
             aria-label={label}
+            type="button"
             size="1"
             variant="surface"
             color="gray"
@@ -107,6 +109,8 @@ export function PromptButton({
   note,
   value,
   onChange,
+  indicator,
+  children,
 }: {
   label: string;
   hint: string;
@@ -114,6 +118,8 @@ export function PromptButton({
   note?: string;
   value: string;
   onChange: (value: string) => void;
+  indicator?: ReactNode;
+  children?: ReactNode;
 }) {
   return (
     <Popover.Root>
@@ -126,6 +132,7 @@ export function PromptButton({
             className={`prompt-button${value ? "" : " is-empty"}`}
           >
             <span>{value || label}</span>
+            {indicator}
           </Button>
         </Popover.Trigger>
       </Hint>
@@ -146,6 +153,7 @@ export function PromptButton({
                 event.currentTarget.blur();
             }}
           />
+          {children}
           {note && (
             <Text size="1" color="gray">
               {note}

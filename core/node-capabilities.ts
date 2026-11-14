@@ -1,6 +1,6 @@
 import type { SceneNode } from "./schema";
 
-type TransformCapabilities = {
+export type TransformCapabilities = {
   translate: boolean;
   rotate: boolean;
   scale: boolean;
@@ -10,6 +10,7 @@ const transformOverrides: Partial<
   Record<SceneNode["kind"], Partial<TransformCapabilities>>
 > = {
   camera: { scale: false },
+  capture: { scale: false },
 };
 
 export function transformCapabilities(nodes: readonly SceneNode[]) {
@@ -23,7 +24,9 @@ export function transformCapabilities(nodes: readonly SceneNode[]) {
     for (const mode of Object.keys(
       supported,
     ) as (keyof TransformCapabilities)[])
-      supported[mode] &&= overrides?.[mode] ?? true;
+      supported[mode] &&=
+        (overrides?.[mode] ?? true) &&
+        (node.transformPermissions?.[mode] ?? true);
   }
   return supported;
 }

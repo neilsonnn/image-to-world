@@ -1,5 +1,51 @@
+import { cameraAimSchema, type CameraAim } from "./schema";
 import { Matrix4, Quaternion, Vector3 } from "three";
 import type { Camera, Projection, SceneNode, Workspace } from "./schema";
+
+/** Resolve an aim in world or a node's local coordinates into the ordinary camera contract. */
+export function aimCamera(
+  workspace: Pick<Workspace, "nodes">,
+  input: CameraAim,
+  projection: Projection,
+): Camera {
+  const aim = cameraAimSchema.parse(input);
+  const frame = aim.frameId ? workspace.nodes[aim.frameId] : undefined;
+  if (aim.frameId && !frame)
+    throw new Error(`Coordinate frame does not exist: ${aim.frameId}`);
+  const matrix = frame ? worldMatrix(frame, workspace.nodes) : new Matrix4();
+  const position = new Vector3(...aim.position).applyMatrix4(matrix);
+  const target = new Vector3(...aim.target).applyMatrix4(matrix);
+  const up = new Vector3(...aim.up).transformDirection(matrix);
+  const direction = target.clone().sub(position);
+  if (direction.lengthSq() < 1e-12)
+    throw new Error("Camera position and look-at target must differ");
+  if (
+    up.lengthSq() < 1e-12 ||
+    direction.clone().normalize().cross(up).lengthSq() < 1e-10
+  )
+    throw new Error(
+      "Camera up must be nonzero and not parallel to the viewing direction",
+    );
+  const rotation = new Matrix4().lookAt(position, target, up);
+  const intrinsics = { ...(aim.projection ?? projection) };
+  if (aim.fov !== undefined) {
+    intrinsics.fx = intrinsics.fy =
+      intrinsics.height / (2 * Math.tan((aim.fov * Math.PI) / 360));
+    intrinsics.cx = intrinsics.width / 2;
+    intrinsics.cy = intrinsics.height / 2;
+  }
+  return {
+    extrinsics: {
+      position: position.toArray(),
+      quaternion: new Quaternion()
+        .setFromRotationMatrix(rotation)
+        .normalize()
+        .toArray(),
+      coordinateSystem: "rub",
+    },
+    intrinsics,
+  };
+}
 
 export function cameraNodeData(camera: Camera) {
   return {
@@ -147,7 +193,7 @@ export function matrixTransform(matrix: Matrix4): SceneNode["transform"] {
     )
   )
     throw new Error(
-      "This transform would require shear; remove nonuniform ancestor scaling first",
+      "This transform would require shear; use object-space scaling or remove nonuniform ancestor scaling",
     );
   if (scale.toArray().some((value) => value <= 0))
     throw new Error("Scale must stay positive");

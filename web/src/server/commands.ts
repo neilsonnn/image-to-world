@@ -10,6 +10,7 @@ import {
 import type { JobRunner } from "./jobs";
 import type { WorkspaceStore } from "./store";
 import { integrateAssets } from "./integration";
+import { saveEnvironment } from "./environment";
 
 export class CommandService {
   constructor(
@@ -20,6 +21,15 @@ export class CommandService {
     const command = commandSchema.parse(input);
     let jobId: string | undefined, jobIds: string[] | undefined;
     switch (command.type) {
+      case "caption.clear":
+        await this.store.update((state) => {
+          state.settings.enhancedCaption = null;
+          state.settings.captionEpoch = (state.settings.captionEpoch ?? 0) + 1;
+        });
+        break;
+      case "environment.configure":
+        await saveEnvironment(command.values);
+        break;
       case "assets.trash":
         await moveAssetsToTrash(this.store, command.ids);
         break;

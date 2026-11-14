@@ -1,17 +1,14 @@
 import { useWorldbashClient, useWorkspaceData } from "../lib/client";
-import { NodeIcon } from "./NodeIcon";
+import { NodeIcon, nodePresentation } from "./NodeIcon";
 import { sceneCamera } from "../../../core/captures";
 import { cameraNodeData } from "../../../core/cameras";
 import { DropdownMenu } from "@radix-ui/themes";
 import {
-  Camera,
   CaretDown,
   CaretRight,
-  Cube,
   Eye,
   EyeSlash,
   MagnifyingGlass,
-  Path,
   Plus,
   Stack,
 } from "@phosphor-icons/react";
@@ -36,12 +33,9 @@ import { CollectionActions } from "./CollectionActions";
 import { CollectionSearch, useCollectionSearch } from "./CollectionSearch";
 import { Hint, PanelHeader } from "./ui";
 
-const NEW_NODES = [
-  { kind: "group", label: "Group", icon: Stack },
-  { kind: "clip", label: "Clip", icon: Cube },
-  { kind: "camera", label: "Camera", icon: Camera },
-  { kind: "path", label: "Path", icon: Path },
-] as const;
+const NEW_NODES = (["group", "clip", "camera", "path"] as const).map(
+  (kind) => ({ kind, ...nodePresentation[kind] }),
+);
 
 type Position = "before" | "inside" | "after";
 type Target = { id: string; position: Position; valid: boolean };
@@ -531,7 +525,6 @@ export function ScenePanel({
                     >
                       <NodeIcon kind={node.kind} />
                       <span>{node.name}</span>
-                      <small>{node.kind}</small>
                     </button>
                   )}
                   <CollectionActions

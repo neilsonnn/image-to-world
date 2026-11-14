@@ -1,5 +1,7 @@
 import {
-  Aperture,
+  GlobeHemisphereWest,
+  PlugsConnected,
+  Plugs,
   Camera,
   FilmStrip,
   Gear,
@@ -36,6 +38,7 @@ import { ResizableDivider } from "./ResizableDivider";
 import { Hint, PanelHeader, ToolbarIconButton, ToolbarPopover } from "./ui";
 import { Viewport as ViewportView } from "./Viewport";
 import { useGlobalShortcuts } from "../lib/shortcuts";
+import { EnvironmentEditor } from "./EnvironmentEditor";
 
 const AtlasDock = memo(AtlasDockView);
 
@@ -66,7 +69,7 @@ function EditorLoading() {
   if (ready) return <EditorWorkspace />;
   return (
     <main className="loading-screen">
-      <Aperture className="brand-mark spin-slow" />
+      <GlobeHemisphereWest className="brand-mark spin-slow" />
       <span>{loading ? "Opening workspace" : "Workspace unavailable"}</span>
       {error && <p>{error}</p>}
     </main>
@@ -85,7 +88,9 @@ function WorkspaceTitle() {
 }
 
 function EditorWorkspace() {
+  const connected = useClientState((state) => state.connected);
   const client = useWorldbashClient();
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
   const { requestPlacement, dialog: imageImportDialog } = useImageImport();
   const [previewNodes, setPreviewNodes] = useState<SceneNode[] | null>(null);
   const [gizmoNodes, setGizmoNodes] = useState<SceneNode[] | null>(null);
@@ -209,15 +214,29 @@ function EditorWorkspace() {
     >
       <header className="topbar">
         <div className="wordmark">
-          <Aperture weight="duotone" />
+          <GlobeHemisphereWest weight="duotone" />
+          <Wrench />
           <strong>WORLDBASH</strong>
         </div>
         <WorkspaceTitle />
         <div className="topbar-actions">
-          <span className={`connection ${error ? "offline" : ""}`}>
-            <i />
-            {error ? "Offline" : "Live"}
-          </span>
+          <Hint
+            label={
+              connected
+                ? "Connected to the local workspace server"
+                : "Reconnecting to the local workspace server"
+            }
+          >
+            <span
+              className={`connection ${connected ? "" : "offline"}`}
+              role="status"
+              aria-label={
+                connected ? "Workspace connected" : "Workspace reconnecting"
+              }
+            >
+              {connected ? <PlugsConnected /> : <Plugs />}
+            </span>
+          </Hint>
           <ToolbarPopover
             label="Generation tools"
             icon={<Wrench />}
@@ -286,20 +305,14 @@ function EditorWorkspace() {
                   />
                 </label>
               </Hint>
-              <dl>
-                <div>
-                  <dt>World Labs</dt>
-                  <dd className={status?.worldLabsConfigured ? "ready" : ""}>
-                    {status?.worldLabsConfigured ? "Ready" : "Not configured"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>FAL</dt>
-                  <dd className={status?.falConfigured ? "ready" : ""}>
-                    {status?.falConfigured ? "Ready" : "Not configured"}
-                  </dd>
-                </div>
-              </dl>
+              <Button
+                size="1"
+                variant="surface"
+                color="gray"
+                onClick={() => setConnectionsOpen(true)}
+              >
+                Environment variables
+              </Button>
               <Hint label="Restore default panel sizes">
                 <Button
                   size="1"
@@ -346,6 +359,10 @@ function EditorWorkspace() {
           </ToolbarPopover>
         </div>
       </header>
+
+      {connectionsOpen && (
+        <EnvironmentEditor onClose={() => setConnectionsOpen(false)} />
+      )}
 
       <div className="editor-workspace">
         <aside

@@ -1,15 +1,40 @@
-import { Camera, Cube, Path, Stack, VideoCamera } from "@phosphor-icons/react";
+import {
+  BoundingBox,
+  Camera,
+  Cube,
+  DotsNine,
+  File,
+  FrameCorners,
+  ImageSquare,
+  Path,
+  Stack,
+  StackSimple,
+  VideoCamera,
+  type Icon,
+} from "@phosphor-icons/react";
 import type { Asset, SceneNode } from "../../../core/schema";
+import { Hint } from "./ui";
 
 type Kind = SceneNode["kind"] | Asset["kind"];
-const icons: Partial<Record<Kind, typeof Camera>> = {
-  camera: Camera,
-  path: Path,
-  video: VideoCamera,
-  group: Stack,
-};
+export const nodePresentation = {
+  capture: { label: "Frame", icon: FrameCorners },
+  camera: { label: "Camera", icon: Camera },
+  points: { label: "Points", icon: DotsNine },
+  clip: { label: "Clip", icon: BoundingBox },
+  image: { label: "Image", icon: ImageSquare },
+  splat: { label: "Splat", icon: Cube },
+  path: { label: "Path", icon: Path },
+  video: { label: "Video", icon: VideoCamera },
+  group: { label: "Group", icon: Stack },
+  depth: { label: "Depth", icon: StackSimple },
+  file: { label: "File", icon: File },
+} satisfies Record<Kind, { label: string; icon: Icon }>;
 
 export function NodeIcon({ kind }: { kind: Kind }) {
-  const Icon = icons[kind] ?? Cube;
-  return <Icon className="node-icon" data-node-kind={kind} />;
+  const { icon: Icon, label } = nodePresentation[kind];
+  return (
+    <Hint label={label}>
+      <Icon aria-label={label} className="node-icon" data-node-kind={kind} />
+    </Hint>
+  );
 }

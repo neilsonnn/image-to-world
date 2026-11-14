@@ -17,11 +17,18 @@ without either key.
    bun install --frozen-lockfile
    ```
 
-2. Copy `.env.example` to `.env` and set `WLT_API_KEY` and `FAL_KEY` for generation.
-   To share credentials across checkouts, put the same variables in
-   `~/.config/worldbash/env` (or `$XDG_CONFIG_HOME/worldbash/env`) with file permissions
-   `600`. Shell variables override checkout `.env`, which overrides user config.
-   `WLT_API_BASE_URL` overrides the World Labs API origin. Keys stay on the server.
+2. No credential setup is needed before opening the editor. Use **Environment**
+   in the top bar or **Workspace settings → Environment variables** to edit the
+   shared local config as key/value rows. `WLT_API_KEY` and `FAL_KEY` are suggested
+   entries; add any variable by name. Values stay masked, and existing values are
+   never sent back to the browser. Blank replacement fields keep current values;
+   removing a saved variable restores any inherited process value.
+   Saves use permissions `600` in `~/.config/worldbash/env` (or
+   `$XDG_CONFIG_HOME/worldbash/env`), outside project state and undo history.
+   Saved variables override shell variables and checkout `.env`. Provider keys,
+   `WLT_API_BASE_URL`, `FFMPEG_PATH`, and `FFPROBE_PATH` apply immediately;
+   startup settings such as the workspace directory apply next launch.
+   Saving does not contact providers or validate keys or task access.
 
 3. Open a project:
 
@@ -50,7 +57,8 @@ editing. Install FFmpeg through your system package manager; its distribution
 normally includes ffprobe. `FFMPEG_PATH` and `FFPROBE_PATH` override detection.
 
 Use `bun run dev` when editing the app itself. The launcher loads user config;
-the development server uses the checkout `.env` and shell environment.
+the development server also reads saved provider keys, with checkout `.env` and
+shell variables available for other configuration.
 The server binds to loopback and serves one local workspace. Project files live
 in the chosen directory, independently of the installation. Generation requires
 internet access; local editing does not.
@@ -192,8 +200,11 @@ The inspector can also attach a depth asset and camera metadata to an image.
 All scene objects share parent, transform, visibility, and selection behavior.
 Hover over the viewport to fly with WASD or arrow keys; Q/E moves down/up.
 Right-drag or two-finger swipes look around; Shift moves faster and pinch changes FOV. Left-click
-selects; Shift/Cmd/Ctrl-click toggles items. Use 1/2/3 for move/rotate/scale and
-F to frame the selection. Cmd/Ctrl-D duplicates selected hierarchies; Backspace
+selects; Shift/Cmd/Ctrl-click toggles items. The combined gizmo exposes move/rotate/scale together; F frames the selection.
+Choose Center (combined bounds) or Origin (average selected origins), and World
+or Object axes (the primary selected object). Frames and cameras cannot be scaled.
+Per-node `transformPermissions` can further restrict operations through the shared
+capability contract. Cmd/Ctrl-D duplicates selected hierarchies; Backspace
 or Delete removes them. Cmd/Ctrl-Z undoes and Cmd/Ctrl-Shift-Z redoes.
 Camera gestures, display changes, and each gizmo drag are single undo entries.
 Undo/redo restores the selection for scene edits and survives restart.
@@ -249,7 +260,7 @@ bun run worldbash scene place <image-a> <image-b>
 Drop image files or library assets into the viewport to place them at its current
 yaw and floor position. Unposed images queue `images2PosedRGBD`; existing posed
 assets can be instanced immediately. Each capture is a movable parent with camera,
-image, point-cloud, and clip children. Estimated camera height and orientation
+image and point-cloud children. Clip boxes are added explicitly; posing never creates them. Estimated camera height and orientation
 remain on the children. Moving the parent during generation preserves that edit.
 
 ```sh
@@ -420,3 +431,91 @@ Fork the repository, make changes on a branch, and run `bun run check`,
 `bun run test`, and `bun run build` before opening a pull request.
 
 Licensed under [Apache-2.0](LICENSE).
+
+### Create an image in the viewport
+
+Type a prompt into the viewport's top bar and press Enter. A Frame and placeholder
+camera appear immediately at the current horizontal position and yaw. FLUX Schnell
+creates the image through FAL, then the ordinary World Labs image-posing workflow
+fills that same Frame with the calibrated image and points. Solved height
+provides grounding; subsequent viewport navigation does not change the placement.
+The stages appear in Jobs, where failed stages can be retried. Deleting or undoing
+the Frame prevents late results from recreating it. Requires `FAL_KEY` and
+`WLT_API_KEY`, editable in Workspace settings → Environment variables.
+
+The CLI uses the same workflow:
+
+```sh
+bun run worldbash image create --prompt 'An abandoned Soviet laboratory' --model schnell
+# Optionally supply the placement camera:
+bun run worldbash image create --prompt 'A tiled laboratory' --camera camera.json
+```
+
+`core/models.ts` owns image model IDs, labels, aliases, and shared options for the
+UI, CLI, and schema. The new-image workflow uses FLUX Schnell; image editing uses
+the Nano Banana models.
+
+Atlas saves the enhanced caption returned by a render and reuses it for later
+renders, path generation, and splats with the same scene description. A lightning
+icon beside **Describe the scene** indicates a cached caption. Its popover shows
+only the cache status and a **Clear** action. Editing the description invalidates
+the cache; clear it when changing the scene's content while keeping the description.
+
+### Agent camera planning, inspection, and previews
+
+These are regular CLI commands backed by shared camera math, the command service,
+and the existing viewport spatial contracts. No provider calls are required.
+The user or agent chooses the viewpoints and visually evaluates the scene.
+`camera solve` calculates orientation from a supplied position and target;
+`camera place` records the chosen camera as an undoable edit. Neither selects
+viewpoints, optimizes coverage, or generates images. Inspection reports structural
+validity rather than visual quality, and previews provide images for review.
+These helpers can be combined in any order appropriate to the scene.
+
+```sh
+# Discover the interface without guessing fields.
+bun run worldbash --help
+bun run worldbash schema aim
+bun run worldbash schema jobs
+bun run worldbash schema inspection
+
+# Resolve a camera without editing the scene. Coordinates can be world-space
+# or local to any scene node, including a transformed Frame or group.
+bun run worldbash camera solve --position 2,1.6,3 --look-at 0,1,-4 --fov 65 --out camera.json
+bun run worldbash camera place --position 2,1.6,3 --look-at 0,1,-4 --relative-to <node-id> --name 'Window aisle'
+
+# Full scene report with bounds from the open viewport's NodeSpatial providers.
+bun run worldbash scene inspect --out inspection.json
+# Structural information works with no browser. Missing bounds are explicit.
+bun run worldbash scene inspect --headless
+
+# One contact sheet for all Frames, a selection, or completed generation rounds.
+bun run worldbash scene preview --out room.png
+bun run worldbash scene preview <frame-id> <frame-id> --columns 2 --out selected.png
+bun run worldbash scene preview --jobs <job-id>,<job-id> --out round.png
+```
+
+`camera solve` emits the standard camera JSON accepted by `atlas --camera`,
+`capture --camera`, `image create --camera`, and placement. `--relative-to` resolves
+position, look-at target, and `--up` in that node's current coordinate frame; it
+creates a world-space camera, without parenting it. `--fov` is vertical degrees.
+`camera place` with aim flags uses the undoable `camera.aim` command. Standard
+`camera place` and viewport C continue to record the live view.
+
+`scene inspect` returns node IDs/names/kinds, parent IDs, effective visibility,
+world matrices, camera calibration/poses, transform capabilities, world bounds,
+and usable/broken Atlas inputs. Bounds match framing, including hidden content
+and empty-node framing boxes; they do not represent clipped geometry or certify
+scene coverage. Full inspection queues an `inspect` job serviced by an open
+viewport and waits up to 30 seconds by default. Headless inspection is a read-only
+`GET /api/scene/inspect`; it explicitly returns null bounds. The report carries the
+revision observed by the renderer, rather than claiming a submission-time snapshot.
+
+`scene preview` queues a local `contactSheet` job, snapshots the selected image
+bindings and labels, and writes a labeled PNG plus a JSON source manifest into
+project assets. It works headlessly and does not move cameras or create scene nodes.
+Images are letterboxed without cropping. `--out` also exports a local copy and
+refuses to overwrite an existing file. Preview/inspection results are normal
+assets, available through the usual export command. `schema commands` includes
+`camera.aim` and `jobs.submit`; `schema jobs` describes both new local job kinds.
+The bundled [Worldbash agent skill](skills/worldbash/SKILL.md) teaches the same paths.

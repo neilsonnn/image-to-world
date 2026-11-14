@@ -18,7 +18,11 @@ import {
   useClientState,
 } from "../lib/client";
 import { clipboardAssetIds, type RequestPlacement } from "./ImageImport";
-import { sceneCamera } from "../../../core/captures";
+import {
+  sceneCamera,
+  selectedPath,
+  spatialContextFieldOfView,
+} from "../../../core/captures";
 import { collectionDragPayload, endCollectionDrag } from "../lib/drag";
 import { SparkRenderer } from "@sparkjsdev/spark";
 import {
@@ -1507,6 +1511,10 @@ export function Viewport({
       </div>
       <ViewportCameraTools
         camera={viewCamera}
+        autoFov={spatialContextFieldOfView(
+          workspace,
+          selectedPath(workspace)?.id,
+        )}
         format={format}
         options={workspace.settings.viewportOptions}
         overrideName={

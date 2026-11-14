@@ -224,7 +224,7 @@ export const displaySchema = z.object({
 });
 export const viewportOptionsSchema = z
   .object({
-    passepartout: z.boolean().default(true),
+    passepartout: z.boolean().default(false),
     maskOpacity: number.min(0).max(1).default(0.8),
     near: number.min(0.001).max(1000).default(0.01),
     far: number.min(1).max(1000000).default(10000),

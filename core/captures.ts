@@ -229,6 +229,28 @@ export function atlasContextNodes(
   });
 }
 
+/** Average current vertical camera FOVs of the active context, in degrees. */
+export function spatialContextFieldOfView(
+  workspace: Parameters<typeof atlasContextNodes>[0],
+  pathId?: string | null,
+): number | null {
+  const values = atlasContextNodes(workspace, undefined, pathId).flatMap(
+    (node) => {
+      const camera = sceneCamera(workspace, node.id);
+      if (!camera) return [];
+      return [
+        (2 *
+          Math.atan(camera.intrinsics.height / (2 * camera.intrinsics.fy)) *
+          180) /
+          Math.PI,
+      ];
+    },
+  );
+  return values.length
+    ? values.reduce((sum, value) => sum + value, 0) / values.length
+    : null;
+}
+
 export function atlasContext(...args: Parameters<typeof atlasContextNodes>) {
   return atlasContextNodes(...args).map((node) =>
     captureFrame(args[0], node.id),

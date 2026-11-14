@@ -1,3 +1,4 @@
+import { TextField } from "@radix-ui/themes";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 export type NumericInputProps = {
@@ -90,83 +91,87 @@ export function NumericInput({
   });
 
   return (
-    <div className={`numeric-input${label ? " has-label" : ""}`}>
-      {label && (
-        <span
-          className="numeric-scrub-label"
-          onPointerDown={(event) => {
-            if (disabled || event.button !== 0) return;
-            event.preventDefault();
-            begin();
-            const initial = Number(draftRef.current);
-            scrub.current = {
-              pointer: event.pointerId,
-              x: event.clientX,
-              value: Number.isFinite(initial) ? initial : (value ?? 0),
-            };
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={(event) => {
-            const active = scrub.current;
-            if (!active || active.pointer !== event.pointerId) return;
-            const modifier = event.shiftKey ? 10 : event.altKey ? 0.1 : 1;
-            preview(
-              active.value + (event.clientX - active.x) * step * modifier,
-            );
-          }}
-          onPointerUp={(event) => {
-            if (scrub.current?.pointer !== event.pointerId) return;
-            scrub.current = undefined;
-            inputRef.current?.focus({ preventScroll: true });
-            commit();
-          }}
-          onPointerCancel={() => {
-            scrub.current = undefined;
-            revert();
-          }}
-        >
-          {label}
-        </span>
-      )}
-      <input
-        ref={inputRef}
-        type="text"
-        aria-label={label}
-        inputMode="decimal"
-        value={draft}
-        placeholder={placeholder}
-        disabled={disabled}
-        onFocus={begin}
-        onChange={(event) => {
-          begin();
-          draftRef.current = event.target.value;
-          setDraft(event.target.value);
-        }}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.preventDefault();
-            commit();
-            event.currentTarget.select();
-            return;
-          }
-          if (event.key === "Escape") {
-            event.preventDefault();
-            revert();
-            event.currentTarget.select();
-            return;
-          }
-          if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    <TextField.Root
+      size="1"
+      className="numeric-input"
+      ref={inputRef}
+      type="text"
+      aria-label={label}
+      inputMode="decimal"
+      value={draft}
+      placeholder={placeholder}
+      disabled={disabled}
+      onFocus={begin}
+      onChange={(event) => {
+        begin();
+        draftRef.current = event.target.value;
+        setDraft(event.target.value);
+      }}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
           event.preventDefault();
-          begin();
-          const current = Number(draftRef.current);
-          const base = Number.isFinite(current) ? current : (value ?? 0);
-          preview(base + (event.key === "ArrowUp" ? 1 : -1) * keyStep(event));
-        }}
-        onKeyUp={(event) => {
-          if (event.key === "ArrowUp" || event.key === "ArrowDown") commit();
-        }}
-      />
-    </div>
+          commit();
+          event.currentTarget.select();
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          revert();
+          event.currentTarget.select();
+          return;
+        }
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        begin();
+        const current = Number(draftRef.current);
+        const base = Number.isFinite(current) ? current : (value ?? 0);
+        preview(base + (event.key === "ArrowUp" ? 1 : -1) * keyStep(event));
+      }}
+      onKeyUp={(event) => {
+        if (event.key === "ArrowUp" || event.key === "ArrowDown") commit();
+      }}
+    >
+      {label && (
+        <TextField.Slot side="left">
+          <span
+            className="numeric-scrub-label"
+            onPointerDown={(event) => {
+              if (disabled || event.button !== 0) return;
+              event.preventDefault();
+              event.stopPropagation();
+              begin();
+              const initial = Number(draftRef.current);
+              scrub.current = {
+                pointer: event.pointerId,
+                x: event.clientX,
+                value: Number.isFinite(initial) ? initial : (value ?? 0),
+              };
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={(event) => {
+              const active = scrub.current;
+              if (!active || active.pointer !== event.pointerId) return;
+              const modifier = event.shiftKey ? 10 : event.altKey ? 0.1 : 1;
+              preview(
+                active.value + (event.clientX - active.x) * step * modifier,
+              );
+            }}
+            onPointerUp={(event) => {
+              if (scrub.current?.pointer !== event.pointerId) return;
+              scrub.current = undefined;
+              inputRef.current?.focus({ preventScroll: true });
+              commit();
+            }}
+            onPointerCancel={() => {
+              scrub.current = undefined;
+              revert();
+            }}
+          >
+            {label}
+          </span>
+        </TextField.Slot>
+      )}
+    </TextField.Root>
   );
 }

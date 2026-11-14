@@ -5,6 +5,7 @@ import {
   SlidersHorizontal,
 } from "@phosphor-icons/react";
 import {
+  Button,
   Flex,
   IconButton,
   Popover,
@@ -62,12 +63,14 @@ const lensFields = {
 
 export function ViewportCameraTools({
   camera,
+  autoFov,
   format,
   options,
   overrideName,
   onRelease,
 }: {
   camera: CameraData;
+  autoFov: number | null;
   format: Resolution;
   options: Workspace["settings"]["viewportOptions"];
   overrideName?: string;
@@ -139,6 +142,25 @@ export function ViewportCameraTools({
             onCommit={setFov}
           />
         </div>
+      </Hint>
+      <Hint
+        label={
+          autoFov === null
+            ? "No spatial context camera FOVs available"
+            : `Set vertical FOV to the spatial context average (${autoFov.toFixed(1)}°)`
+        }
+      >
+        <Button
+          size="1"
+          variant="surface"
+          color="gray"
+          disabled={!!overrideName || autoFov === null}
+          onClick={() => {
+            if (autoFov !== null) setFov(autoFov);
+          }}
+        >
+          Auto
+        </Button>
       </Hint>
       <Popover.Root>
         <Tooltip delayDuration={0} content="Lens and clipping settings">

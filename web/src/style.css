@@ -877,11 +877,11 @@ button {
   color: var(--muted);
   font-size: 9px;
 }
-.field input,
+.field input:not(.rt-TextFieldInput),
 .field textarea,
 .field select,
-.vector-field input,
-.keyframe input {
+.vector-field input:not(.rt-TextFieldInput),
+.keyframe input:not(.rt-TextFieldInput) {
   width: 100%;
   min-width: 0;
   padding: 4px 5px;
@@ -892,29 +892,30 @@ button {
   border-radius: 3px;
   font-size: 10px;
 }
-.numeric-input {
-  position: relative;
+.numeric-input.rt-TextFieldRoot {
+  flex: 1 1 0;
+  width: 100%;
   min-width: 0;
 }
-.numeric-input.has-label input {
-  padding-left: 13px;
+.numeric-input .rt-TextFieldSlot {
+  flex-shrink: 1;
+  max-width: 65%;
+  min-width: 0;
 }
 .numeric-scrub-label {
-  position: absolute;
-  z-index: 1;
-  top: 50%;
-  left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--muted);
   cursor: ew-resize;
-  font-size: 8px;
+  font-size: 9px;
   user-select: none;
-  transform: translateY(-50%);
 }
-.field input:focus,
+.field input:not(.rt-TextFieldInput):focus,
 .field textarea:focus,
 .field select:focus,
-.vector-field input:focus,
-.keyframe input:focus {
+.vector-field input:not(.rt-TextFieldInput):focus,
+.keyframe input:not(.rt-TextFieldInput):focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--focus-shadow);
 }
@@ -955,7 +956,7 @@ button {
   grid-auto-columns: minmax(0, 1fr);
   gap: 3px;
 }
-.vector-field input {
+.vector-field input:not(.rt-TextFieldInput) {
   padding: 4px;
   text-align: center;
 }

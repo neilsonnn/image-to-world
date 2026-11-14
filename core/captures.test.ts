@@ -9,6 +9,7 @@ import {
   createCapture,
   sceneCamera,
   spatialContextFrames,
+  spatialContextFieldOfView,
 } from "./captures";
 import { captureClip, clipMasks, clippedOpacity } from "./clips";
 import { inactiveNodeIds } from "./scene";
@@ -209,6 +210,27 @@ test("Atlas uses ordered visible context and accepts child selections without do
   workspace.settings.atlas.soloIds = [];
   workspace.settings.atlas.excludedIds = ["a"];
   expect(atlasContext(workspace)).toEqual([]);
+});
+
+test("context FOV averages current node lenses and respects context inclusion", () => {
+  const { workspace, asset } = fixture();
+  expect(spatialContextFieldOfView(workspace)).toBeNull();
+  applyCommand(workspace, {
+    type: "nodes.put",
+    nodes: [...createCapture(asset, "a"), ...createCapture(asset, "b")],
+  });
+  for (const [id, fov] of [
+    ["a_camera", 30],
+    ["b_camera", 90],
+  ] as const) {
+    const projection = workspace.nodes[id].projection!;
+    projection.fy = projection.height / (2 * Math.tan((fov * Math.PI) / 360));
+  }
+  expect(spatialContextFieldOfView(workspace)).toBeCloseTo(60);
+  workspace.settings.atlas.excludedIds = ["a"];
+  expect(spatialContextFieldOfView(workspace)).toBeCloseTo(90);
+  workspace.nodes.b.visible = false;
+  expect(spatialContextFieldOfView(workspace)).toBeNull();
 });
 
 test("camera view and exit restore the previous camera and are undoable", () => {

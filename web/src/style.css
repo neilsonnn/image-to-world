@@ -1670,8 +1670,8 @@ button {
 }
 .activity-drawer {
   position: fixed;
-  left: 260px;
-  right: 320px;
+  right: 16px;
+  width: min(820px, calc(100vw - 32px));
   bottom: 30px;
   height: 290px;
   min-height: 150px;
@@ -1680,29 +1680,23 @@ button {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--color-panel-solid, #202022);
-  border: 1px solid var(--gray-6);
-  border-radius: 6px 6px 0 0;
-  box-shadow: 0 -8px 35px #0004;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius) var(--control-radius) 0 0;
+  box-shadow: 0 -8px 35px var(--shadow);
   z-index: 60;
 }
 .activity-filters {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
-  padding: 8px;
-  border-bottom: 1px solid var(--gray-5);
+  padding: var(--panel-padding);
+  border-bottom: 1px solid var(--line);
 }
-.activity-filters input {
+.activity-search {
   flex: 1;
-  min-width: 80px;
-}
-.activity-filters :is(input, select, button) {
-  background: var(--gray-3);
-  color: var(--gray-12);
-  border: 1px solid var(--gray-6);
-  border-radius: 4px;
-  padding: 4px;
-  font-size: 11px;
+  min-width: 120px;
 }
 .activity-list {
   overflow: auto;
@@ -1754,24 +1748,6 @@ button {
   gap: 3px;
   font-size: 10px;
   margin-left: 4px;
-}
-@media (max-width: 900px) {
-  .activity-drawer {
-    left: 12px;
-    right: 12px;
-  }
-  .activity-filters {
-    flex-wrap: wrap;
-  }
-}
-
-.activity-drawer {
-  left: auto;
-  right: 16px;
-  width: min(820px, calc(100vw - 32px));
-}
-.activity-filters {
-  flex-wrap: wrap;
 }
 .activity-entry summary {
   min-width: 0;

@@ -7,7 +7,16 @@ import {
   type Activity,
 } from "../../../core/activity";
 import { useClientState, useWorldbashClient } from "../lib/client";
-import { Hint, PanelHeader } from "./ui";
+import {
+  Button,
+  Checkbox,
+  Flex,
+  Select,
+  Text,
+  TextField,
+} from "@radix-ui/themes";
+import { ArrowDown, X } from "@phosphor-icons/react";
+import { Hint, PanelHeader, ToolbarIconButton } from "./ui";
 
 const empty: Activity[] = [];
 export function ActivityFeed({ fallback }: { fallback: string }) {
@@ -85,67 +94,92 @@ export function ActivityFeed({ fallback }: { fallback: string }) {
       {open && (
         <section className="activity-drawer" aria-label="Activity history">
           <PanelHeader title="Activity">
-            <label>
-              <input
-                type="checkbox"
-                checked={showPresence}
-                onChange={(e) =>
-                  client.store.setState({ showPresence: e.target.checked })
-                }
-              />{" "}
-              Agent presence
-            </label>
-            <button onClick={() => setOpen(false)} aria-label="Close activity">
-              ×
-            </button>
+            <Text as="label" size="1" weight="regular" color="gray">
+              <Flex align="center" gap="2" mr="2">
+                <Checkbox
+                  size="1"
+                  color="gray"
+                  checked={showPresence}
+                  onCheckedChange={(checked) =>
+                    client.store.setState({ showPresence: checked === true })
+                  }
+                />
+                Agent presence
+              </Flex>
+            </Text>
+            <ToolbarIconButton
+              label="Close activity"
+              onClick={() => setOpen(false)}
+            >
+              <X size={14} />
+            </ToolbarIconButton>
           </PanelHeader>
           <div className="activity-filters">
-            <select
-              aria-label="Activity detail"
-              value={detail}
-              onChange={(e) => setDetail(e.target.value)}
-            >
-              {Object.entries(activityDetails).map(([v, label]) => (
-                <option value={v} key={v}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Activity actor"
-              value={actor}
-              onChange={(e) => setActor(e.target.value)}
-            >
-              <option value="">All actors</option>
-              {actors.map((a) => (
-                <option key={a}>{a}</option>
-              ))}
-            </select>
-            <select
-              aria-label="Activity severity"
-              value={severity}
-              onChange={(e) => setSeverity(e.target.value)}
-            >
-              <option value="">All levels</option>
-              <option value="info">Info</option>
-              <option value="warning">Warnings</option>
-              <option value="error">Errors</option>
-            </select>
-            <input
+            {[
+              {
+                label: "Activity detail",
+                value: detail,
+                onChange: setDetail,
+                options: Object.entries(activityDetails),
+              },
+              {
+                label: "Activity actor",
+                value: actor,
+                onChange: setActor,
+                options: [["", "All actors"], ...actors.map((a) => [a, a])],
+              },
+              {
+                label: "Activity severity",
+                value: severity,
+                onChange: setSeverity,
+                options: [
+                  ["", "All levels"],
+                  ["info", "Info"],
+                  ["warning", "Warnings"],
+                  ["error", "Errors"],
+                ],
+              },
+            ].map((filter) => (
+              <Select.Root
+                key={filter.label}
+                size="1"
+                value={`option:${filter.value}`}
+                onValueChange={(value) => filter.onChange(value.slice(7))}
+              >
+                <Select.Trigger
+                  aria-label={filter.label}
+                  variant="surface"
+                  color="gray"
+                />
+                <Select.Content position="popper" color="gray" variant="soft">
+                  {filter.options.map(([value, label]) => (
+                    <Select.Item key={value} value={`option:${value}`}>
+                      {label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+            ))}
+            <TextField.Root
+              size="1"
+              className="activity-search"
               aria-label="Search activity"
               placeholder="Search actions, assets, models…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <button
+            <Button
+              size="1"
+              variant="surface"
+              color="gray"
               onClick={() => {
                 following.current = true;
                 if (list.current)
                   list.current.scrollTop = list.current.scrollHeight;
               }}
             >
-              Live ↓
-            </button>
+              Live <ArrowDown size={12} />
+            </Button>
           </div>
           <div
             className="activity-list"

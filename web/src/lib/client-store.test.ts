@@ -1,6 +1,6 @@
 import { expect, spyOn, test } from "bun:test";
 import { emptyWorkspace, identity } from "../../../core/schema";
-import { createImageToWorldClient } from "./client-store";
+import { createWorldbashClient } from "./client-store";
 
 function project() {
   const workspace = emptyWorkspace();
@@ -26,7 +26,7 @@ function project() {
 }
 
 test("saving provider keys refreshes readiness without putting secrets in client state", async () => {
-  const client = createImageToWorldClient();
+  const client = createWorldbashClient();
   const original = project();
   client.acceptWorkspace(original);
   const requests: string[] = [];
@@ -68,7 +68,7 @@ test("saving provider keys refreshes readiness without putting secrets in client
 });
 
 test("a refreshed snapshot changes only edited branches, including removal and array order", () => {
-  const client = createImageToWorldClient();
+  const client = createWorldbashClient();
   const original = project();
   original.selection = ["camera", "group"];
   client.acceptWorkspace(original);
@@ -94,7 +94,7 @@ test("a refreshed snapshot changes only edited branches, including removal and a
 });
 
 test("duplicate and older snapshots do not replace the accepted project", () => {
-  const client = createImageToWorldClient();
+  const client = createWorldbashClient();
   const current = project();
   current.revision = 9;
   client.acceptWorkspace(current);
@@ -108,8 +108,8 @@ test("duplicate and older snapshots do not replace the accepted project", () => 
 });
 
 test("editor instances do not share their workspace or errors", () => {
-  const first = createImageToWorldClient();
-  const second = createImageToWorldClient();
+  const first = createWorldbashClient();
+  const second = createWorldbashClient();
   first.acceptWorkspace(project());
   first.setError("Disconnected");
   expect(second.store.getState()).toEqual({
@@ -139,7 +139,7 @@ test("a command during a refresh waits for a subsequent snapshot without paralle
     ),
   );
   try {
-    const client = createImageToWorldClient();
+    const client = createWorldbashClient();
     const pending = client.refresh();
     await Promise.resolve();
     const command = client.command({ type: "selection.set", ids: [] });
@@ -162,7 +162,7 @@ test("a command during a refresh waits for a subsequent snapshot without paralle
 });
 
 test("a failed refresh retains the project and recovers on the next request", async () => {
-  const client = createImageToWorldClient();
+  const client = createWorldbashClient();
   const original = project();
   client.acceptWorkspace(original);
   const network = spyOn(globalThis, "fetch").mockRejectedValueOnce(

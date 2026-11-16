@@ -17,7 +17,7 @@ afterEach(async () => {
   for (const fn of cleanup.splice(0).reverse()) await fn();
 });
 async function fixture() {
-  const root = await mkdtemp(path.join(tmpdir(), "image-to-world-agent-"));
+  const root = await mkdtemp(path.join(tmpdir(), "worldbash-agent-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const store = await new WorkspaceStore(root).init();
   const runner = new JobRunner(store);

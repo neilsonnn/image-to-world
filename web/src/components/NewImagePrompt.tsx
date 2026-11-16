@@ -8,11 +8,11 @@ import {
   type ImageModelFor,
 } from "../../../core/models";
 import type { Camera } from "../../../core/schema";
-import { useImageToWorldClient } from "../lib/client";
+import { useWorldbashClient } from "../lib/client";
 import { PanelHeader, ToolbarIconButton, ToolbarPopover } from "./ui";
 
 export function NewImagePrompt({ camera }: { camera: () => Camera }) {
-  const { command, setError } = useImageToWorldClient();
+  const { command, setError } = useWorldbashClient();
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<ImageModelFor<"create">>(
     defaultImageModels.create,
@@ -33,7 +33,6 @@ export function NewImagePrompt({ camera }: { camera: () => Camera }) {
             type: "generation.submit",
             request: {
               kind: "image.create",
-              outputMode: "reference",
               prompt,
               model,
               placement: camera(),

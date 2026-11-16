@@ -4,7 +4,7 @@ import {
   imageEditRatios,
   imageEditResolutions,
 } from "../../../core/models";
-import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
+import { useWorldbashClient, useWorkspaceData } from "../lib/client";
 import { selectedImageOperation } from "../../../core/image-operation";
 import { selectedCaptureMask } from "../lib/clip-mask";
 import {
@@ -86,7 +86,7 @@ export function ImageEditor({
     upload,
     getWorkspace,
     setError: onError,
-  } = useImageToWorldClient();
+  } = useWorldbashClient();
   const workspace = useWorkspaceData(
     [
       "nodes",

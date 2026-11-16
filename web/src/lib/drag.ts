@@ -12,14 +12,11 @@ export function startCollectionDrag(event: DragEvent, payload: Payload) {
   claimPaneShortcutGesture(payload.kind === "nodes" ? "scene" : "assets");
   event.dataTransfer.effectAllowed = payload.kind === "nodes" ? "move" : "copy";
   event.dataTransfer.setData(
-    `application/x-image-to-world-${payload.kind}`,
+    `application/x-worldbash-${payload.kind}`,
     JSON.stringify(payload.ids),
   );
   if (payload.kind === "assets")
-    event.dataTransfer.setData(
-      "application/x-image-to-world-asset",
-      payload.ids[0],
-    );
+    event.dataTransfer.setData("application/x-worldbash-asset", payload.ids[0]);
 }
 
 export function endCollectionDrag() {
@@ -31,9 +28,7 @@ export function collectionDragPayload(event: DragEvent): Payload | undefined {
   // Native dragover protects getData; retain only our own active drag in memory.
   if (active) return active;
   for (const kind of ["nodes", "assets"] as const) {
-    const value = event.dataTransfer.getData(
-      `application/x-image-to-world-${kind}`,
-    );
+    const value = event.dataTransfer.getData(`application/x-worldbash-${kind}`);
     if (!value) continue;
     try {
       const ids = JSON.parse(value);

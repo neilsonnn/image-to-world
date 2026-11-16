@@ -1,4 +1,3 @@
-import { isGaussianPly } from "../../../core/ply";
 import { validateGlb } from "../../../core/mesh";
 import type { Operation } from "../../../core/activity";
 import {
@@ -32,9 +31,6 @@ import {
 
 const formats: Record<string, [Asset["kind"], string]> = {
   ".glb": ["mesh", "model/gltf-binary"],
-  ".hdr": ["file", "application/octet-stream"],
-  ".js": ["file", "text/javascript"],
-  ".ts": ["file", "text/plain"],
   ".png": ["image", "image/png"],
   ".jpg": ["image", "image/jpeg"],
   ".jpeg": ["image", "image/jpeg"],
@@ -63,7 +59,6 @@ export class WorkspaceStore {
       ) {
         ids.add(value);
         const a = snapshot.assets[value];
-        walk(a.sourceAssetIds);
         for (const key of [
           "depthAssetId",
           "confidenceAssetId",
@@ -78,9 +73,9 @@ export class WorkspaceStore {
     walk(inputs);
     if (includeScene)
       for (const node of Object.values(snapshot.nodes)) {
-        walk(node);
+        walk(node.assetId);
+        walk(node.geometryAssetId);
       }
-    if (includeScene) walk(snapshot.settings.art.environmentAssetId);
     const pins: NonNullable<Job["pinnedAssets"]> = {};
     await mkdir(path.join(this.assetsPath, ".snapshots"), { recursive: true });
     for (const id of ids) {
@@ -364,7 +359,7 @@ export class WorkspaceStore {
         else if (asset) continue;
         else {
           const id = `asset_${createHash("sha256").update(file).digest("hex").slice(0, 20)}`;
-          state.assets[id] = await this.fileAsset(id, file, info);
+          state.assets[id] = this.fileAsset(id, file, info);
         }
       }
       if (before !== JSON.stringify(state)) {
@@ -379,22 +374,15 @@ export class WorkspaceStore {
     this.tail = result.catch(() => {});
     await result;
   }
-  private async fileAsset(
+  private fileAsset(
     id: string,
     file: string,
     info: { size: number; modifiedAt: number },
-  ): Promise<Asset> {
-    let [kind, mimeType] = formats[path.extname(file).toLowerCase()] ?? [
+  ): Asset {
+    const [kind, mimeType] = formats[path.extname(file).toLowerCase()] ?? [
       "file",
       "application/octet-stream",
     ];
-    if (
-      path.extname(file).toLowerCase() === ".ply" &&
-      !isGaussianPly(
-        await Bun.file(path.join(this.assetsPath, file)).slice(0, 65536).text(),
-      )
-    )
-      kind = "file";
     return {
       id,
       path: file,
@@ -421,10 +409,10 @@ export class WorkspaceStore {
       const info = await stat(path.join(this.assetsPath, relative));
       const id = `asset_${createHash("sha256").update(relative).digest("hex").slice(0, 20)}`;
       const asset = {
-        ...(await this.fileAsset(id, relative, {
+        ...this.fileAsset(id, relative, {
           size: info.size,
           modifiedAt: info.mtimeMs,
-        })),
+        }),
         name: safeName,
         ...metadata,
         id,

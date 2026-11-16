@@ -12,7 +12,7 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "image-to-world | Asset creation toolkit" },
+      { title: "worldbash | Spatial studio" },
     ],
   }),
   component: () => (

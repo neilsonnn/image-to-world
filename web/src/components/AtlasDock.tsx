@@ -40,7 +40,7 @@ import {
 import { generationInput } from "../../../core/generation";
 import { assetUrl, type Job, type Workspace } from "../../../core/schema";
 import type { SelectionState } from "../../../core/selection";
-import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
+import { useWorldbashClient, useWorkspaceData } from "../lib/client";
 import { useGlobalShortcuts } from "../lib/shortcuts";
 import { useCollection } from "../lib/useCollection";
 import { liveViewportCamera } from "../lib/viewport-camera";
@@ -119,7 +119,7 @@ function SpatialContext({
   /** Generation controls pinned below the vertical context list. */
   children: ReactNode;
 }) {
-  const { safeCommand, upload, setError } = useImageToWorldClient();
+  const { safeCommand, upload, setError } = useWorldbashClient();
   const fileInput = useRef<HTMLInputElement>(null);
   const strip = useRef<HTMLDivElement>(null);
   const path = selectedPath(workspace);
@@ -279,7 +279,7 @@ function CaptureTile({
   itemProps: ReturnType<ReturnType<typeof useCollection>["getItemProps"]>;
   onSelect: (event: React.MouseEvent) => void;
 }) {
-  const { safeCommand, getWorkspace } = useImageToWorldClient();
+  const { safeCommand, getWorkspace } = useWorldbashClient();
   const node = workspace.nodes[id];
   const asset = node.assetId ? workspace.assets[node.assetId] : undefined;
   const sourceJob = node.jobId ? workspace.jobs[node.jobId] : undefined;
@@ -496,7 +496,7 @@ function CaptureTile({
 }
 
 function GeneratingTile({ job }: { job: Job }) {
-  const { safeCommand } = useImageToWorldClient();
+  const { safeCommand } = useWorldbashClient();
   const status =
     job.status === "queued" ? "Queued" : job.message || "Generating";
   return (
@@ -526,7 +526,7 @@ function GeneratingTile({ job }: { job: Job }) {
 
 function NewFrames({ workspace }: { workspace: DockWorkspace }) {
   const locked = lockedFormat(workspace);
-  const { safeCommand } = useImageToWorldClient();
+  const { safeCommand } = useWorldbashClient();
   const path = selectedPath(workspace);
   let blocked: string | null = null;
   try {
@@ -653,7 +653,7 @@ function NewFrames({ workspace }: { workspace: DockWorkspace }) {
 }
 
 function GenerationSettings({ workspace }: { workspace: DockWorkspace }) {
-  const { safeCommand } = useImageToWorldClient();
+  const { safeCommand } = useWorldbashClient();
   const { seed, seedMode, enhancePrompt, atlasReturnDepth } =
     workspace.settings;
   const update = (settings: Partial<Workspace["settings"]>) =>

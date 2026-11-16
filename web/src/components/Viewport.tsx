@@ -14,7 +14,7 @@ import {
 import { GizmoOptions } from "./GizmoOptions";
 import { NewImagePrompt } from "./NewImagePrompt";
 import {
-  useImageToWorldClient,
+  useWorldbashClient,
   useWorkspaceData,
   useClientState,
 } from "../lib/client";
@@ -217,7 +217,7 @@ export function Viewport({
     upload,
     setError: onError,
     setHoveredNode,
-  } = useImageToWorldClient();
+  } = useWorldbashClient();
   const hoveredNodeId = useClientState((state) => state.hoveredNodeId);
   const source = useWorkspaceData(
     [
@@ -231,7 +231,6 @@ export function Viewport({
       "imageVersions",
     ],
     [
-      "art",
       "viewportCamera",
       "viewportOptions",
       "freeCamera",
@@ -460,7 +459,6 @@ export function Viewport({
       (value) => errorRef.current(value),
       color("helper"),
       color("active"),
-      renderer,
     );
     const presence = new AgentPresence(scene);
     const fly = new FlyControls(
@@ -790,7 +788,6 @@ export function Viewport({
         setHoveredNode(graph.pick(runtime.raycaster, hoverPointer) ?? null);
       }
       transform.update();
-      graph.sample(workspaceRef.current.settings.art.time, camera);
       graph.update();
       presence.update(
         clientStore.getState().activity ?? [],
@@ -999,7 +996,7 @@ export function Viewport({
             `/api/viewport-jobs/${encodeURIComponent(job.id)}/claim`,
             {
               method: "POST",
-              headers: { "X-Image-To-World-Client": "web" },
+              headers: { "X-Worldbash-Client": "web" },
               signal: controller.signal,
             },
           );
@@ -1029,7 +1026,7 @@ export function Viewport({
               `/api/viewport-jobs/${encodeURIComponent(job.id)}`,
               {
                 method: "POST",
-                headers: { "X-Image-To-World-Client": "web" },
+                headers: { "X-Worldbash-Client": "web" },
                 body: form,
                 signal: controller.signal,
               },
@@ -1141,7 +1138,7 @@ export function Viewport({
             `/api/viewport-jobs/${encodeURIComponent(job.id)}`,
             {
               method: "POST",
-              headers: { "X-Image-To-World-Client": "web" },
+              headers: { "X-Worldbash-Client": "web" },
               body: form,
               signal: controller.signal,
             },
@@ -1159,7 +1156,7 @@ export function Viewport({
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
-                  "X-Image-To-World-Client": "web",
+                  "X-Worldbash-Client": "web",
                 },
                 body: JSON.stringify({ error: detail }),
                 signal: controller.signal,

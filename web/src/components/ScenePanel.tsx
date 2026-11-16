@@ -1,6 +1,6 @@
 import { ActivityBadge } from "./ActivityFeed";
 import { ToolbarMenu } from "./ui";
-import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
+import { useWorldbashClient, useWorkspaceData } from "../lib/client";
 import { NodeIcon, nodePresentation } from "./NodeIcon";
 import { sceneCamera } from "../../../core/captures";
 import { cameraNodeData } from "../../../core/cameras";
@@ -58,7 +58,7 @@ export function ScenePanel({
     upload,
     getWorkspace,
     setError: onError,
-  } = useImageToWorldClient();
+  } = useWorldbashClient();
   const workspace = useWorkspaceData(
     ["nodes", "assets", "selection", "primaryId", "selectionAnchor"],
     ["collections"],

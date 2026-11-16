@@ -28,7 +28,7 @@ afterEach(async () => {
   for (const clean of cleanups.splice(0).reverse()) await clean();
 });
 async function directory() {
-  const root = await mkdtemp(path.join(tmpdir(), "image-to-world-flow-"));
+  const root = await mkdtemp(path.join(tmpdir(), "worldbash-flow-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   return root;
 }
@@ -70,7 +70,7 @@ const commandRequest = (command: unknown, origin?: string, header = true) =>
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(header ? { "X-Image-To-World-Client": "test" } : {}),
+      ...(header ? { "X-Worldbash-Client": "test" } : {}),
       ...(origin ? { Origin: origin } : {}),
     },
     body: JSON.stringify(command),
@@ -423,12 +423,7 @@ test("placing images poses in the background, preserves edits, and feeds moved c
     quaternion: [0, 0, 0, 1],
     coordinateSystem: "rub",
   };
-  const [jobId] = await runner.place(
-    [source.id],
-    camera,
-    undefined,
-    "individual",
-  );
+  const [jobId] = await runner.place([source.id], camera);
   await submitted;
   const pose = store.snapshot().jobs[jobId].input;
   if (pose.kind !== "pose") throw new Error("Expected pose");
@@ -1292,7 +1287,6 @@ test("create image reserves a Frame immediately and reuses posing with yaw, grou
       type: "generation.submit",
       request: {
         kind: "image.create",
-        outputMode: "pose",
         prompt: "An abandoned lab",
         placement,
         seed: 17,
@@ -1383,7 +1377,7 @@ for (const action of ["delete", "undo", "replace"] as const) {
     cleanups.push(async () => gate.resolve());
     const { jobId } = await commands.execute({
       type: "generation.submit",
-      request: { kind: "image.create", outputMode: "pose", prompt: "Room" },
+      request: { kind: "image.create", prompt: "Room" },
     });
     const state = store.snapshot(),
       input = state.jobs[jobId!].input;
@@ -1487,7 +1481,6 @@ test("resuming image creation keeps its placeholder and remote request, then pos
       id: "resume-image",
       input: {
         kind: "image",
-        outputMode: "pose",
         prompt: "Lab",
         model: "fal-ai/flux/schnell",
         placement: camera,
@@ -1532,7 +1525,7 @@ test("cancelling automatic posing keeps the generated image without applying lat
   cleanups.push(async () => gate.resolve());
   const { jobId } = await commands.execute({
     type: "generation.submit",
-    request: { kind: "image.create", outputMode: "pose", prompt: "Laboratory" },
+    request: { kind: "image.create", prompt: "Laboratory" },
   });
   const parent = await done(store, jobId!);
   await entered.promise;
@@ -1604,7 +1597,7 @@ test("inspection uses the viewport job lease and stores a validated report; head
     service.handle(
       new Request(`http://127.0.0.1:4310/api/viewport-jobs/${jobId}${suffix}`, {
         method: "POST",
-        headers: { "X-Image-To-World-Client": "test" },
+        headers: { "X-Worldbash-Client": "test" },
         body,
       }),
     );
@@ -1676,26 +1669,4 @@ test("footer activity reports CLI commands without persisting an extra scene edi
   } finally {
     unsubscribe();
   }
-});
-
-test("image creation defaults to an asset without requiring a World Labs pose", async () => {
-  const { store, commands, poseCount } = await generatedSceneFixture(true);
-  const result = await commands.execute({
-    type: "generation.submit",
-    request: { kind: "image.create", prompt: "A beautiful little object" },
-  });
-  const job = await done(store, result.jobId!);
-  expect(job.status).toBe("succeeded");
-  expect(job.childJobId).toBeUndefined();
-  expect(
-    Object.values(store.snapshot().nodes).filter(
-      (node) => node.jobId === job.id,
-    ),
-  ).toHaveLength(0);
-  expect(poseCount()).toBe(0);
-  expect(
-    job.outputAssetIds.some(
-      (id) => store.snapshot().assets[id].kind === "image",
-    ),
-  ).toBe(true);
 });

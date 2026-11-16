@@ -1,5 +1,5 @@
 import { imageModels } from "../../../core/models";
-import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
+import { useWorldbashClient, useWorkspaceData } from "../lib/client";
 import { Button } from "@radix-ui/themes";
 import {
   ArrowClockwise,
@@ -21,7 +21,7 @@ function jobLabel(job: Job) {
 }
 
 export function JobsPanel() {
-  const { command, setError: onError } = useImageToWorldClient();
+  const { command, setError: onError } = useWorldbashClient();
   const workspace = useWorkspaceData(["jobs", "assets"], []);
   const jobs = Object.values(workspace.jobs).sort(
     (a, b) => b.createdAt - a.createdAt,

@@ -1,5 +1,5 @@
 {
-  "name": "image-to-world",
+  "name": "worldbash",
   "private": true,
   "type": "module",
   "version": "0.1.0",
@@ -11,7 +11,7 @@
     "dev": "bun scripts/build-renderer.ts && bun --cwd web dev",
     "build": "bun scripts/build-renderer.ts && bun --cwd web build",
     "start": "bun --cwd web start",
-    "image-to-world": "bun cli/index.ts",
+    "worldbash": "bun cli/index.ts",
     "check": "tsc --noEmit",
     "test": "bun test core web/src/server web/src/lib cli",
     "format": "prettier --write .",
@@ -48,8 +48,5 @@
   "license": "Apache-2.0",
   "engines": {
     "bun": ">=1.3.10"
-  },
-  "exports": {
-    "./runtime": "./core/module-contract.ts"
   }
 }

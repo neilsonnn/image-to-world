@@ -12,7 +12,7 @@ const root = path.resolve(import.meta.dir, "..");
 async function launchEnvironment() {
   const config = path.join(
     process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"),
-    "image-to-world",
+    "worldbash",
     "env",
   );
   const read = async (file: string) => {
@@ -70,9 +70,7 @@ export async function buildFingerprint(directory = root) {
 export async function doctor(project?: string) {
   const { env, config } = await launchEnvironment();
   const workspace = path.resolve(
-    project ||
-      env.IMAGE_TO_WORLD_WORKSPACE ||
-      path.join(root, ".image-to-world"),
+    project || env.WORLDBASH_WORKSPACE || path.join(root, ".worldbash"),
   );
   let existing = workspace;
   let directoryExists = false;
@@ -155,9 +153,7 @@ export async function openProject(
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("Port must be an integer from 1 to 65535");
   const workspace = path.resolve(
-    project ||
-      env.IMAGE_TO_WORLD_WORKSPACE ||
-      path.join(root, ".image-to-world"),
+    project || env.WORLDBASH_WORKSPACE || path.join(root, ".worldbash"),
   );
   await mkdir(workspace, { recursive: true });
   const canonical = await realpath(workspace);
@@ -173,7 +169,7 @@ export async function openProject(
       workspacePath?: string;
     };
     if (
-      result.application !== "image-to-world" ||
+      result.application !== "worldbash" ||
       !result.workspacePath ||
       (await realpath(result.workspacePath)) !== canonical
     )
@@ -209,14 +205,14 @@ export async function openProject(
     )
       throw error;
   }
-  const stamp = Bun.file(path.join(root, "web/dist/.image-to-world-build"));
+  const stamp = Bun.file(path.join(root, "web/dist/.worldbash-build"));
   const fingerprint = await buildFingerprint();
   if (
     !(await stamp.exists()) ||
     (await stamp.text()) !== fingerprint ||
     !(await Bun.file(path.join(root, "web/dist/server/server.js")).exists())
   ) {
-    process.stderr.write("Building image-to-world…\n");
+    process.stderr.write("Building worldbash…\n");
     const build = Bun.spawn([process.execPath, "run", "build"], {
       cwd: root,
       env,
@@ -235,7 +231,7 @@ export async function openProject(
     // inherited values, or removing an override would revive its old value.
     env: {
       ...inheritedEnv,
-      IMAGE_TO_WORLD_WORKSPACE: canonical,
+      WORLDBASH_WORKSPACE: canonical,
       PORT: String(port),
     },
     stdout: "inherit",
@@ -268,9 +264,7 @@ export async function openProject(
     if (!ready)
       throw new Error("Server did not become ready within 10 seconds.");
     await show();
-    process.stderr.write(
-      "Keep this terminal open; Ctrl+C stops image-to-world.\n",
-    );
+    process.stderr.write("Keep this terminal open; Ctrl+C stops worldbash.\n");
     const code = await child.exited;
     if (code !== 0 && code !== 143) throw new Error(`Server exited (${code}).`);
   } finally {

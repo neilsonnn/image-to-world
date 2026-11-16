@@ -13,10 +13,6 @@ export function geometrySpatial(object: Object3D): NodeSpatial {
     getBounds: () => {
       const bounds = new Box3();
       const append = (child: Object3D, matrix: Matrix4) => {
-        const localBounds = child.userData.localBounds as
-          (() => Box3) | undefined;
-        if (localBounds)
-          bounds.union(localBounds().clone().applyMatrix4(matrix));
         const geometry = (child as Mesh).geometry;
         if (geometry) {
           if (!geometry.boundingBox) geometry.computeBoundingBox();

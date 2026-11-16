@@ -82,8 +82,6 @@ export function generationInput(
   const r = generationSchema.parse(request);
   const s = workspace.settings;
   switch (r.kind) {
-    case "project.export":
-    case "module":
     case "mask":
     case "render":
     case "observe":
@@ -94,7 +92,6 @@ export function generationInput(
     case "image.create":
       return {
         kind: "image",
-        outputMode: r.outputMode,
         prompt: r.prompt,
         model: r.model,
         seed: r.seed,

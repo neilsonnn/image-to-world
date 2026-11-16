@@ -14,9 +14,7 @@ afterEach(async () => {
   );
 });
 async function temporaryDirectory() {
-  const directory = await mkdtemp(
-    path.join(tmpdir(), "image-to-world-launch-"),
-  );
+  const directory = await mkdtemp(path.join(tmpdir(), "worldbash-launch-"));
   directories.push(directory);
   return directory;
 }
@@ -26,10 +24,7 @@ test("build fingerprint tracks source, lockfile, and public assets but ignores p
   await Bun.write(path.join(directory, "bun.lock"), "lock");
   await Bun.write(path.join(directory, "web/src/editor.tsx"), "editor");
   const first = await buildFingerprint(directory);
-  await Bun.write(
-    path.join(directory, ".image-to-world/workspace.json"),
-    "project",
-  );
+  await Bun.write(path.join(directory, ".worldbash/workspace.json"), "project");
   await Bun.write(path.join(directory, "web/dist/server/server.js"), "output");
   expect(await buildFingerprint(directory)).toBe(first);
   await Bun.write(path.join(directory, "web/src/editor.tsx"), "changed editor");
@@ -53,7 +48,7 @@ test("launcher refuses a port serving another project", async () => {
     hostname: "127.0.0.1",
     port: 0,
     fetch: () =>
-      Response.json({ application: "image-to-world", workspacePath: other }),
+      Response.json({ application: "worldbash", workspacePath: other }),
   });
   try {
     await expect(
@@ -83,16 +78,16 @@ test("doctor rejects a file as a project without creating directories", async ()
 test("launcher and CLI keep port 4310 when another app sets PORT", async () => {
   const directory = await temporaryDirectory();
   const previousPort = process.env.PORT;
-  const previousUrl = process.env.IMAGE_TO_WORLD_URL;
+  const previousUrl = process.env.WORLDBASH_URL;
   process.env.PORT = "3000";
-  delete process.env.IMAGE_TO_WORLD_URL;
+  delete process.env.WORLDBASH_URL;
   const requests: string[] = [];
   const fetchMock = spyOn(globalThis, "fetch").mockImplementation(
     Object.assign(
       async (input: Parameters<typeof fetch>[0]) => {
         requests.push(String(input));
         return Response.json({
-          application: "image-to-world",
+          application: "worldbash",
           workspacePath: directory,
         });
       },
@@ -112,7 +107,7 @@ test("launcher and CLI keep port 4310 when another app sets PORT", async () => {
     output.mockRestore();
     if (previousPort === undefined) delete process.env.PORT;
     else process.env.PORT = previousPort;
-    if (previousUrl === undefined) delete process.env.IMAGE_TO_WORLD_URL;
-    else process.env.IMAGE_TO_WORLD_URL = previousUrl;
+    if (previousUrl === undefined) delete process.env.WORLDBASH_URL;
+    else process.env.WORLDBASH_URL = previousUrl;
   }
 });

@@ -1,5 +1,4 @@
-import { CreationProperties } from "./CreationControls";
-import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
+import { useWorldbashClient, useWorkspaceData } from "../lib/client";
 import { Button, TextField } from "@radix-ui/themes";
 import { Plus, SlidersHorizontal, X } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
@@ -110,7 +109,6 @@ function TransformFields({
     return nodes.map((node) => {
       const vector = [...node.transform[key]];
       vector[index] = value;
-      if (key === "scale" && capabilities.uniformScale) vector.fill(value);
       if (key === "quaternion") {
         const length = Math.hypot(...vector);
         if (!length) return node;
@@ -135,34 +133,26 @@ function TransformFields({
         <div className="vector-field" key={key}>
           <span>{label}</span>
           <div>
-            {Array.from(
-              {
-                length:
-                  key === "scale" && capabilities.uniformScale ? 1 : count,
-              },
-              (_, index) => (
-                <NumericInput
-                  key={index}
-                  label={
-                    (key === "quaternion"
-                      ? ["X", "Y", "Z", "W"]
-                      : ["X", "Y", "Z"])[index]
-                  }
-                  value={common(
-                    nodes.map((node) => node.transform[key][index]),
-                  )}
-                  disabled={!capabilities[mode]}
-                  step={step}
-                  min={key === "scale" ? 0.001 : undefined}
-                  onPreview={(value) =>
-                    preview(
-                      value === undefined ? null : withValue(key, index, value),
-                    )
-                  }
-                  onCommit={(value) => update(withValue(key, index, value))}
-                />
-              ),
-            )}
+            {Array.from({ length: count }, (_, index) => (
+              <NumericInput
+                key={index}
+                label={
+                  (key === "quaternion"
+                    ? ["X", "Y", "Z", "W"]
+                    : ["X", "Y", "Z"])[index]
+                }
+                value={common(nodes.map((node) => node.transform[key][index]))}
+                disabled={!capabilities[mode]}
+                step={step}
+                min={key === "scale" ? 0.001 : undefined}
+                onPreview={(value) =>
+                  preview(
+                    value === undefined ? null : withValue(key, index, value),
+                  )
+                }
+                onCommit={(value) => update(withValue(key, index, value))}
+              />
+            ))}
           </div>
         </div>
       ))}
@@ -175,7 +165,7 @@ export function InspectorPanel({
 }: {
   onPreview: (nodes: SceneNode[] | null) => void;
 }) {
-  const { safeCommand, setError: onError } = useImageToWorldClient();
+  const { safeCommand, setError: onError } = useWorldbashClient();
   const workspace = useWorkspaceData(
     ["nodes", "assets", "selection", "primaryId"],
     ["targetFrameCount", "viewportCamera"],
@@ -281,8 +271,6 @@ export function InspectorPanel({
             }}
           />
         )}
-
-        {nodes.length === 1 && <CreationProperties node={nodes[0]} />}
 
         {nodes.some((node) => node.assetId) && (
           <section className="property-section">

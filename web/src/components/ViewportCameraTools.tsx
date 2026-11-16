@@ -19,7 +19,7 @@ import type {
   Workspace,
 } from "../../../core/schema";
 import type { Resolution } from "../../../core/formats";
-import { useImageToWorldClient } from "../lib/client";
+import { useWorldbashClient } from "../lib/client";
 import { liveViewportCamera } from "../lib/viewport-camera";
 import { NumericInput } from "./NumericInput";
 import { Hint } from "./ui";
@@ -76,7 +76,7 @@ export function ViewportCameraTools({
   overrideName?: string;
   onRelease: () => void;
 }) {
-  const { safeCommand, getWorkspace } = useImageToWorldClient();
+  const { safeCommand, getWorkspace } = useWorldbashClient();
   const updateOptions = (patch: Partial<typeof options>) =>
     void safeCommand({
       type: "workspace.update",

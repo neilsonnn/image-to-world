@@ -85,7 +85,7 @@ async function readJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function createImageToWorldClient() {
+export function createWorldbashClient() {
   const store = createStore<ClientState>(() => ({
     workspace: null,
     status: null,
@@ -159,8 +159,8 @@ export function createImageToWorldClient() {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "X-Image-To-World-Client": "web",
-          "X-Image-To-World-Context": JSON.stringify({
+          "X-Worldbash-Client": "web",
+          "X-Worldbash-Context": JSON.stringify({
             actorId: "You",
             requestId: crypto.randomUUID(),
           }),
@@ -185,7 +185,7 @@ export function createImageToWorldClient() {
     const assets = await readJson<Asset[]>(
       await fetch("/api/assets", {
         method: "POST",
-        headers: { "X-Image-To-World-Client": "web" },
+        headers: { "X-Worldbash-Client": "web" },
         body: data,
       }),
     );

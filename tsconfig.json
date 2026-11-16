@@ -12,6 +12,6 @@
     "esModuleInterop": true,
     "types": ["bun", "vite/client"]
   },
-  "include": ["core", "cli", "web", "examples"],
+  "include": ["core", "cli", "web"],
   "exclude": ["node_modules", "web/dist"]
 }

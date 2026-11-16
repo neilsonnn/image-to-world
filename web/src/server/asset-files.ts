@@ -12,17 +12,10 @@ function containsId(value: unknown, ids: Set<string>): boolean {
 
 function checkReferences(state: Workspace, ids: Set<string>) {
   for (const node of Object.values(state.nodes))
-    if (containsId(node, ids))
+    if (ids.has(node.assetId ?? "") || ids.has(node.geometryAssetId ?? ""))
       throw new Error(
         `Remove "${node.name}" from the scene before trashing its asset`,
       );
-  if (
-    state.settings.art.environmentAssetId &&
-    ids.has(state.settings.art.environmentAssetId)
-  )
-    throw new Error(
-      "Remove the presentation environment map before trashing its asset",
-    );
   for (const asset of Object.values(state.assets)) {
     if (ids.has(asset.id) || asset.trashedAt !== undefined) continue;
     if (
@@ -31,7 +24,6 @@ function checkReferences(state: Workspace, ids: Set<string>) {
         asset.confidenceAssetId,
         asset.maskAssetId,
         asset.geometrySourceAssetId,
-        ...(asset.sourceAssetIds ?? []),
       ].some((id) => id && ids.has(id))
     )
       throw new Error(`"${asset.name}" still uses this asset for geometry`);
@@ -43,11 +35,7 @@ function checkReferences(state: Workspace, ids: Set<string>) {
       );
   for (const job of Object.values(state.jobs)) {
     if (!["queued", "running"].includes(job.status)) continue;
-    if (
-      containsId(job.input, ids) ||
-      containsId(job.sourceFrameAssetIds, ids) ||
-      Object.keys(job.pinnedAssets ?? {}).some((id) => ids.has(id))
-    )
+    if (containsId(job.input, ids) || containsId(job.sourceFrameAssetIds, ids))
       throw new Error(
         `Wait for or cancel generation ${job.id} before trashing its inputs`,
       );

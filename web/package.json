@@ -1,5 +1,5 @@
 {
-  "name": "@image-to-world/web",
+  "name": "@worldbash/web",
   "private": true,
   "type": "module",
   "scripts": {

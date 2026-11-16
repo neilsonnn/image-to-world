@@ -71,6 +71,8 @@ async function render(workspace: Workspace, input: RenderInput) {
     graph.sync(workspace);
     await graph.ready(controller.signal);
     if (errors.length) throw new Error(errors.join("\n"));
+    graph.sample(0, camera);
+    if (errors.length) throw new Error(errors.join("\n"));
     graph.hideCaptureHelpers();
     for (const entry of graph.entries.values()) {
       if (entry.imagePlane) entry.imagePlane.visible = false;
@@ -114,9 +116,13 @@ async function render(workspace: Workspace, input: RenderInput) {
                 input.nodeIds.some((id) =>
                   isNodeInSubtree(workspace, id, e.node.id),
                 )) &&
-              ["mesh", "points", "splat"].includes(e.node.kind),
+              ["mesh", "points", "splat", "procedural"].includes(e.node.kind),
           );
-          if (geometry.some((e) => e.node.kind !== "mesh"))
+          if (
+            geometry.some(
+              (e) => e.node.kind === "points" || e.node.kind === "splat",
+            )
+          )
             throw new Error(
               `${pass} requires mesh geometry; select mesh nodes explicitly. Point/splat geometry passes are unsupported.`,
             );
@@ -201,5 +207,6 @@ async function render(workspace: Workspace, input: RenderInput) {
     renderer.forceContextLoss();
   }
 }
-(globalThis as unknown as { worldbashRender: typeof render }).worldbashRender =
-  render;
+(
+  globalThis as unknown as { imageToWorldRender: typeof render }
+).imageToWorldRender = render;

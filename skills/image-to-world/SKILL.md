@@ -1,27 +1,27 @@
 ---
-name: worldbash
+name: image-to-world
 description: >-
-  Control a worldbash spatial studio workspace through its CLI: inspect scenes, plan cameras with look-at targets, build contact sheets, edit images with Nano Banana via FAL, explore branching image history, activate image versions in posed captures, reconstruct images and video, arrange and clip scenes, generate Atlas views, and render camera-path video through keyframes.
+  Control a image-to-world spatial studio workspace through its CLI: inspect scenes, plan cameras with look-at targets, build contact sheets, edit images with Nano Banana via FAL, explore branching image history, activate image versions in posed captures, reconstruct images and video, arrange and clip scenes, generate Atlas views, and render camera-path video through keyframes.
 ---
 
-# worldbash
+# image-to-world
 
-Run commands from the worldbash project directory with `bun run worldbash`. If the CLI is
-installed as a binary, use `worldbash` instead. The app must be running; default URL
-is `http://127.0.0.1:4310`. `--url` or `WORLDBASH_URL` selects another loopback port.
+Run commands from the image-to-world project directory with `bun run image-to-world`. If the CLI is
+installed as a binary, use `image-to-world` instead. The app must be running; default URL
+is `http://127.0.0.1:4310`. `--url` or `IMAGE_TO_WORLD_URL` selects another loopback port.
 API keys belong to the server, never to command arguments or saved workspace JSON.
 
 ## Discover the workspace
 
-1. Run `bun run worldbash status` to verify the connection and provider configuration.
-2. Run `bun run worldbash state` for the current selection, image drafts, scene, panel
+1. Run `bun run image-to-world status` to verify the connection and provider configuration.
+2. Run `bun run image-to-world state` for the current selection, image drafts, scene, panel
    settings, and jobs. Asset and node IDs are separate identities in the same
    selection collection. Resolve a node's `assetId` before editing its image.
-3. Use `bun run worldbash schema commands` for all commands, `schema workspace` for
+3. Use `bun run image-to-world schema commands` for all commands, `schema workspace` for
    state, `schema camera` for cameras, or `schema draft` for image layers/strokes.
 
 All command results are JSON. Errors go to stderr with exit 1. For arbitrary
-commands, write JSON to a file and use `bun run worldbash command @file.json`; this
+commands, write JSON to a file and use `bun run image-to-world command @file.json`; this
 avoids shell quoting problems. Do not replace the entire workspace to change one
 object. Read the affected object, change its fields, and send `nodes.put`,
 `assets.update`, `image.draft`, or `workspace.update`.
@@ -45,11 +45,11 @@ Bounds include hidden content and framing boxes for empty nodes; they are not a
 coverage score and do not reflect clipping. Review actual images before splatting.
 
 ```sh
-bun run worldbash scene inspect --out inspection.json
-bun run worldbash camera solve --position 2,1.6,3 --look-at 0,1,-4 --fov 65 --out target-camera.json
-bun run worldbash camera place --position 2,1.6,3 --look-at 0,1,-4 --relative-to <node-id> --name 'Window aisle'
-bun run worldbash scene preview --out room.png
-bun run worldbash scene preview --jobs <job-id>,<job-id> --columns 3 --out round.png
+bun run image-to-world scene inspect --out inspection.json
+bun run image-to-world camera solve --position 2,1.6,3 --look-at 0,1,-4 --fov 65 --out target-camera.json
+bun run image-to-world camera place --position 2,1.6,3 --look-at 0,1,-4 --relative-to <node-id> --name 'Window aisle'
+bun run image-to-world scene preview --out room.png
+bun run image-to-world scene preview --jobs <job-id>,<job-id> --columns 3 --out round.png
 ```
 
 `camera solve` is read-only and returns normal camera JSON. Pass it to existing
@@ -101,12 +101,12 @@ Additional references are `referenceAssetIds`; they do not change the primary
 history branch. The job retains prompt, model settings, seed, and input draft.
 
 ```sh
-bun run worldbash import /absolute/path/to/source.png
-bun run worldbash image open <source-id>
-bun run worldbash image history <source-id>
-bun run worldbash image edit <source-id> --prompt 'Replace the chair with a red armchair' --model 2 --resolution 1K
-bun run worldbash jobs wait <job-id> --timeout 300
-bun run worldbash image history <source-id>
+bun run image-to-world import /absolute/path/to/source.png
+bun run image-to-world image open <source-id>
+bun run image-to-world image history <source-id>
+bun run image-to-world image edit <source-id> --prompt 'Replace the chair with a red armchair' --model 2 --resolution 1K
+bun run image-to-world jobs wait <job-id> --timeout 300
+bun run image-to-world image history <source-id>
 ```
 
 A completed edit activates its first output in linked captures. The previous depth
@@ -128,7 +128,7 @@ composites the draft into a PNG and uploads binary files to FAL. Annotation mark
 guide the model; they do not guarantee a hard pixel mask. Save draft changes with:
 
 ```sh
-bun run worldbash image draft <source-id> --file draft.json
+bun run image-to-world image draft <source-id> --file draft.json
 ```
 
 Use the dedicated Nano command for image edits, not generic `fal`, so generation
@@ -143,13 +143,13 @@ already posed assets can be instanced without another API request. `--camera`
 captures an explicit placement. Library import alone saves the binary.
 
 ```sh
-bun run worldbash import /absolute/path/to/source.png
-bun run worldbash scene place <image-id> --camera camera.json
-bun run worldbash jobs wait <job-id>
-bun run worldbash context list
-bun run worldbash camera view <capture-id>
-bun run worldbash camera free
-bun run worldbash atlas <capture-id> --camera target-camera.json --prompt 'Sunlight through the windows'
+bun run image-to-world import /absolute/path/to/source.png
+bun run image-to-world scene place <image-id> --camera camera.json
+bun run image-to-world jobs wait <job-id>
+bun run image-to-world context list
+bun run image-to-world camera view <capture-id>
+bun run image-to-world camera free
+bun run image-to-world atlas <capture-id> --camera target-camera.json --prompt 'Sunlight through the windows'
 ```
 
 A `capture` parent (Frame in the UI) contains a camera and camera-local points.
@@ -169,16 +169,16 @@ its 1280x720 grid. View generation requests depth by default. Move the target aw
 from the context camera: pure rotations have no baseline for depth registration.
 
 ```sh
-bun run worldbash context hide <capture-id>
-bun run worldbash context show <capture-id>
-bun run worldbash context exclude <capture-id>
-bun run worldbash context include <capture-id>
-bun run worldbash context solo <capture-id>
-bun run worldbash context solo
-bun run worldbash context freeze <capture-id>
-bun run worldbash context unfreeze <capture-id>
-bun run worldbash path create <camera-id> <camera-id> --target-frames 36
-bun run worldbash context exclude <capture-id> --path <path-id>
+bun run image-to-world context hide <capture-id>
+bun run image-to-world context show <capture-id>
+bun run image-to-world context exclude <capture-id>
+bun run image-to-world context include <capture-id>
+bun run image-to-world context solo <capture-id>
+bun run image-to-world context solo
+bun run image-to-world context freeze <capture-id>
+bun run image-to-world context unfreeze <capture-id>
+bun run image-to-world path create <camera-id> <camera-id> --target-frames 36
+bun run image-to-world context exclude <capture-id> --path <path-id>
 ```
 
 Hide changes scene visibility. Exclusion changes generation membership. Solo
@@ -217,13 +217,13 @@ Read current state before patching nested settings; `workspace.update` replaces
 provided nested objects. These display controls leave API camera/depth inputs intact.
 
 ```sh
-bun run worldbash scene move <id> --parent <parent-id> --before <sibling-id>
-bun run worldbash scene move <id> --parent root
-bun run worldbash scene duplicate <id>
-bun run worldbash undo
-bun run worldbash redo
-bun run worldbash image undo <source-id>
-bun run worldbash image redo <source-id>
+bun run image-to-world scene move <id> --parent <parent-id> --before <sibling-id>
+bun run image-to-world scene move <id> --parent root
+bun run image-to-world scene duplicate <id>
+bun run image-to-world undo
+bun run image-to-world redo
+bun run image-to-world image undo <source-id>
+bun run image-to-world image redo <source-id>
 ```
 
 Moves preserve world transforms and relative order, and filter selected descendants
@@ -253,16 +253,16 @@ resolution. Without `--camera` it captures the current viewport. An open browser
 viewport is required for capture; other commands work headlessly.
 
 ```sh
-bun run worldbash scene add path --name 'Camera move'
-bun run worldbash path keyframe <path-id> --file start-camera.json
-bun run worldbash path keyframe <path-id> --file end-camera.json
-bun run worldbash video <posed-node-id> --path <path-id> --target-frames 36 --fps 12 --keyframes 4
-bun run worldbash video frames <keyframe-job-id>
-bun run worldbash image edit <frame-asset-id> --prompt 'Add flowering plants'
-bun run worldbash image activate <edited-frame-id>
-bun run worldbash video --source-job <keyframe-job-id>
-bun run worldbash video integrate <dense-job-id> --indices 0,4,8
-bun run worldbash video reconstruct <dense-job-id>
+bun run image-to-world scene add path --name 'Camera move'
+bun run image-to-world path keyframe <path-id> --file start-camera.json
+bun run image-to-world path keyframe <path-id> --file end-camera.json
+bun run image-to-world video <posed-node-id> --path <path-id> --target-frames 36 --fps 12 --keyframes 4
+bun run image-to-world video frames <keyframe-job-id>
+bun run image-to-world image edit <frame-asset-id> --prompt 'Add flowering plants'
+bun run image-to-world image activate <edited-frame-id>
+bun run image-to-world video --source-job <keyframe-job-id>
+bun run image-to-world video integrate <dense-job-id> --indices 0,4,8
+bun run image-to-world video reconstruct <dense-job-id>
 ```
 
 Wait for each generation before using its outputs; wait for an edit's reconstruction
@@ -284,9 +284,9 @@ using FFmpeg. Export with `export <asset-id> /new/output.mp4`.
 Reconstruct imported video or images without opening a browser:
 
 ```sh
-bun run worldbash reconstruct --video <video-asset-id> --fps 2 --max-frames 60
-bun run worldbash reconstruct <image-id> <image-id>
-bun run worldbash jobs wait <job-id>
+bun run image-to-world reconstruct --video <video-asset-id> --fps 2 --max-frames 60
+bun run image-to-world reconstruct <image-id> <image-id>
+bun run image-to-world jobs wait <job-id>
 ```
 
 Video sampling uses FFmpeg/ffprobe and spreads the cap across the duration.
@@ -320,7 +320,7 @@ or editing `workspace.json` while a command is pending.
 Camera gestures and display edits participate in the scene undo journal. Each
 multi-object gizmo drag is one edit; duplicate/delete undo restores selection.
 Pane sizing and image drafts retain their separate behavior. Nonuniform ancestor
-scaling can make a world rotation require shear; worldbash rejects that transform.
+scaling can make a world rotation require shear; image-to-world rejects that transform.
 
 ## Decompose a posed image into editable objects
 
@@ -373,8 +373,8 @@ writes scene state. Use `schema generation` and `schema context` to discover exa
 
 ## Concurrent workers
 
-Workers may share one live server. Set `WORLDBASH_URL` once and optionally
-`WORLDBASH_ACTOR` per worker; identity also accepts `--actor`. Work on separate
+Workers may share one live server. Set `IMAGE_TO_WORLD_URL` once and optionally
+`IMAGE_TO_WORLD_ACTOR` per worker; identity also accepts `--actor`. Work on separate
 objects, and nominate one worker to clean a shared source view. Independent local
 rendering and provider generation have separate scheduling slots.
 

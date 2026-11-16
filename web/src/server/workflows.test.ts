@@ -28,7 +28,7 @@ afterEach(async () => {
   for (const clean of cleanups.splice(0).reverse()) await clean();
 });
 async function directory() {
-  const root = await mkdtemp(path.join(tmpdir(), "worldbash-flow-"));
+  const root = await mkdtemp(path.join(tmpdir(), "image-to-world-flow-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   return root;
 }
@@ -70,7 +70,7 @@ const commandRequest = (command: unknown, origin?: string, header = true) =>
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(header ? { "X-Worldbash-Client": "test" } : {}),
+      ...(header ? { "X-Image-To-World-Client": "test" } : {}),
       ...(origin ? { Origin: origin } : {}),
     },
     body: JSON.stringify(command),
@@ -1597,7 +1597,7 @@ test("inspection uses the viewport job lease and stores a validated report; head
     service.handle(
       new Request(`http://127.0.0.1:4310/api/viewport-jobs/${jobId}${suffix}`, {
         method: "POST",
-        headers: { "X-Worldbash-Client": "test" },
+        headers: { "X-Image-To-World-Client": "test" },
         body,
       }),
     );

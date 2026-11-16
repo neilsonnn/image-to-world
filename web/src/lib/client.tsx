@@ -9,28 +9,28 @@ import {
 import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import type { Workspace } from "../../../core/schema";
-import { createWorldbashClient, type ClientState } from "./client-store";
+import { createImageToWorldClient, type ClientState } from "./client-store";
 
 const ClientContext = createContext<ReturnType<
-  typeof createWorldbashClient
+  typeof createImageToWorldClient
 > | null>(null);
 
-export function WorldbashProvider({ children }: { children: ReactNode }) {
-  const [client] = useState(createWorldbashClient);
+export function ImageToWorldProvider({ children }: { children: ReactNode }) {
+  const [client] = useState(createImageToWorldClient);
   useEffect(() => client.connect(), [client]);
   return (
     <ClientContext.Provider value={client}>{children}</ClientContext.Provider>
   );
 }
 
-export function useWorldbashClient() {
+export function useImageToWorldClient() {
   const client = useContext(ClientContext);
-  if (!client) throw new Error("WorldbashProvider is required");
+  if (!client) throw new Error("ImageToWorldProvider is required");
   return client;
 }
 
 export function useClientState<T>(selector: (state: ClientState) => T) {
-  return useStore(useWorldbashClient().store, selector);
+  return useStore(useImageToWorldClient().store, selector);
 }
 
 export function useWorkspace<T>(selector: (workspace: Workspace) => T) {

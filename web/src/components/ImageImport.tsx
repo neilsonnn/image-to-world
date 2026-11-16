@@ -16,9 +16,9 @@ import {
   type Resolution,
 } from "../../../core/formats";
 import { assetUrl, type Asset, type Camera } from "../../../core/schema";
-import { useWorldbashClient, useWorkspace } from "../lib/client";
+import { useImageToWorldClient, useWorkspace } from "../lib/client";
 
-export const ASSET_CLIPBOARD_TYPE = "application/x-worldbash-assets+json";
+export const ASSET_CLIPBOARD_TYPE = "application/x-image-to-world-assets+json";
 
 export type PlacementDestination = {
   parentId?: string | null;
@@ -100,7 +100,7 @@ async function cropToFormat(
 }
 
 export function useImageImport() {
-  const client = useWorldbashClient();
+  const client = useImageToWorldClient();
   const locked = useWorkspace(lockedFormat);
   const [pending, setPending] = useState<PendingPlacement[]>([]);
   const active = pending[0];

@@ -1,4 +1,5 @@
-import { useWorldbashClient, useWorkspaceData } from "../lib/client";
+import { ProceduralProperties } from "./ProceduralProperties";
+import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
 import { Button, TextField } from "@radix-ui/themes";
 import { Plus, SlidersHorizontal, X } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
@@ -165,7 +166,7 @@ export function InspectorPanel({
 }: {
   onPreview: (nodes: SceneNode[] | null) => void;
 }) {
-  const { safeCommand, setError: onError } = useWorldbashClient();
+  const { safeCommand, setError: onError } = useImageToWorldClient();
   const workspace = useWorkspaceData(
     ["nodes", "assets", "selection", "primaryId"],
     ["targetFrameCount", "viewportCamera"],
@@ -288,6 +289,10 @@ export function InspectorPanel({
                 ))}
             </dl>
           </section>
+        )}
+
+        {nodes.length === 1 && primaryNode?.procedural && (
+          <ProceduralProperties node={primaryNode} />
         )}
 
         {clipNodes.length > 0 && (

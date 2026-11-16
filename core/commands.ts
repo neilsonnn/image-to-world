@@ -423,7 +423,14 @@ export function applyCommand(
         node.context[key] = node.context[key].filter((id) => next.nodes[id]);
   validateScene(next.nodes);
   for (const node of Object.values(next.nodes))
-    for (const id of [node.assetId, node.geometryAssetId])
+    for (const id of [
+      node.assetId,
+      node.geometryAssetId,
+      node.procedural?.sourceAssetId,
+      node.procedural?.bundleAssetId,
+      ...(node.procedural?.sourceAssetIds ?? []),
+      ...(node.procedural?.assetIds ?? []),
+    ])
       if (id && !next.assets[id]) throw new Error(`Unknown asset ${id}`);
   if (!input.type.startsWith("history.") || input.type === "history.revert") {
     const changes = editChanges(workspace, next);

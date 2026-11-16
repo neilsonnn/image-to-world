@@ -17,8 +17,8 @@ import { Button, TextField } from "@radix-ui/themes";
 import { memo, useRef, useState } from "react";
 import type { Camera as CameraData, SceneNode } from "../../../core/schema";
 import {
-  WorldbashProvider,
-  useWorldbashClient,
+  ImageToWorldProvider,
+  useImageToWorldClient,
   useClientState,
   useWorkspace,
   useWorkspaceData,
@@ -60,9 +60,9 @@ const DEFAULT_LAYOUT = {
 
 export function Editor() {
   return (
-    <WorldbashProvider>
+    <ImageToWorldProvider>
       <EditorLoading />
-    </WorldbashProvider>
+    </ImageToWorldProvider>
   );
 }
 
@@ -85,7 +85,7 @@ function WorkspaceTitle() {
   const revision = useWorkspace((state) => state.revision);
   return (
     <div className="project-title">
-      <span>{name}</span>
+      <span title={name}>{name}</span>
       <small>rev {revision}</small>
     </div>
   );
@@ -93,7 +93,7 @@ function WorkspaceTitle() {
 
 function EditorWorkspace() {
   const connected = useClientState((state) => state.connected);
-  const client = useWorldbashClient();
+  const client = useImageToWorldClient();
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [agentGuideOpen, setAgentGuideOpen] = useState(true);
   const [propertiesOpen, setPropertiesOpen] = useState(false);
@@ -251,7 +251,7 @@ function EditorWorkspace() {
         <div className="wordmark">
           <GlobeHemisphereWest weight="duotone" />
           <Wrench />
-          <strong>WORLDBASH</strong>
+          <strong>IMAGE-TO-WORLD</strong>
         </div>
         <WorkspaceTitle />
         <div className="topbar-actions">

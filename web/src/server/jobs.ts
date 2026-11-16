@@ -539,7 +539,7 @@ export class JobRunner {
       const task = this.store
         .withJobAssets(job, () => this.run(job.id, controller.signal))
         .catch((error) =>
-          console.error("worldbash job could not save its status:", error),
+          console.error("image-to-world job could not save its status:", error),
         )
         .finally(() => {
           this.active.delete(job.id);

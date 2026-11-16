@@ -26,7 +26,7 @@ const server = Bun.serve({
     return app.fetch(request);
   },
 });
-console.info(`worldbash is running at ${server.url}`);
+console.info(`image-to-world is running at ${server.url}`);
 
 let closing = false;
 async function stop() {
@@ -34,9 +34,9 @@ async function stop() {
   closing = true;
   await server.stop(true);
   const runtime = globalThis as typeof globalThis & {
-    worldbashService?: Promise<{ close(): Promise<void> }>;
+    imageToWorldService?: Promise<{ close(): Promise<void> }>;
   };
-  await (await runtime.worldbashService)?.close();
+  await (await runtime.imageToWorldService)?.close();
   process.exit(0);
 }
 process.on("SIGINT", stop);

@@ -3,7 +3,7 @@ node_modules/
 dist/
 .tanstack/
 .vite/
-.worldbash/
+.image-to-world/
 /claude-plans/
 coverage/
 playwright-report/
@@ -16,4 +16,9 @@ test-results/
 *.tsbuildinfo
 
 /web/public/render-worker.js
+/.image-to-world-demos/
+
+# Retired local demo data and generated output; never source.
+/.worldbash/
 /.worldbash-demos/
+/web/public/scene-player.js

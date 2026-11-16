@@ -2,7 +2,7 @@ import { Button, Dialog, Flex, Grid, Text, TextField } from "@radix-ui/themes";
 import { Plus, X } from "@phosphor-icons/react";
 import { useState } from "react";
 import type { EnvironmentStatus } from "../../../core/environment";
-import { useClientState, useWorldbashClient } from "../lib/client";
+import { useClientState, useImageToWorldClient } from "../lib/client";
 import { PanelHeader, ToolbarIconButton } from "./ui";
 
 type Row = {
@@ -22,7 +22,7 @@ const rowsFor = (environment: EnvironmentStatus): Row[] =>
   }));
 
 export function EnvironmentEditor({ onClose }: { onClose: () => void }) {
-  const client = useWorldbashClient();
+  const client = useImageToWorldClient();
   const environment = useClientState((state) => state.status?.environment);
   const [rows, setRows] = useState(() => rowsFor(environment ?? {}));
   const [removed, setRemoved] = useState<string[]>([]);

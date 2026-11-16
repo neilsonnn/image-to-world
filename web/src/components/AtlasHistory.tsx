@@ -1,4 +1,4 @@
-import { useWorldbashClient, useWorkspaceData } from "../lib/client";
+import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
 import { useCollection } from "../lib/useCollection";
 import type { SelectionState } from "../../../core/selection";
 import { frameAssets } from "../../../core/frames";
@@ -23,7 +23,7 @@ type GenerationJob = Job & {
 };
 
 export function AtlasHistory() {
-  const { command, safeCommand, setError: onError } = useWorldbashClient();
+  const { command, safeCommand, setError: onError } = useImageToWorldClient();
   const workspace = useWorkspaceData(
     ["jobs", "assets", "nodes", "imageVersions"],
     ["atlasPanel", "editor2d"],

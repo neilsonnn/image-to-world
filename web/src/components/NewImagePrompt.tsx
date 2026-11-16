@@ -8,11 +8,11 @@ import {
   type ImageModelFor,
 } from "../../../core/models";
 import type { Camera } from "../../../core/schema";
-import { useWorldbashClient } from "../lib/client";
+import { useImageToWorldClient } from "../lib/client";
 import { PanelHeader, ToolbarIconButton, ToolbarPopover } from "./ui";
 
 export function NewImagePrompt({ camera }: { camera: () => Camera }) {
-  const { command, setError } = useWorldbashClient();
+  const { command, setError } = useImageToWorldClient();
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<ImageModelFor<"create">>(
     defaultImageModels.create,

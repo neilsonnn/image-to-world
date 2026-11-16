@@ -1,3 +1,4 @@
+import { proceduralSchema } from "./procedural";
 import {
   defaultImageModels,
   modelIds,
@@ -169,6 +170,7 @@ export const nodeSchema = z
       "path",
       "clip",
       "video",
+      "procedural",
     ]),
     parentId: z.string().nullable().default(null),
     order: number.int().nonnegative().optional(),
@@ -184,6 +186,7 @@ export const nodeSchema = z
       })
       .strict()
       .optional(),
+    procedural: proceduralSchema.optional(),
     geometryAssetId: z.string().optional(),
     jobId: z.string().optional(),
     clipInitialized: z.boolean().optional(),
@@ -566,7 +569,7 @@ export const workspaceSchema = z.object({
   selectionAnchor: z.string().nullable().default(null),
   undo: z.array(editSchema).max(100).default([]),
   redo: z.array(editSchema).max(100).default([]),
-  version: z.literal(5),
+  version: z.literal(7),
   revision: number.int().nonnegative(),
   name: z.string().min(1),
   imageDrafts: z.record(imageDraftSchema).default({}),
@@ -601,7 +604,7 @@ export function emptyWorkspace(): Workspace {
     selectionAnchor: null,
     undo: [],
     redo: [],
-    version: 5,
+    version: 7,
     revision: 0,
     name: "Untitled workspace",
     imageDrafts: {},

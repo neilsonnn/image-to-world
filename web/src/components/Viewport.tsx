@@ -14,7 +14,7 @@ import {
 import { GizmoOptions } from "./GizmoOptions";
 import { NewImagePrompt } from "./NewImagePrompt";
 import {
-  useWorldbashClient,
+  useImageToWorldClient,
   useWorkspaceData,
   useClientState,
 } from "../lib/client";
@@ -217,7 +217,7 @@ export function Viewport({
     upload,
     setError: onError,
     setHoveredNode,
-  } = useWorldbashClient();
+  } = useImageToWorldClient();
   const hoveredNodeId = useClientState((state) => state.hoveredNodeId);
   const source = useWorkspaceData(
     [
@@ -787,6 +787,7 @@ export function Viewport({
         runtime.raycaster.setFromCamera(hoverPointer, camera);
         setHoveredNode(graph.pick(runtime.raycaster, hoverPointer) ?? null);
       }
+      graph.sample(performance.now() / 1000, camera);
       transform.update();
       graph.update();
       presence.update(
@@ -996,7 +997,7 @@ export function Viewport({
             `/api/viewport-jobs/${encodeURIComponent(job.id)}/claim`,
             {
               method: "POST",
-              headers: { "X-Worldbash-Client": "web" },
+              headers: { "X-Image-To-World-Client": "web" },
               signal: controller.signal,
             },
           );
@@ -1026,7 +1027,7 @@ export function Viewport({
               `/api/viewport-jobs/${encodeURIComponent(job.id)}`,
               {
                 method: "POST",
-                headers: { "X-Worldbash-Client": "web" },
+                headers: { "X-Image-To-World-Client": "web" },
                 body: form,
                 signal: controller.signal,
               },
@@ -1138,7 +1139,7 @@ export function Viewport({
             `/api/viewport-jobs/${encodeURIComponent(job.id)}`,
             {
               method: "POST",
-              headers: { "X-Worldbash-Client": "web" },
+              headers: { "X-Image-To-World-Client": "web" },
               body: form,
               signal: controller.signal,
             },
@@ -1156,7 +1157,7 @@ export function Viewport({
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
-                  "X-Worldbash-Client": "web",
+                  "X-Image-To-World-Client": "web",
                 },
                 body: JSON.stringify({ error: detail }),
                 signal: controller.signal,

@@ -20,7 +20,7 @@ import {
 } from "../../../core/captures";
 import { generationInput } from "../../../core/generation";
 import { assetUrl, type Command, type Job } from "../../../core/schema";
-import { useWorldbashClient, useWorkspaceData } from "../lib/client";
+import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
 import { Hint, PanelHeader, ToolbarPopover } from "./ui";
 
 export function SplatPanel() {
@@ -49,7 +49,7 @@ export function SplatPanel() {
       "seed",
     ],
   );
-  const { command, safeCommand, getWorkspace } = useWorldbashClient();
+  const { command, safeCommand, getWorkspace } = useImageToWorldClient();
   const [pending, setPending] = useState<{
     command: Command;
     description: string;

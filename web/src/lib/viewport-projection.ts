@@ -3,6 +3,22 @@ import { cameraMatrix } from "../../../core/cameras";
 import type { Camera } from "../../../core/schema";
 import type { Resolution } from "../../../core/formats";
 
+/** Center-crop to the viewfinder without changing the calibrated optical axis. */
+export function viewfinderCamera(value: Camera, format: Resolution): Camera {
+  const c = value.intrinsics;
+  const scale = Math.max(format.width / c.width, format.height / c.height);
+  return {
+    ...value,
+    intrinsics: {
+      ...format,
+      fx: c.fx * scale,
+      fy: c.fy * scale,
+      cx: format.width / 2 + (c.cx - c.width / 2) * scale,
+      cy: format.height / 2 + (c.cy - c.height / 2) * scale,
+    },
+  };
+}
+
 export function applyCamera(camera: PerspectiveCamera, value: Camera) {
   cameraMatrix(value).decompose(
     camera.position,

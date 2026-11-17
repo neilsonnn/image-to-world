@@ -1,5 +1,5 @@
 import { ActivityBadge } from "./ActivityFeed";
-import { useWorldbashClient, useWorkspaceData } from "../lib/client";
+import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
 import { Button, Checkbox, Flex, Popover, Text } from "@radix-ui/themes";
 import {
   Cube,
@@ -38,7 +38,7 @@ export function AssetsPanel() {
     upload,
     getWorkspace,
     setError: onError,
-  } = useWorldbashClient();
+  } = useImageToWorldClient();
   const workspace = useWorkspaceData(
     ["assets", "selection", "primaryId", "selectionAnchor"],
     ["collections"],

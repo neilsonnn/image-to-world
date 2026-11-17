@@ -152,7 +152,8 @@ function mutate(workspace: Workspace, input: Command) {
       break;
     }
     case "camera.release":
-      if (workspace.settings.freeCamera)
+      if (command.camera) workspace.settings.viewportCamera = command.camera;
+      else if (workspace.settings.freeCamera)
         workspace.settings.viewportCamera = workspace.settings.freeCamera;
       workspace.settings.viewingCameraId = null;
       workspace.settings.freeCamera = null;
@@ -423,7 +424,14 @@ export function applyCommand(
         node.context[key] = node.context[key].filter((id) => next.nodes[id]);
   validateScene(next.nodes);
   for (const node of Object.values(next.nodes))
-    for (const id of [node.assetId, node.geometryAssetId])
+    for (const id of [
+      node.assetId,
+      node.geometryAssetId,
+      node.procedural?.sourceAssetId,
+      node.procedural?.bundleAssetId,
+      ...(node.procedural?.sourceAssetIds ?? []),
+      ...(node.procedural?.assetIds ?? []),
+    ])
       if (id && !next.assets[id]) throw new Error(`Unknown asset ${id}`);
   if (!input.type.startsWith("history.") || input.type === "history.revert") {
     const changes = editChanges(workspace, next);

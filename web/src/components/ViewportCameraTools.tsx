@@ -19,7 +19,7 @@ import type {
   Workspace,
 } from "../../../core/schema";
 import type { Resolution } from "../../../core/formats";
-import { useWorldbashClient } from "../lib/client";
+import { useImageToWorldClient } from "../lib/client";
 import { liveViewportCamera } from "../lib/viewport-camera";
 import { NumericInput } from "./NumericInput";
 import { Hint } from "./ui";
@@ -76,7 +76,7 @@ export function ViewportCameraTools({
   overrideName?: string;
   onRelease: () => void;
 }) {
-  const { safeCommand, getWorkspace } = useWorldbashClient();
+  const { safeCommand, getWorkspace } = useImageToWorldClient();
   const updateOptions = (patch: Partial<typeof options>) =>
     void safeCommand({
       type: "workspace.update",
@@ -117,7 +117,7 @@ export function ViewportCameraTools({
       <Hint
         label={
           overrideName
-            ? `Camera settings overridden by ${overrideName}. Move or press Escape to restore the free viewport camera.`
+            ? `Camera settings overridden by ${overrideName}. Move to explore from here, or press Escape to restore the previous viewport camera.`
             : "Independent viewport camera; used by Render"
         }
       >

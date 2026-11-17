@@ -4,7 +4,11 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { identity, type Camera } from "../../../core/schema";
-import { createCapture, captureFrame } from "../../../core/captures";
+import {
+  createCapture,
+  captureFrame,
+  sceneCamera,
+} from "../../../core/captures";
 import { applyCommand } from "../../../core/commands";
 import { linearDepth } from "../../../core/depth";
 import { WorkspaceStore } from "./store";
@@ -17,7 +21,7 @@ afterEach(async () => {
   for (const fn of cleanup.splice(0).reverse()) await fn();
 });
 async function fixture() {
-  const root = await mkdtemp(path.join(tmpdir(), "worldbash-agent-"));
+  const root = await mkdtemp(path.join(tmpdir(), "image-to-world-agent-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const store = await new WorkspaceStore(root).init();
   const runner = new JobRunner(store);
@@ -51,7 +55,7 @@ const camera: Camera = {
   },
   intrinsics: { width: 64, height: 64, fx: 50, fy: 50, cx: 32, cy: 32 },
 };
-function triangle() {
+function triangle(extra: Record<string, unknown> = {}) {
   const positions = new Float32Array([
     -0.5, -0.5, -2, 0.5, -0.5, -2, 0, 0.5, -2,
   ]);
@@ -86,7 +90,7 @@ function triangle() {
       },
     ],
   };
-  const text = JSON.stringify(json),
+  const text = JSON.stringify({ ...json, ...extra }),
     padded = text + " ".repeat((4 - (text.length % 4)) % 4),
     bytes = Buffer.alloc(12 + 8 + padded.length + 8 + positions.byteLength);
   bytes.writeUInt32LE(0x46546c67, 0);
@@ -101,6 +105,34 @@ function triangle() {
   Buffer.from(positions.buffer).copy(bytes, at + 8);
   return new Blob([bytes], { type: "model/gltf-binary" });
 }
+test("mesh import accepts embedded WebP textures while rejecting external images and decoder-only extensions", async () => {
+  const { store } = await fixture();
+  const image = createCanvas(2, 2).toBuffer("image/webp");
+  const extra = {
+    extensionsUsed: ["EXT_texture_webp"],
+    extensionsRequired: ["EXT_texture_webp"],
+    textures: [{ extensions: { EXT_texture_webp: { source: 0 } } }],
+    images: [{ uri: `data:image/webp;base64,${image.toString("base64")}` }],
+  };
+  const asset = await store.importFile(triangle(extra), "embedded-webp.glb");
+  expect(asset.kind).toBe("mesh");
+  await expect(
+    store.importFile(
+      triangle({
+        ...extra,
+        images: [{ uri: "https://example.com/texture.webp" }],
+      }),
+      "remote.glb",
+    ),
+  ).rejects.toThrow("external GLB resources");
+  await expect(
+    store.importFile(
+      triangle({ extensionsRequired: ["KHR_draco_mesh_compression"] }),
+      "compressed.glb",
+    ),
+  ).rejects.toThrow("Unsupported required GLB extension");
+});
+
 test("agents merge disjoint field patches, reject stale guards, replay receipts, and revert only their edit", async () => {
   const { store, commands } = await fixture();
   await commands.execute({ type: "nodes.put", nodes: [node("a"), node("b")] });
@@ -301,6 +333,70 @@ test.skipIf(!rendererExecutable())(
     ctx.drawImage(image, 0, 0);
     expect(ctx.getImageData(32, 32, 1, 1).data[0]).toBe(255);
     expect(ctx.getImageData(0, 0, 1, 1).data[3]).toBe(0);
+  },
+  120000,
+);
+
+test.skipIf(!rendererExecutable())(
+  "rendered depth points retain source-image shadow, midtone, and highlight colors",
+  async () => {
+    const { store, runner, commands } = await fixture();
+    const depth = await store.importFile(
+      await encodeDepth({
+        width: 64,
+        height: 64,
+        stride: 1,
+        data: new Float32Array(4096).fill(2),
+      }),
+      "flat.exr",
+    );
+    const canvas = createCanvas(64, 64),
+      ctx = canvas.getContext("2d");
+    const colors = [
+      [32, 48, 64],
+      [96, 128, 160],
+      [192, 208, 224],
+      [240, 240, 240],
+    ];
+    colors.forEach((rgb, i) => {
+      ctx.fillStyle = `rgb(${rgb.join(",")})`;
+      ctx.fillRect(i * 16, 0, 16, 64);
+    });
+    const image = await store.importFile(
+      new Blob([new Uint8Array(canvas.toBuffer("image/png"))]),
+      "colors.png",
+      { camera, depthAssetId: depth.id },
+    );
+    await commands.execute({
+      type: "nodes.put",
+      nodes: createCapture(image, "capture"),
+    });
+    const id = await runner.submit({
+      kind: "render",
+      camera: sceneCamera(store.snapshot(), "capture")!,
+      nodeIds: ["capture_points"],
+      passes: ["color"],
+    });
+    const job = await done(store, id);
+    expect(job.error).toBeUndefined();
+    const output = job.outputAssetIds
+      .map((id) => store.snapshot().assets[id])
+      .find((a) => a.kind === "image")!;
+    ctx.drawImage(
+      await loadImage((await store.assetFile(output.id)).file),
+      0,
+      0,
+    );
+    colors.forEach((rgb, i) => {
+      const pixel = ctx.getImageData(i * 16 + 8, 32, 1, 1).data;
+      // Gaussian footprints leave a little background visible. Allow coverage
+      // loss and 8-bit rounding, but reject the much larger sRGB-to-linear shift.
+      rgb.forEach((value, channel) =>
+        expect(Math.abs(pixel[channel] - value)).toBeLessThanOrEqual(
+          value * 0.06 + 1,
+        ),
+      );
+    });
   },
   120000,
 );

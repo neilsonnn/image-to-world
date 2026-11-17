@@ -274,6 +274,30 @@ test("switching viewed Frames preserves the independent lens and pose, including
   expect(workspace.settings.viewingCameraId).toBeNull();
 });
 
+test("navigation releases at the visible pose and lens, while Escape still restores the saved view", () => {
+  const { workspace, asset } = fixture();
+  applyCommand(workspace, {
+    type: "nodes.put",
+    nodes: createCapture(asset, "a"),
+  });
+  const free = structuredClone(workspace.settings.viewportCamera);
+  applyCommand(workspace, { type: "camera.view", nodeId: "a" });
+  const visible = sceneCamera(workspace, "a")!;
+  visible.intrinsics.cx -= 60;
+  visible.extrinsics.position[0] += 0.1;
+  applyCommand(workspace, { type: "camera.release", camera: visible });
+  expect(workspace.settings.viewportCamera).toEqual(visible);
+  expect(workspace.settings.freeCamera).toBeNull();
+  expect(workspace.settings.viewingCameraId).toBeNull();
+  applyCommand(workspace, { type: "camera.release" });
+  expect(workspace.settings.viewportCamera).toEqual(visible);
+  applyCommand(workspace, { type: "history.undo" });
+  expect(workspace.settings.viewingCameraId).toBe("a");
+  expect(workspace.settings.freeCamera).toEqual(free);
+  applyCommand(workspace, { type: "camera.release" });
+  expect(workspace.settings.viewportCamera).toEqual(free);
+});
+
 test("local clip masks follow their parent and leave other captures intact", () => {
   const { workspace, asset } = fixture();
   applyCommand(workspace, {

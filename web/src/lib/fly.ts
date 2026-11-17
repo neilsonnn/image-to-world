@@ -51,14 +51,18 @@ export function lookFlyCamera(
     -Math.PI / 2 + 0.01,
     Math.min(Math.PI / 2 - 0.01, rotation.x + dy * 0.003),
   );
-  rotation.z = 0;
   camera.quaternion.setFromEuler(rotation);
   camera.updateMatrixWorld();
 }
 
 export function zoomFlyCamera(camera: PerspectiveCamera, delta: number) {
+  const previous = Math.tan((camera.fov * Math.PI) / 360);
   camera.fov = Math.max(10, Math.min(120, camera.fov * Math.exp(delta * 0.01)));
-  camera.updateProjectionMatrix();
+  // Keep the calibrated principal point, pixel aspect, and viewfinder framing.
+  const scale = previous / Math.tan((camera.fov * Math.PI) / 360);
+  camera.projectionMatrix.elements[0] *= scale;
+  camera.projectionMatrix.elements[5] *= scale;
+  camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
 }
 
 export class FlyControls {

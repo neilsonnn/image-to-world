@@ -23,6 +23,8 @@ export function validateGlb(buffer: ArrayBuffer) {
         "Mesh must embed all buffers and textures; external GLB resources are unsupported",
       );
   const supported = new Set([
+    // GLTFLoader decodes embedded WebP textures natively, without a plugin.
+    "EXT_texture_webp",
     "KHR_materials_unlit",
     "KHR_materials_clearcoat",
     "KHR_materials_transmission",

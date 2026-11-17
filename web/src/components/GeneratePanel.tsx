@@ -1,5 +1,5 @@
 import { modelSuggestions } from "../../../core/models";
-import { useWorldbashClient, useWorkspaceData } from "../lib/client";
+import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
 import { Button } from "@radix-ui/themes";
 import { Cpu, Image as ImageIcon, SpinnerGap } from "@phosphor-icons/react";
 import { useState } from "react";
@@ -16,7 +16,7 @@ export function GeneratePanel({
     ffmpegAvailable: boolean;
   } | null;
 }) {
-  const { command, safeCommand, setError: onError } = useWorldbashClient();
+  const { command, safeCommand, setError: onError } = useImageToWorldClient();
   const workspace = useWorkspaceData(
     ["assets", "selection"],
     ["falModel", "falInput"],

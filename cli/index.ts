@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import { compileModule } from "./modules";
+import { proceduralSchema, moduleParameters } from "../core/procedural";
 import { commandContextSchema } from "../core/command-context";
 import { generationSchema } from "../core/schema";
 import { sceneCamera } from "../core/captures";
@@ -36,91 +38,95 @@ import {
   type Workspace,
 } from "../core/schema";
 
-const HELP = `worldbash controls the same filesystem workspace as the browser.
+const HELP = `image-to-world controls the same filesystem workspace as the browser.
 
-  bun run worldbash open [project] [--port 4310] [--no-browser]  Build and launch locally
-  bun run worldbash doctor [project]                Check local setup without API requests
-  bun run worldbash schema commands|jobs|workspace|draft|camera|aim|inspection  JSON Schema for agents
-  bun run worldbash status                         Provider configuration and workspace path
-  bun run worldbash state                          Full workspace JSON
-  bun run worldbash import <file>...                Import binary files
-  bun run worldbash assets [--trash] [--search text] List assets
-  bun run worldbash assets trash|restore <asset-id>...
-  bun run worldbash assets reveal <asset-id>
-  bun run worldbash image open <asset-id>           Open an image in the bottom editor
-  bun run worldbash image activate <asset-id> [node-id...]  Use this version in scene captures
-  bun run worldbash image history <asset-id>        Branching assets, prompts, and jobs
-  bun run worldbash image create --prompt '...' [--model schnell] [--camera camera.json]
-  bun run worldbash image edit <asset-id> --prompt '...' [--reference id,id]
+  bun run image-to-world open [project] [--port 4310] [--no-browser]  Build and launch locally
+  bun run image-to-world doctor [project]                Check local setup without API requests
+  bun run image-to-world schema commands|jobs|workspace|draft|camera|aim|inspection  JSON Schema for agents
+  bun run image-to-world status                         Provider configuration and workspace path
+  bun run image-to-world state                          Full workspace JSON
+  bun run image-to-world import <file>...                Import binary files
+  bun run image-to-world assets [--trash] [--search text] List assets
+  bun run image-to-world assets trash|restore <asset-id>...
+  bun run image-to-world assets reveal <asset-id>
+  bun run image-to-world image open <asset-id>           Open an image in the bottom editor
+  bun run image-to-world image activate <asset-id> [node-id...]  Use this version in scene captures
+  bun run image-to-world image history <asset-id>        Branching assets, prompts, and jobs
+  bun run image-to-world image create --prompt '...' [--model schnell] [--camera camera.json]
+  bun run image-to-world image edit <asset-id> --prompt '...' [--reference id,id]
                    [--model 2|pro] [--resolution 1K|2K|4K] [--ratio auto|16:9]
                    [--count 1] [--seed 42] [--draft draft.json]
-  bun run worldbash image draft <asset-id> --file draft.json
-  bun run worldbash image undo|redo <asset-id>       Undo/redo this image's draft
-  bun run worldbash export <asset-id> <file>        Write binary output to a local file
-  bun run worldbash scene                          List scene objects
-  bun run worldbash scene inspect [node-id...] [--headless] [--out report.json]
+  bun run image-to-world image draft <asset-id> --file draft.json
+  bun run image-to-world image undo|redo <asset-id>       Undo/redo this image's draft
+  bun run image-to-world export <asset-id> <file>        Write binary output to a local file
+  bun run image-to-world module add <source.ts> [--assets id,id] [--file params.json] [--seed 1]
+  bun run image-to-world module update <node-id> <source.ts>   Recompile and replace code undoably
+  bun run image-to-world module params <node-id> --file params.json
+  bun run image-to-world module inspect <node-id>
+  bun run image-to-world scene                          List scene objects
+  bun run image-to-world scene inspect [node-id...] [--headless] [--out report.json]
                    Inspect cameras, context, errors and renderer bounds (open viewport required)
-  bun run worldbash scene preview [node-id...] [--jobs id,id | --assets id,id]
+  bun run image-to-world scene preview [node-id...] [--jobs id,id | --assets id,id]
                    [--columns 3] [--width 384] [--out preview.png]  Headless contact sheet
-  bun run worldbash scene add image --asset <id> [--name 'Image'] [--parent id]
-  bun run worldbash scene add camera|group|path|clip [--name '...'] [--parent id]
-  bun run worldbash scene put --file nodes.json    Create/update complete node records
-  bun run worldbash scene transform <id>... [--position x,y,z] [--scale x,y,z]
+  bun run image-to-world scene add image --asset <id> [--name 'Image'] [--parent id]
+  bun run image-to-world scene add camera|group|path|clip [--name '...'] [--parent id]
+  bun run image-to-world scene put --file nodes.json    Create/update complete node records
+  bun run image-to-world scene transform <id>... [--position x,y,z] [--scale x,y,z]
                    [--quaternion x,y,z,w] [--parent id|root]
-  bun run worldbash scene move <id>... --parent <id|root> [--before <sibling-id>]
-  bun run worldbash scene duplicate <id>...
-  bun run worldbash undo|redo                     Undo/redo scene, camera, display, or property edits
-  bun run worldbash scene remove <id>...           Remove objects and their descendants
-  bun run worldbash select <id>...                 Select any mixture of assets and nodes
-  bun run worldbash camera [--file camera.json]    Read/set viewport camera
-  bun run worldbash path update <path-id> [--fov 60] [--target-frames 36]
-  bun run worldbash path keyframe <path-id> [--index 0] [--file camera.json] [--id keyframe-id] [--remove]
-  bun run worldbash scene place <asset-id>... [--camera camera.json] [--reconstruct]  Place images individually or reconstruct together
-  bun run worldbash camera solve --position x,y,z --look-at x,y,z [--relative-to node-id]
+  bun run image-to-world scene move <id>... --parent <id|root> [--before <sibling-id>]
+  bun run image-to-world scene duplicate <id>...
+  bun run image-to-world undo|redo                     Undo/redo scene, camera, display, or property edits
+  bun run image-to-world scene remove <id>...           Remove objects and their descendants
+  bun run image-to-world select <id>...                 Select any mixture of assets and nodes
+  bun run image-to-world camera [--file camera.json]    Read/set viewport camera
+  bun run image-to-world path update <path-id> [--fov 60] [--target-frames 36]
+  bun run image-to-world path keyframe <path-id> [--index 0] [--file camera.json] [--id keyframe-id] [--remove]
+  bun run image-to-world scene place <asset-id>... [--camera camera.json] [--reconstruct]  Place images individually or reconstruct together
+  bun run image-to-world camera solve --position x,y,z --look-at x,y,z [--relative-to node-id]
                    [--up x,y,z] [--fov 60] [--out camera.json]  Calculate orientation from your position/target; no scene edit
-  bun run worldbash camera place [--position x,y,z --look-at x,y,z --relative-to node-id]
+  bun run image-to-world camera place [--position x,y,z --look-at x,y,z --relative-to node-id]
                    [--name 'Camera'] [--file camera.json]  Record your chosen camera, undoably; extend selection (viewport C)
-  bun run worldbash camera view <node-id> | camera free
-  bun run worldbash context [list|include|exclude|solo|show|hide|freeze|unfreeze] <capture-id>...
-  bun run worldbash path create <camera-id>... [--target-frames 36]
-  bun run worldbash pose <asset-id>... [--camera camera.json]
-  bun run worldbash atlas [--camera camera.json] [--path path-id] [--prompt '...']
-  bun run worldbash splats [capture-id...] [--path path-id] [--prompt '...'] [--refine]
+  bun run image-to-world camera view <node-id> | camera free
+  bun run image-to-world context [list|include|exclude|solo|show|hide|freeze|unfreeze] <capture-id>...
+  bun run image-to-world path create <camera-id>... [--target-frames 36]
+  bun run image-to-world pose <asset-id>... [--camera camera.json]
+  bun run image-to-world atlas [--camera camera.json] [--path path-id] [--prompt '...']
+  bun run image-to-world splats [capture-id...] [--path path-id] [--prompt '...'] [--refine]
                    Reconstruct splats from posed captures (draft unless --refine)
-  bun run worldbash video [--path path-id] [--fps 12] [--target-frames 36]
+  bun run image-to-world video [--path path-id] [--fps 12] [--target-frames 36]
                    [--keyframes count] [--source-job job-id]
-  bun run worldbash video frames <job-id>
-  bun run worldbash video view <job-id> <frame-index>
-  bun run worldbash video integrate <job-id> [--indices 0,4,8]
-  bun run worldbash video reconstruct <job-id> [--indices 0,4,8]
-  bun run worldbash reconstruct <asset-id>... [--video video-asset-id]
+  bun run image-to-world video frames <job-id>
+  bun run image-to-world video view <job-id> <frame-index>
+  bun run image-to-world video integrate <job-id> [--indices 0,4,8]
+  bun run image-to-world video reconstruct <job-id> [--indices 0,4,8]
+  bun run image-to-world reconstruct <asset-id>... [--video video-asset-id]
                    [--fps 1] [--max-frames 60]
-  bun run worldbash render <camera-or-capture-id> [--camera file.json] [--targets id,id]
+  bun run image-to-world render <camera-or-capture-id> [--camera file.json] [--targets id,id]
                    [--passes color,mask,depth,ids] [--reference image-id]  Independent headless renderer
-  bun run worldbash mask <asset-id>... [--operation union|intersection] [--invert] [--dilate pixels] [--feather pixels]
-  bun run worldbash observe <capture-id> --region x,y,w,h [--mask asset-id] [--padding .1]
+  bun run image-to-world mask <asset-id>... [--operation union|intersection] [--invert] [--dilate pixels] [--feather pixels]
+  bun run image-to-world observe <capture-id> --region x,y,w,h [--mask asset-id] [--padding .1]
                    Save crop, masks, camera and scene-depth observation (normalized top-left coordinates)
-  bun run worldbash fit <mesh-node-id> --observation manifest-asset-id [--quaternion x,y,z,w]
+  bun run image-to-world fit <mesh-node-id> --observation manifest-asset-id [--quaternion x,y,z,w]
                    Read-only placement proposal; use its command and preconditions after reviewing
-  bun run worldbash models [endpoint] [--search text]  Suggestions or live provider schema
-  bun run worldbash model <endpoint> --file input.json  General image/3D model call; {"$asset":"id"}
-  bun run worldbash generate --file request.json   All generation and local inspection workflows
-  bun run worldbash activity [--after sequence]    Automatic action history
-  bun run worldbash revert <edit-id>               Revert only an unchanged edit
+  bun run image-to-world models [endpoint] [--search text]  Suggestions or live provider schema
+  bun run image-to-world model <endpoint> --file input.json  General image/3D model call; {"$asset":"id"}
+  bun run image-to-world generate --file request.json   All generation and local inspection workflows
+  bun run image-to-world activity [--after sequence]    Automatic action history
+  bun run image-to-world revert <edit-id>               Revert only an unchanged edit
   All mutations accept --actor name --request-id id --expect preconditions.json
   Image edits accept --asset-only or --targets capture-id,... --unchanged-mask asset-id
-  bun run worldbash fal <endpoint> --file input.json  Asset input: {"$asset":"asset-id"}
-  bun run worldbash capture [--camera camera.json]   Requires an open browser viewport
-  bun run worldbash jobs [show|wait|cancel|retry] [job-id] [--timeout 300]
-  bun run worldbash command '<JSON>'|@file.json    Every UI command, including panel/settings changes
-  bun run worldbash events                        Stream workspace revisions as JSON lines
+  bun run image-to-world fal <endpoint> --file input.json  Asset input: {"$asset":"asset-id"}
+  bun run image-to-world capture [--camera camera.json]   Requires an open browser viewport
+  bun run image-to-world jobs [show|wait|cancel|retry] [job-id] [--timeout 300]
+  bun run image-to-world command '<JSON>'|@file.json    Every UI command, including panel/settings changes
+  bun run image-to-world events                        Stream workspace revisions as JSON lines
 
 Planning helpers leave viewpoint selection and visual review to the user or agent.
 They do not choose shots, assess visual quality, or prescribe a scene-building sequence.
 
 All responses are JSON. Errors use stderr and exit 1. Generation returns a job ID
 immediately; --wait waits for completion; --ready follows automatic depth/pose jobs. --url defaults to http://127.0.0.1:4310
-(or WORLDBASH_URL). No API credentials are needed by the CLI.
+(or IMAGE_TO_WORLD_URL). No API credentials are needed by the CLI.
 `;
 
 export async function run(argv: string[]) {
@@ -206,22 +212,30 @@ export async function run(argv: string[]) {
   }
   const base = (
     values.url ||
-    process.env.WORLDBASH_URL ||
+    process.env.IMAGE_TO_WORLD_URL ||
     "http://127.0.0.1:4310"
   ).replace(/\/$/, "");
   const output = (value: unknown) =>
     process.stdout.write(JSON.stringify(value, null, 2) + "\n");
+  let modulePreconditions: Array<{
+    collection: "nodes";
+    id: string;
+    field?: string;
+    expected: unknown;
+  }> = [];
   const request = async (route: string, init?: RequestInit) => {
     const response = await fetch(`${base}/api/${route}`, {
       ...init,
       headers: {
-        "X-Worldbash-Client": "cli",
-        "X-Worldbash-Context": JSON.stringify({
-          actorId: values.actor ?? process.env.WORLDBASH_ACTOR ?? "CLI session",
+        "X-Image-To-World-Client": "cli",
+        "X-Image-To-World-Context": JSON.stringify({
+          actorId:
+            values.actor ?? process.env.IMAGE_TO_WORLD_ACTOR ?? "CLI session",
           requestId: values["request-id"] ?? crypto.randomUUID(),
-          ...(values.expect
-            ? { preconditions: await Bun.file(values.expect).json() }
-            : {}),
+          preconditions: [
+            ...modulePreconditions,
+            ...(values.expect ? await Bun.file(values.expect).json() : []),
+          ],
         }),
         ...init?.headers,
       },
@@ -308,8 +322,120 @@ export async function run(argv: string[]) {
     const report = await doctor(sub);
     output(report);
     if (!report.ok) process.exitCode = 1;
+  } else if (action === "module") {
+    const workspace = await state();
+    const id =
+      sub === "add" ? `node_${crypto.randomUUID()}` : need(rest[0], "node ID");
+    const existing = workspace.nodes[id];
+    if (sub !== "add" && existing?.kind !== "procedural")
+      throw new Error("Choose an existing procedural node");
+    if (sub === "inspect") {
+      output(existing.procedural);
+      return;
+    }
+    if (sub === "params") {
+      if (!existing.procedural) throw new Error("Node has no module");
+      modulePreconditions = [
+        {
+          collection: "nodes",
+          id,
+          field: "procedural",
+          expected: existing.procedural,
+        },
+      ];
+      output(
+        await command({
+          type: "nodes.patch",
+          id,
+          patch: {
+            procedural: {
+              ...existing.procedural,
+              parameters: moduleParameters.parse(await jsonFile(values.file)),
+            },
+          },
+        }),
+      );
+      return;
+    }
+    if (sub !== "add" && sub !== "update")
+      throw new Error("Use module add, update, params, or inspect");
+    const source = need(rest[sub === "add" ? 0 : 1], "source.ts");
+    const compiled = await compileModule(source);
+    const upload = async (text: string, name: string, type = "text/plain") => {
+      const form = new FormData();
+      form.append("files", new Blob([text], { type }), name);
+      const result = (await (
+        await request("assets", { method: "POST", body: form })
+      ).json()) as Array<{ id: string }>;
+      return result[0].id;
+    };
+    const sources = [];
+    for (const [file, text] of compiled.sources)
+      sources.push({
+        path: path.relative(path.dirname(compiled.source), file),
+        assetId: await upload(text, path.basename(file)),
+      });
+    const sourceAssetId = sources.find(
+      (item) => item.path === path.basename(compiled.source),
+    )!.assetId;
+    const bundleAssetId = await upload(
+      compiled.code,
+      `${path.basename(source)}-${compiled.hash.slice(0, 12)}.js`,
+      "text/javascript",
+    );
+    const manifest = await upload(
+      JSON.stringify({
+        entry: path.basename(compiled.source),
+        sources,
+        compiler: compiled.compiler,
+      }),
+      "module-sources.json",
+      "application/json",
+    );
+    const procedural = proceduralSchema.parse({
+      sourceAssetId,
+      bundleAssetId,
+      sourceAssetIds: [...sources.map((item) => item.assetId), manifest],
+      assetIds:
+        values.assets?.split(",").filter(Boolean) ??
+        existing?.procedural?.assetIds ??
+        [],
+      parameters: values.file
+        ? await jsonFile(values.file)
+        : (existing?.procedural?.parameters ?? {}),
+      seed: finite(values.seed, existing?.procedural?.seed ?? 1),
+      enabled: existing?.procedural?.enabled ?? true,
+    });
+    modulePreconditions = [
+      {
+        collection: "nodes",
+        id,
+        ...(existing
+          ? { field: "procedural", expected: existing.procedural }
+          : { expected: null }),
+      },
+    ];
+    const result = await command(
+      existing
+        ? { type: "nodes.patch", id, patch: { procedural } }
+        : {
+            type: "nodes.put",
+            nodes: [
+              nodeSchema.parse({
+                id,
+                name: values.name ?? path.basename(source),
+                kind: "procedural",
+                parentId: values.parent ?? null,
+                transform: identity(),
+                procedural,
+              }),
+            ],
+          },
+    );
+    output({ ...result, nodeId: id, sourceAssetId, bundleAssetId });
   } else if (action === "schema") {
     const schemas = {
+      modules: proceduralSchema,
       commands: commandSchema,
       generation: generationSchema,
       context: commandContextSchema,

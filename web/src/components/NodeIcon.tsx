@@ -1,4 +1,5 @@
 import {
+  Code,
   BoundingBox,
   Camera,
   Cube,
@@ -26,6 +27,7 @@ export const nodePresentation = {
   splat: { label: "Splat", icon: Cube },
   path: { label: "Path", icon: Path },
   video: { label: "Video", icon: VideoCamera },
+  procedural: { label: "Procedural code", icon: Code },
   group: { label: "Group", icon: Stack },
   depth: { label: "Depth", icon: StackSimple },
   file: { label: "File", icon: File },

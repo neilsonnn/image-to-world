@@ -49,7 +49,9 @@ button {
   grid-column: 1;
   grid-row: 1;
   display: grid;
-  grid-template-columns: 150px minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 16px;
+  white-space: nowrap;
   align-items: center;
   height: var(--panel-header-height);
   padding: 0 8px 0 12px;
@@ -70,13 +72,23 @@ button {
   color: var(--accent);
 }
 .project-title {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   justify-self: center;
   display: flex;
   align-items: baseline;
   gap: 8px;
   font-size: 12px;
 }
+.project-title > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .project-title small {
+  flex-shrink: 0;
   color: var(--dim);
   font-size: 9px;
   text-transform: uppercase;
@@ -1261,11 +1273,11 @@ button {
   }
 }
 @media (max-width: 760px) {
-  .project-title {
+  .project-title small {
     display: none;
   }
   .topbar {
-    grid-template-columns: 1fr auto;
+    column-gap: 8px;
   }
   .viewport-onboarding {
     left: 12px;

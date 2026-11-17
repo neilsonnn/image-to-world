@@ -99,7 +99,7 @@ export class RenderWorker {
     });
     await this.page.goto(String(this.server.url));
     await this.page.waitForFunction(
-      () => "worldbashRender" in globalThis,
+      () => "imageToWorldRender" in globalThis,
       {},
       { timeout: 30000 },
     );
@@ -139,12 +139,12 @@ export class RenderWorker {
         async ({ workspace, input }) => {
           return (
             globalThis as unknown as {
-              worldbashRender: (
+              imageToWorldRender: (
                 w: unknown,
                 i: unknown,
               ) => Promise<RenderResult>;
             }
-          ).worldbashRender(workspace, input);
+          ).imageToWorldRender(workspace, input);
         },
         { workspace: snapshot, input },
       );

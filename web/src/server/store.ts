@@ -75,6 +75,7 @@ export class WorkspaceStore {
       for (const node of Object.values(snapshot.nodes)) {
         walk(node.assetId);
         walk(node.geometryAssetId);
+        walk(node.procedural);
       }
     const pins: NonNullable<Job["pinnedAssets"]> = {};
     await mkdir(path.join(this.assetsPath, ".snapshots"), { recursive: true });

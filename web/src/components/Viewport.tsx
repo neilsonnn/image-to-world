@@ -1,7 +1,6 @@
 import { AgentPresence } from "../lib/agent-presence";
 import { ViewportCameraTools } from "./ViewportCameraTools";
 import { sessionFormat } from "../../../core/formats";
-import { atlasCamera } from "../../../core/cameras";
 import {
   applyCamera,
   cameraValue,
@@ -10,11 +9,12 @@ import {
   cameraWithIntrinsics,
   cameraInViewfinder,
   viewfinderRect,
+  viewfinderCamera,
 } from "../lib/viewport-projection";
 import { GizmoOptions } from "./GizmoOptions";
 import { NewImagePrompt } from "./NewImagePrompt";
 import {
-  useWorldbashClient,
+  useImageToWorldClient,
   useWorkspaceData,
   useClientState,
 } from "../lib/client";
@@ -217,7 +217,7 @@ export function Viewport({
     upload,
     setError: onError,
     setHoveredNode,
-  } = useWorldbashClient();
+  } = useImageToWorldClient();
   const hoveredNodeId = useClientState((state) => state.hoveredNodeId);
   const source = useWorkspaceData(
     [
@@ -498,21 +498,15 @@ export function Viewport({
       if (!id || runtime.releasedCameraId === id) return;
       runtime.releasedCameraId = id;
       runtime.cameraTransition.cancel();
-      const restored = atlasCamera(
-        state.settings.freeCamera ?? state.settings.viewportCamera,
-        sessionFormat(state),
-      );
-      applyCamera(camera, restored);
-      viewportProjection(camera, host.clientWidth, host.clientHeight, restored);
-      runtime.lastCamera = JSON.stringify(restored);
+      const visible = readViewportCamera(runtime, state);
+      runtime.lastCamera = JSON.stringify(visible);
       runtime.releasePromise = commandRef
-        .current({ type: "camera.release" })
+        .current({ type: "camera.release", camera: visible })
         .catch((error) => errorRef.current(message(error)));
     };
 
     const persistCamera = () => {
-      const intrinsics = sessionFormat(workspaceRef.current);
-      const value = cameraValue(camera, intrinsics.width, intrinsics.height);
+      const value = readViewportCamera(runtime, workspaceRef.current);
       runtime.lastCamera = JSON.stringify(value);
       runtime.persistingCamera = true;
       void Promise.resolve(runtime.releasePromise)
@@ -719,22 +713,21 @@ export function Viewport({
       runtime.cameraTransition.finish();
       const width = Math.max(1, host.clientWidth);
       const height = Math.max(1, host.clientHeight);
-      renderer.setSize(width, height, false);
       const state = workspaceRef.current;
       setViewportSize({ width, height });
-      const format = sessionFormat(state);
       const calibrated =
         runtime.fly.moving || runtime.persistingCamera
-          ? cameraValue(camera, format.width, format.height)
+          ? readViewportCamera(runtime, state)
           : (previewCameraRef.current ??
             (state.settings.viewingCameraId
               ? sceneCamera(state, state.settings.viewingCameraId)
               : undefined));
+      renderer.setSize(width, height, false);
       viewportProjection(
         camera,
         width,
         height,
-        atlasCamera(
+        viewfinderCamera(
           calibrated ?? state.settings.viewportCamera,
           sessionFormat(state),
         ),
@@ -755,27 +748,11 @@ export function Viewport({
       if (runtime.capturing) return;
       if (runtime.fly.moving && runtime.cameraTransition.active) {
         runtime.cameraTransition.cancel();
-        const format = sessionFormat(workspaceRef.current);
-        viewportProjection(
-          camera,
-          host.clientWidth,
-          host.clientHeight,
-          cameraValue(camera, format.width, format.height),
-        );
         // Save the interrupted pose when the fly gesture ends, even without a drag.
         runtime.fly.markChanged();
       }
       runtime.cameraTransition.update(now);
       runtime.fly.update(seconds);
-      if (runtime.fly.moving) {
-        const format = sessionFormat(workspaceRef.current);
-        viewportProjection(
-          camera,
-          host.clientWidth,
-          host.clientHeight,
-          cameraValue(camera, format.width, format.height),
-        );
-      }
       if (
         hoverDirty &&
         hoverPointer &&
@@ -787,6 +764,7 @@ export function Viewport({
         runtime.raycaster.setFromCamera(hoverPointer, camera);
         setHoveredNode(graph.pick(runtime.raycaster, hoverPointer) ?? null);
       }
+      graph.sample(performance.now() / 1000, camera);
       transform.update();
       graph.update();
       presence.update(
@@ -876,13 +854,12 @@ export function Viewport({
       return;
     }
 
-    const value = atlasCamera(
+    const value = viewfinderCamera(
       previewCamera ??
         (workspace.settings.viewingCameraId &&
         runtime.releasedCameraId !== workspace.settings.viewingCameraId
           ? sceneCamera(workspace, workspace.settings.viewingCameraId)
           : undefined) ??
-        (runtime.releasedCameraId ? workspace.settings.freeCamera : null) ??
         workspace.settings.viewportCamera,
       sessionFormat(workspace),
     );
@@ -996,7 +973,7 @@ export function Viewport({
             `/api/viewport-jobs/${encodeURIComponent(job.id)}/claim`,
             {
               method: "POST",
-              headers: { "X-Worldbash-Client": "web" },
+              headers: { "X-Image-To-World-Client": "web" },
               signal: controller.signal,
             },
           );
@@ -1026,7 +1003,7 @@ export function Viewport({
               `/api/viewport-jobs/${encodeURIComponent(job.id)}`,
               {
                 method: "POST",
-                headers: { "X-Worldbash-Client": "web" },
+                headers: { "X-Image-To-World-Client": "web" },
                 body: form,
                 signal: controller.signal,
               },
@@ -1138,7 +1115,7 @@ export function Viewport({
             `/api/viewport-jobs/${encodeURIComponent(job.id)}`,
             {
               method: "POST",
-              headers: { "X-Worldbash-Client": "web" },
+              headers: { "X-Image-To-World-Client": "web" },
               body: form,
               signal: controller.signal,
             },
@@ -1156,7 +1133,7 @@ export function Viewport({
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
-                  "X-Worldbash-Client": "web",
+                  "X-Image-To-World-Client": "web",
                 },
                 body: JSON.stringify({ error: detail }),
                 signal: controller.signal,
@@ -1260,7 +1237,7 @@ export function Viewport({
   const viewingNode = workspace.settings.viewingCameraId
     ? workspace.nodes[workspace.settings.viewingCameraId]
     : undefined;
-  const viewCamera = atlasCamera(
+  const viewCamera = viewfinderCamera(
     previewCamera ??
       (viewingNode ? sceneCamera(workspace, viewingNode.id) : undefined) ??
       workspace.settings.viewportCamera,

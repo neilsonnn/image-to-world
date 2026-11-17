@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { PanelHeader, ToolbarIconButton } from "./ui";
 
 const installMessage =
-  "Open https://github.com/neilsonnn/worldbash and follow the README to install worldbash locally. Read skills/worldbash/SKILL.md so you know how to use its CLI. Launch a new local project, help me configure any needed API keys through the app's Environment variables screen, and then ask me what I want to build.";
+  "Open https://github.com/neilsonnn/worldbash and follow the README to install image-to-world locally. Read skills/image-to-world/SKILL.md so you know how to use its CLI. Launch a new local project, help me configure any needed API keys through the app's Environment variables screen, and then ask me what I want to build.";
 
 export function AgentGuide({ onClose }: { onClose: () => void }) {
   const [copied, setCopied] = useState(false);
@@ -23,7 +23,10 @@ export function AgentGuide({ onClose }: { onClose: () => void }) {
     }
   };
   return (
-    <aside className="agent-guide" aria-label="Use worldbash with your agent">
+    <aside
+      className="agent-guide"
+      aria-label="Use image-to-world with your agent"
+    >
       <PanelHeader title="Agent workspace">
         <ToolbarIconButton label="Hide agent guide" onClick={onClose}>
           <X />
@@ -58,7 +61,7 @@ export function AgentGuide({ onClose }: { onClose: () => void }) {
               className="agent-chat-bubble agent-copy-message"
               aria-label="Get started with your agent"
             >
-              <h2>Use worldbash in Claude or Codex.</h2>
+              <h2>Use image-to-world in Claude or Codex.</h2>
               <Button
                 size="2"
                 variant="surface"

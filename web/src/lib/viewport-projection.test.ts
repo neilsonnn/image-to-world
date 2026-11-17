@@ -1,12 +1,14 @@
 import { expect, test } from "bun:test";
-import { PerspectiveCamera, Vector3 } from "three";
+import { Euler, PerspectiveCamera, Vector3 } from "three";
 import { defaultCamera } from "../../../core/schema";
 import {
   applyCamera,
   cameraInViewfinder,
   viewportProjection,
   viewfinderRect,
+  viewfinderCamera,
 } from "./viewport-projection";
+import { lookFlyCamera, moveFlyCamera, zoomFlyCamera } from "./fly";
 
 test("the project viewfinder and Render camera agree across wide, tall, and resized viewports", () => {
   for (const format of [
@@ -27,8 +29,9 @@ test("the project viewfinder and Render camera agree across wide, tall, and resi
       { width: 800, height: 600 },
     ]) {
       const camera = new PerspectiveCamera();
-      applyCamera(camera, value);
-      viewportProjection(camera, viewport.width, viewport.height, value);
+      const viewed = viewfinderCamera(value, format);
+      applyCamera(camera, viewed);
+      viewportProjection(camera, viewport.width, viewport.height, viewed);
       camera.updateMatrixWorld();
       const rect = viewfinderRect(viewport, format);
       expect(rect.left).toBeGreaterThanOrEqual(0);
@@ -57,4 +60,57 @@ test("the project viewfinder and Render camera agree across wide, tall, and resi
       expect(read.extrinsics.position).toEqual(value.extrinsics.position);
     }
   }
+});
+
+test("viewfinder crop preserves off-center image calibration", () => {
+  const value = defaultCamera();
+  value.intrinsics = {
+    width: 1280,
+    height: 720,
+    fx: 900,
+    fy: 850,
+    cx: 570,
+    cy: 390,
+  };
+  const cropped = viewfinderCamera(value, { width: 960, height: 720 });
+  expect(cropped.intrinsics).toEqual({
+    width: 960,
+    height: 720,
+    fx: 900,
+    fy: 850,
+    cx: 410,
+    cy: 390,
+  });
+  expect(cropped.extrinsics).toEqual(value.extrinsics);
+});
+
+test("flying, looking, and zooming keep the visible camera calibration and roll", () => {
+  const value = defaultCamera();
+  value.intrinsics = {
+    width: 1280,
+    height: 720,
+    fx: 900,
+    fy: 850,
+    cx: 570,
+    cy: 390,
+  };
+  const camera = new PerspectiveCamera();
+  applyCamera(camera, value);
+  camera.rotation.set(0.2, 0.5, 0.12, "YXZ");
+  const viewport = { width: 400, height: 900 };
+  viewportProjection(camera, viewport.width, viewport.height, value);
+  moveFlyCamera(camera, new Set(["w"]), 1 / 60, 5);
+  lookFlyCamera(camera, 10, 10);
+  expect(new Euler().setFromQuaternion(camera.quaternion, "YXZ").z).toBeCloseTo(
+    0.12,
+  );
+  const moved = cameraInViewfinder(camera, viewport, value.intrinsics);
+  for (const key of ["fx", "fy", "cx", "cy", "width", "height"] as const)
+    expect(moved.intrinsics[key]).toBeCloseTo(value.intrinsics[key]);
+  zoomFlyCamera(camera, -20);
+  const after = cameraInViewfinder(camera, viewport, value.intrinsics);
+  expect(after.intrinsics.cx).toBeCloseTo(570);
+  expect(after.intrinsics.cy).toBeCloseTo(390);
+  expect(after.intrinsics.fx / after.intrinsics.fy).toBeCloseTo(900 / 850);
+  expect(after.intrinsics.fy).toBeGreaterThan(850);
 });

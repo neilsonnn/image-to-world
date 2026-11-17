@@ -19,7 +19,9 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 async function setup() {
-  const root = await mkdtemp(path.join(tmpdir(), "worldbash-credentials-"));
+  const root = await mkdtemp(
+    path.join(tmpdir(), "image-to-world-credentials-"),
+  );
   const previous = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = path.join(root, "config");
   cleanups.push(async () => {
@@ -36,7 +38,7 @@ function request(values: unknown, origin?: string, header = true) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(header ? { "X-Worldbash-Client": "test" } : {}),
+      ...(header ? { "X-Image-To-World-Client": "test" } : {}),
       ...(origin ? { origin } : {}),
     },
     body: JSON.stringify({ type: "environment.configure", values }),
@@ -112,13 +114,13 @@ test("provider configuration rejects cross-origin, missing-header and dotenv inj
 
 test("arbitrary variables round-trip quoted values, empty values, and removal without leaking values", async () => {
   const service = await setup();
-  const original = process.env.WORLDBASH_TEST_SETTING;
-  process.env.WORLDBASH_TEST_SETTING = "inherited";
+  const original = process.env.IMAGE_TO_WORLD_TEST_SETTING;
+  process.env.IMAGE_TO_WORLD_TEST_SETTING = "inherited";
   try {
     const variables = {
       CUSTOM_TOKEN: "token with spaces # and 'quotes'",
       EMPTY_SETTING: "",
-      WORLDBASH_TEST_SETTING: "saved",
+      IMAGE_TO_WORLD_TEST_SETTING: "saved",
     };
     expect((await service.handle(request(variables))).status).toBe(200);
     expect(parseEnv(await readFile(configFile(), "utf8"))).toEqual(variables);
@@ -134,18 +136,18 @@ test("arbitrary variables round-trip quoted values, empty values, and removal wi
     expect(
       (
         await service.handle(
-          request({ CUSTOM_TOKEN: null, WORLDBASH_TEST_SETTING: null }),
+          request({ CUSTOM_TOKEN: null, IMAGE_TO_WORLD_TEST_SETTING: null }),
         )
       ).status,
     ).toBe(200);
     expect(environmentValue("CUSTOM_TOKEN")).toBeUndefined();
-    expect(environmentValue("WORLDBASH_TEST_SETTING")).toBe("inherited");
+    expect(environmentValue("IMAGE_TO_WORLD_TEST_SETTING")).toBe("inherited");
     expect(parseEnv(await readFile(configFile(), "utf8"))).toEqual({
       EMPTY_SETTING: "",
     });
   } finally {
-    if (original === undefined) delete process.env.WORLDBASH_TEST_SETTING;
-    else process.env.WORLDBASH_TEST_SETTING = original;
+    if (original === undefined) delete process.env.IMAGE_TO_WORLD_TEST_SETTING;
+    else process.env.IMAGE_TO_WORLD_TEST_SETTING = original;
   }
 });
 

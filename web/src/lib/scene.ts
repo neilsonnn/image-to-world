@@ -1,3 +1,6 @@
+import { disposeObject } from "./resources";
+import { createProcedural } from "./procedural";
+import type { Camera as RuntimeCamera } from "three";
 import { validateGlb } from "../../../core/mesh";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { inspectScene } from "../../../core/inspection";
@@ -71,6 +74,8 @@ type Entry = {
   bounds?: Box3;
   spatial?: NodeSpatial;
   error?: string;
+  cleanup?: () => void;
+  sample?: (input: { time: number; camera?: RuntimeCamera }) => void;
 };
 
 type SceneWorkspace = Pick<
@@ -95,36 +100,6 @@ function applyTransform(object: Object3D, node: SceneNode) {
   object.updateMatrix();
 }
 
-function disposeObject(object: Object3D) {
-  const disposed = new Set<Texture>();
-  object.traverse((child) => {
-    if (child instanceof SplatMesh) child.dispose();
-    const video = child.userData.video as HTMLVideoElement | undefined;
-    if (video) {
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-    }
-    const mesh = child as Mesh;
-    mesh.geometry?.dispose();
-    const materials = Array.isArray(mesh.material)
-      ? mesh.material
-      : mesh.material
-        ? [mesh.material]
-        : [];
-    for (const material of materials) {
-      for (const value of Object.values(material)) {
-        if (!(value instanceof Texture) || disposed.has(value)) continue;
-        disposed.add(value);
-        const source = value.image as { close?: () => void } | undefined;
-        value.dispose();
-        source?.close?.();
-      }
-      material.dispose();
-    }
-  });
-}
-
 function tagPickables(object: Object3D, nodeId: string) {
   object.traverse((child) => {
     child.userData.nodeId = nodeId;
@@ -141,6 +116,14 @@ function effectivelyVisible(object: Object3D) {
 }
 
 function resourceKey(node: SceneNode, workspace: SceneWorkspace) {
+  if (node.kind === "procedural")
+    return JSON.stringify([
+      node.procedural,
+      [
+        node.procedural?.bundleAssetId,
+        ...(node.procedural?.assetIds ?? []),
+      ].map((id) => (id ? workspace.assets[id] : null)),
+    ]);
   const asset = nodeImageAsset(workspace, node);
   const depth = asset?.depthAssetId
     ? workspace.assets[asset.depthAssetId]
@@ -233,7 +216,10 @@ async function textureFromAsset(
   const response = await fetch(assetUrl(asset), { signal });
   if (!response.ok)
     throw new Error(`Failed to load ${asset.name} (${response.status})`);
-  const bitmap = await createImageBitmap(await response.blob());
+  // WebGL ignores Texture.flipY for ImageBitmap; orient pixels at decode time.
+  const bitmap = await createImageBitmap(await response.blob(), {
+    imageOrientation: "flipY",
+  });
   const texture = new Texture(bitmap);
   texture.colorSpace = SRGBColorSpace;
   if (projection) {
@@ -442,6 +428,7 @@ export class SceneGraph {
     entry.abort?.abort();
     entry.abort = new AbortController();
     const signal = entry.abort.signal;
+    this.cleanupEntry(entry);
     entry.pickProxy.visible = true;
     entry.getSelectionTarget = undefined;
     if (entry.content) {
@@ -486,6 +473,28 @@ export class SceneGraph {
       entry.error = error instanceof Error ? error.message : String(error);
       this.onError(entry.error);
     };
+
+    if (entry.node.kind === "procedural") {
+      this.track(
+        createProcedural(entry.node, workspace.assets, signal)
+          .then((instance) => {
+            if (!instance) return;
+            if (this.disposed || entry.generation !== generation) {
+              try {
+                instance.dispose?.();
+              } finally {
+                disposeObject(instance.object);
+              }
+              return;
+            }
+            finish(instance.object, instance.spatial);
+            entry.cleanup = instance.dispose?.bind(instance);
+            entry.sample = instance.sample?.bind(instance);
+          })
+          .catch(fail),
+      );
+      return;
+    }
 
     const asset = nodeImageAsset(workspace, entry.node);
     if (
@@ -583,11 +592,12 @@ export class SceneGraph {
                   center.fromArray(points.positions, index * 3);
                   const radius = points.radii[index];
                   scale.set(radius, radius, Math.max(radius * 0.12, 0.0001));
+                  // PackedSplats expects sRGB channel values, not Three's
+                  // linear material colors. Preserve the sampled image bytes.
                   color.setRGB(
                     points.colors[index * 3] / 255,
                     points.colors[index * 3 + 1] / 255,
                     points.colors[index * 3 + 2] / 255,
-                    SRGBColorSpace,
                   );
                   splats.pushSplat(center, scale, quaternion, 1, color);
                 }
@@ -964,11 +974,36 @@ export class SceneGraph {
     };
   }
 
+  sample(time: number, camera?: RuntimeCamera) {
+    for (const entry of this.entries.values()) {
+      try {
+        entry.sample?.({ time, camera });
+      } catch (error) {
+        entry.error = String(error);
+        entry.sample = undefined;
+        this.onError(entry.error);
+      }
+    }
+    this.scene.updateMatrixWorld(true);
+  }
+
+  private cleanupEntry(entry: Entry) {
+    const cleanup = entry.cleanup;
+    entry.cleanup = undefined;
+    entry.sample = undefined;
+    try {
+      cleanup?.();
+    } catch (error) {
+      this.onError(String(error));
+    }
+  }
+
   private removeEntry(entry: Entry) {
     entry.abort?.abort();
     entry.generation += 1;
     for (const { edit } of entry.clipEdits?.values() ?? [])
       edit.removeFromParent();
+    this.cleanupEntry(entry);
     entry.root.removeFromParent();
     disposeObject(entry.root);
     this.entries.delete(entry.node.id);

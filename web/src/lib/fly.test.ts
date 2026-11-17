@@ -27,16 +27,14 @@ test("right-drag looks with the pointer while two-finger scroll keeps its direct
     },
   });
   const camera = new PerspectiveCamera(50);
-  let restore: (() => void) | undefined;
+  let releases = 0;
   const controls = new FlyControls(
     camera,
     canvas as unknown as HTMLCanvasElement,
     () => true,
     () => {},
     () => {
-      const callback = restore;
-      restore = undefined;
-      callback?.();
+      releases++;
     },
   );
   try {
@@ -75,26 +73,25 @@ test("right-drag looks with the pointer while two-finger scroll keeps its direct
     expect(camera.fov).toBeLessThan(50);
     expect(camera.quaternion.equals(rotation)).toBe(true);
     controls.stop();
-    // A temporary viewed camera must be restored before navigation changes it.
+    // Navigation starts at the visible camera, including a quick key tap.
     camera.position.set(99, 99, 99);
     camera.fov = 90;
-    restore = () => {
-      camera.position.set(1, 2, 3);
-      camera.fov = 45;
-    };
+
     canvas.dispatchEvent(pinch);
-    expect(camera.position.toArray()).toEqual([1, 2, 3]);
-    expect(camera.fov).toBeCloseTo(45 * Math.exp(-0.2));
+    expect(camera.position.toArray()).toEqual([99, 99, 99]);
+    expect(camera.fov).toBeCloseTo(90 * Math.exp(-0.2));
     controls.stop();
     Object.assign(canvas, { matches: () => true });
-    restore = () => camera.position.set(4, 5, 6);
+    camera.position.set(4, 5, 6);
+    const before = releases;
     controls.keyDown(
       new window.KeyboardEvent("keydown", {
         key: "w",
       }) as unknown as KeyboardEvent,
     );
     expect(camera.position.toArray()).toEqual([4, 5, 6]);
-    controls.update(1 / 60);
+    window.dispatchEvent(new window.KeyboardEvent("keyup", { key: "w" }));
+    expect(releases).toBe(before + 1);
     expect(camera.position.toArray()).not.toEqual([4, 5, 6]);
     controls.stop();
   } finally {

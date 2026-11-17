@@ -840,7 +840,11 @@ export const commandSchema = z.discriminatedUnion("type", [
     camera: cameraSchema.optional(),
   }),
   z.object({ type: z.literal("camera.view"), nodeId: z.string() }),
-  z.object({ type: z.literal("camera.release") }),
+  z.object({
+    type: z.literal("camera.release"),
+    // Navigation continues from the visible camera; omission restores the saved view.
+    camera: cameraSchema.optional(),
+  }),
   z.object({
     type: z.literal("path.fromCameras"),
     nodeIds: z.array(z.string()).min(2),

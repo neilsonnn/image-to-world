@@ -117,7 +117,7 @@ export function ViewportCameraTools({
       <Hint
         label={
           overrideName
-            ? `Camera settings overridden by ${overrideName}. Move or press Escape to restore the free viewport camera.`
+            ? `Camera settings overridden by ${overrideName}. Move to explore from here, or press Escape to restore the previous viewport camera.`
             : "Independent viewport camera; used by Render"
         }
       >

@@ -163,6 +163,10 @@ estimates a joint set; its relative camera baseline is retained.
 Cameras use XYZW quaternions and camera-to-world poses. `rub` is Three.js right/up/
 backward; `rdf` is accepted and converted. Intrinsics are in pixels. Atlas accepts
 capture IDs or child IDs; `context list` reports currently usable captures.
+While viewing a camera, WASD, right-drag, scroll, and pinch leave viewing mode
+and continue from the visible pose and lens. Escape or `camera free` restores
+the previous free view instead. `camera.release` accepts an optional `camera`
+for an explicit navigation handoff; omitting it restores the previous view.
 Nonuniform scaling or independently displaced camera/point children cannot describe
 one RGBD frame and are excluded. Atlas prepares RGB, depth, and masks together on
 its 1280x720 grid. View generation requests depth by default. Move the target away

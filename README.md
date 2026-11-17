@@ -1,8 +1,10 @@
 # image-to-world
 
-image-to-world is a local spatial studio for editing images, reconstructing RGBD scenes,
-and generating new views and camera-path videos. The browser and CLI share a
-filesystem workspace. Generation runs in the background while you keep editing.
+image-to-world is a local asset creation toolkit for building 3D scenes from
+images, generated meshes, existing assets, and procedural code. Atlas provides
+posed image context, new environment views, and camera-path videos. The browser
+and CLI share a filesystem workspace. Generation runs in the background while
+you keep editing.
 
 ## Run
 
@@ -70,13 +72,14 @@ not roll back project data, and older versions may reject newer project formats.
 
 ## Editor layout and shortcuts
 
-The outline and project assets stay on the left, properties on the right, and
-Atlas and Image tabs below the viewport. Image history occupies the image editor's
-right column. Atlas context stays directly accessible; additional generation tools
-and Jobs open from the top toolbar. Drag the dividers to
-resize panes, or focus a divider and use arrows, Home, or End. Workspace settings
-includes Reset layout. Sizes, collapsed branches, asset view, and selection persist. Narrow embedded
-windows keep both side panes visible and scroll the lower editor horizontally.
+The viewport sits above the image editor. Spatial context and Atlas generation
+controls occupy the full-height far-right dock. Outline, project assets, and
+properties open in their respective side panels; generation history and agent
+activity are accessible from the top bar. Image versions and edit history open
+from the image editor's floating controls. Its centered edit prompt bar is capped
+at 480px and shrinks with the panel. Drag dividers to resize panes, or focus a
+divider and use arrows, Home, or End. Workspace settings includes Reset layout.
+Sizes, collapsed branches, asset view, and selection persist.
 
 Shortcuts follow the pane under the pointer without requiring a click. Keyboard
 focus is the fallback. Text fields, sliders, menus, and active gestures keep their
@@ -341,7 +344,7 @@ length (`target frames / FPS`). Adding, removing, or reordering poses preserves
 the target count. The per-keyframe order control is one-based; CLI `--index` is
 zero-based. `path keyframe` appends; `--id` replaces; `--id` with `--index` reorders.
 
-image-to-world uses project schema version 4. During this buildout, schema changes are
+image-to-world uses project schema version 7. During this buildout, schema changes are
 breaking and there are no migrations or compatibility readers. Create a fresh
 project after a schema change; existing project files are left untouched.
 Camera nodes store their pose in `transform` and lens intrinsics in `projection`.
@@ -422,10 +425,14 @@ Shared collection navigation handles outline, asset, and history selection. Prov
 
 ```sh
 bun run check
-bun run test
 bun run build
-bun run start
+bun run test
+bun scripts/smoke-launch.ts
 ```
+
+CI runs these checks on Linux and macOS with Bun 1.3.10, the frozen lockfile,
+and a pinned Chromium test browser. Provider calls are mocked in the test suite;
+the launch smoke check creates and removes a disposable project with keys disabled.
 
 The tests cover persistence, scene constraints, image compositing, mocked provider
 requests and restart recovery, plus real FFmpeg encoding and video extraction. They do not require API
@@ -473,7 +480,9 @@ the cache; clear it when changing the scene's content while keeping the descript
 The floating bottom-left viewport controls own the free camera's field of view,
 lens and clipping settings, plus a toggleable passepartout matching the project
 aspect ratio. Viewing through a Frame or camera temporarily overrides the lens
-and names the source node. Navigation or Escape restores the saved free camera.
+and names the source node. WASD, right-drag, scrolling, or pinching exits viewing
+mode and continues from the visible camera pose and lens. Escape (or the restore
+button) restores the saved free camera while viewing mode is still active.
 Render uses the camera inside the project viewfinder.
 
 Image and viewport tools share compact floating groups. The edit prompt floats

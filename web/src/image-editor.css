@@ -462,6 +462,8 @@
   bottom: var(--floating-toolbar-edge);
   left: var(--floating-toolbar-edge);
   right: var(--floating-toolbar-edge);
+  max-width: 480px;
+  margin-inline: auto;
   flex-wrap: nowrap;
   min-width: 0;
   overflow-x: auto;

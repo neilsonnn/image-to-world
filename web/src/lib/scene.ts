@@ -216,7 +216,10 @@ async function textureFromAsset(
   const response = await fetch(assetUrl(asset), { signal });
   if (!response.ok)
     throw new Error(`Failed to load ${asset.name} (${response.status})`);
-  const bitmap = await createImageBitmap(await response.blob());
+  // WebGL ignores Texture.flipY for ImageBitmap; orient pixels at decode time.
+  const bitmap = await createImageBitmap(await response.blob(), {
+    imageOrientation: "flipY",
+  });
   const texture = new Texture(bitmap);
   texture.colorSpace = SRGBColorSpace;
   if (projection) {
@@ -589,11 +592,12 @@ export class SceneGraph {
                   center.fromArray(points.positions, index * 3);
                   const radius = points.radii[index];
                   scale.set(radius, radius, Math.max(radius * 0.12, 0.0001));
+                  // PackedSplats expects sRGB channel values, not Three's
+                  // linear material colors. Preserve the sampled image bytes.
                   color.setRGB(
                     points.colors[index * 3] / 255,
                     points.colors[index * 3 + 1] / 255,
                     points.colors[index * 3 + 2] / 255,
-                    SRGBColorSpace,
                   );
                   splats.pushSplat(center, scale, quaternion, 1, color);
                 }

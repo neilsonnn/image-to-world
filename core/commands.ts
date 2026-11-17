@@ -152,7 +152,8 @@ function mutate(workspace: Workspace, input: Command) {
       break;
     }
     case "camera.release":
-      if (workspace.settings.freeCamera)
+      if (command.camera) workspace.settings.viewportCamera = command.camera;
+      else if (workspace.settings.freeCamera)
         workspace.settings.viewportCamera = workspace.settings.freeCamera;
       workspace.settings.viewingCameraId = null;
       workspace.settings.freeCamera = null;

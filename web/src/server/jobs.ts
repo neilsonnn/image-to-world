@@ -1,3 +1,13 @@
+import { loadImage } from "@napi-rs/canvas";
+import { captureRoot, sceneCamera } from "../../../core/captures";
+import { cameraFromWorld, cameraMatrix } from "../../../core/cameras";
+import { RenderWorker } from "./render-worker";
+import { observeRegion, fitObject, composeMask } from "./observations";
+import {
+  checkPreconditions,
+  type CommandContext,
+} from "../../../core/command-context";
+import { jobNames } from "../../../core/activity";
 import { previewItems } from "../../../core/previews";
 import { renderContactSheet } from "./previews";
 import { imageModels } from "../../../core/models";
@@ -38,7 +48,7 @@ import {
   type Job,
   type JobInput,
 } from "../../../core/schema";
-import { renderImageDraft } from "./image-edit";
+import { renderImageDraft, preserveUnchangedPixels } from "./image-edit";
 import {
   buildWorldLabsRequest,
   downloadTaskAsset,
@@ -55,7 +65,10 @@ export class JobRunner {
   private active = new Map<string, AbortController>();
   private stopped = false;
   private running = new Set<Promise<void>>();
-  constructor(private store: WorkspaceStore) {}
+  private renderer: RenderWorker;
+  constructor(private store: WorkspaceStore) {
+    this.renderer = new RenderWorker(store);
+  }
   async init() {
     await this.store.update((state) => {
       for (const job of Object.values(state.jobs)) {
@@ -80,6 +93,7 @@ export class JobRunner {
     input: z.input<typeof jobInputSchema>,
     id = `job_${randomUUID()}`,
     parentJob?: Job,
+    context: CommandContext = {},
   ) {
     if (this.store.snapshot().jobs[id]) return id;
     const parsed = jobInputSchema.parse(input);
@@ -244,6 +258,34 @@ export class JobRunner {
         snapshot.assets[parsed.sourceAssetId].missing
       )
         throw new Error("Choose an available source image");
+      if (parsed.targetNodeIds) {
+        const roots = imageIndex(snapshot).roots;
+        parsed.targetNodeIds = [
+          ...new Set(
+            parsed.targetNodeIds.map((id) => {
+              const root = captureRoot(snapshot, id);
+              if (
+                !root ||
+                roots.get(root.assetId!) !== roots.get(parsed.sourceAssetId)
+              )
+                throw new Error(
+                  "Target capture belongs to a different source image history",
+                );
+              return root.id;
+            }),
+          ),
+        ];
+      }
+      if (parsed.unchangedMaskAssetId) {
+        const source = await loadImage(
+          (await this.store.assetFile(parsed.sourceAssetId)).file,
+        );
+        const mask = await loadImage(
+          (await this.store.assetFile(parsed.unchangedMaskAssetId)).file,
+        );
+        if (source.width !== mask.width || source.height !== mask.height)
+          throw new Error("Unchanged mask must match source dimensions");
+      }
       parsed.draft ??= snapshot.imageDrafts[parsed.sourceAssetId] ?? {
         strokes: [],
         layers: [],
@@ -264,6 +306,13 @@ export class JobRunner {
       !parsed.videoAssetId
     )
       throw new Error("Choose images or video to reconstruct");
+    const pinnedAssets = await this.store.pinAssets(
+      snapshot,
+      parsed,
+      ["atlas", "splats", "video", "render", "observe", "fit"].includes(
+        parsed.kind,
+      ),
+    );
     const index = imageIndex(snapshot);
     const sourceIds =
       parsed.kind === "nano" && parsed.applyToScene
@@ -271,15 +320,19 @@ export class JobRunner {
         : parsed.kind === "reconstruct" && !parsed.placement
           ? parsed.assetIds
           : [];
-    const targetIds = [
-      ...new Set(
-        sourceIds.flatMap(
-          (assetId) =>
-            index.capturesByRoot.get(index.roots.get(assetId)!) ?? [],
-        ),
-      ),
-    ];
+    const targetIds =
+      parsed.kind === "nano" && parsed.targetNodeIds
+        ? parsed.targetNodeIds
+        : [
+            ...new Set(
+              sourceIds.flatMap(
+                (assetId) =>
+                  index.capturesByRoot.get(index.roots.get(assetId)!) ?? [],
+              ),
+            ),
+          ];
     await this.store.update((state) => {
+      checkPreconditions(state, context);
       if (parentJob && state.jobs[parentJob.id]?.status === "cancelled")
         throw new Error("Parent generation was cancelled");
       if (parsed.kind === "pose" || parsed.kind === "image") {
@@ -305,12 +358,21 @@ export class JobRunner {
               ),
             ),
           });
-          applyCommand(state, { type: "selection.set", ids: parsed.nodeIds });
+          if (context.interactive)
+            applyCommand(state, { type: "selection.set", ids: parsed.nodeIds });
         }
       }
-      if (["atlas", "video", "reconstruct"].includes(parsed.kind))
+      if (
+        context.interactive &&
+        ["atlas", "video", "reconstruct"].includes(parsed.kind)
+      )
         state.settings.atlasPanel.jobId = id;
       state.jobs[id] = {
+        interactive: parentJob?.interactive ?? context.interactive ?? false,
+        snapshotRevision: snapshot.revision,
+        pinnedAssets,
+        actorId: parentJob?.actorId ?? context.actorId,
+        requestId: parentJob?.requestId ?? context.requestId,
         id,
         input: parsed,
         previewItems: sheetItems,
@@ -327,26 +389,18 @@ export class JobRunner {
                   : targetIds.map((id) => snapshot.nodes[id]),
               )),
         applyRoots:
-          parsed.kind === "pose"
+          parsed.kind === "pose" ||
+          (parsed.kind === "nano" && parsed.targetNodeIds)
             ? []
             : sourceIds.map((assetId) => index.roots.get(assetId)!),
         appliedTargets: [],
         resultOwnerId: parentJob?.resultOwnerId ?? parentJob?.id ?? id,
         sourceFrameAssetIds,
-        ...(parsed.kind === "atlas" ||
-        parsed.kind === "video" ||
-        parsed.kind === "splats" ||
-        parsed.kind === "reconstruct" ||
-        parsed.kind === "nano" ||
-        parsed.kind === "contactSheet"
-          ? {
-              contextSnapshot: {
-                nodes: snapshot.nodes,
-                assets: snapshot.assets,
-                settings: snapshot.settings,
-              },
-            }
-          : {}),
+        contextSnapshot: {
+          nodes: snapshot.nodes,
+          assets: snapshot.assets,
+          settings: snapshot.settings,
+        },
         status: "queued",
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -357,6 +411,7 @@ export class JobRunner {
       };
       if (!parentJob) claimResultTargets(state, state.jobs[id]);
     });
+    this.reportJob(this.store.snapshot().jobs[id], "summary");
     this.pump();
     return id;
   }
@@ -365,6 +420,7 @@ export class JobRunner {
     camera?: Camera,
     destination?: { parentId?: string | null; beforeId?: string | null },
     mode: "individual" | "reconstruct" = "individual",
+    context: CommandContext = {},
   ) {
     const snapshot = this.store.snapshot();
     if (destination?.parentId && !snapshot.nodes[destination.parentId])
@@ -376,7 +432,7 @@ export class JobRunner {
         (asset) =>
           !asset ||
           asset.missing ||
-          !["image", "splat", "video"].includes(asset.kind),
+          !["image", "splat", "mesh", "video"].includes(asset.kind),
       )
     )
       throw new Error("Choose available images, splats, or videos");
@@ -388,24 +444,34 @@ export class JobRunner {
       if (images.length < 2)
         throw new Error("Choose at least two images to reconstruct together");
       jobIds.push(
-        await this.submit({
-          kind: "reconstruct",
-          assetIds: images.map((asset) => asset.id),
-          integrate: true,
-          placement,
-          ...destination,
-        }),
+        await this.submit(
+          {
+            kind: "reconstruct",
+            assetIds: images.map((asset) => asset.id),
+            integrate: true,
+            placement,
+            ...destination,
+          },
+          undefined,
+          undefined,
+          context,
+        ),
       );
     }
     for (const asset of assets) {
       if (reconstruct && asset.kind === "image") continue;
       if (asset.kind === "image" && !(asset.camera && asset.depthAssetId)) {
-        const jobId = await this.submit({
-          kind: "pose",
-          assetIds: [asset.id],
-          canonicalize: false,
-          placement,
-        });
+        const jobId = await this.submit(
+          {
+            kind: "pose",
+            assetIds: [asset.id],
+            canonicalize: false,
+            placement,
+          },
+          undefined,
+          undefined,
+          context,
+        );
         jobIds.push(jobId);
         const input = this.store.snapshot().jobs[jobId].input;
         if (input.kind === "pose") placed.push(...input.nodeIds!);
@@ -419,7 +485,7 @@ export class JobRunner {
                 {
                   id,
                   name: asset.name,
-                  kind: asset.kind as "splat" | "video",
+                  kind: asset.kind as "splat" | "mesh" | "video",
                   assetId: asset.id,
                   parentId: null,
                   visible: true,
@@ -428,7 +494,8 @@ export class JobRunner {
               ];
         await this.store.update((state) => {
           applyCommand(state, { type: "nodes.put", nodes });
-          applyCommand(state, { type: "selection.set", ids: [id] });
+          if (context.interactive)
+            applyCommand(state, { type: "selection.set", ids: [id] });
         });
       }
     }
@@ -450,7 +517,17 @@ export class JobRunner {
   private pump() {
     if (this.stopped) return;
     for (const job of Object.values(this.store.snapshot().jobs)) {
-      if (this.active.size >= 3) break;
+      const rendering = ["render", "fit"].includes(job.input.kind);
+      const activeJobs = [...this.active.keys()].map(
+        (id) => this.store.snapshot().jobs[id],
+      );
+      if (
+        rendering
+          ? activeJobs.some((j) => ["render", "fit"].includes(j.input.kind))
+          : activeJobs.filter((j) => !["render", "fit"].includes(j.input.kind))
+              .length >= 3
+      )
+        continue;
       if (
         job.status !== "queued" ||
         ["capture", "inspect"].includes(job.input.kind) ||
@@ -459,7 +536,8 @@ export class JobRunner {
         continue;
       const controller = new AbortController();
       this.active.set(job.id, controller);
-      const task = this.run(job.id, controller.signal)
+      const task = this.store
+        .withJobAssets(job, () => this.run(job.id, controller.signal))
         .catch((error) =>
           console.error("worldbash job could not save its status:", error),
         )
@@ -472,10 +550,63 @@ export class JobRunner {
     }
   }
   private async patch(id: string, patch: Partial<Job>) {
+    const previous = this.store.snapshot().jobs[id];
     await this.store.update((state) => {
       const job = state.jobs[id];
       if (job.status === "cancelled") return;
       Object.assign(job, patch, { updatedAt: Date.now() });
+    });
+    const job = this.store.snapshot().jobs[id];
+    if (patch.status || (patch.message && patch.message !== previous?.message))
+      this.reportJob(job, patch.status ? "summary" : "trace");
+  }
+  private reportJob(job: Job, detail: "summary" | "trace") {
+    this.store.recordActivity({
+      actorId: job.actorId ?? "System",
+      requestId: job.requestId,
+      jobId: job.id,
+      operation: job.input.kind,
+      name: jobNames[job.input.kind],
+      phase: job.status,
+      severity:
+        job.status === "failed"
+          ? "error"
+          : job.applicationError
+            ? "warning"
+            : "info",
+      detail,
+      message: job.error ?? job.message,
+      assetIds: [
+        ...new Set([
+          ...Object.keys(job.pinnedAssets ?? {}),
+          ...job.outputAssetIds,
+        ]),
+      ],
+      nodeIds: [
+        ...new Set([
+          ...(job.applyTargets?.map((t) => t.nodeId) ?? []),
+          ...("nodeIds" in job.input ? (job.input.nodeIds ?? []) : []),
+          ...("nodeId" in job.input ? [job.input.nodeId] : []),
+        ]),
+      ],
+      camera:
+        job.input.kind === "render"
+          ? cameraFromWorld(
+              job.input.camera.intrinsics,
+              cameraMatrix(job.input.camera),
+            ).extrinsics
+          : job.input.kind === "observe"
+            ? sceneCamera(
+                { nodes: job.contextSnapshot!.nodes },
+                job.input.nodeId,
+              )?.extrinsics
+            : undefined,
+      model:
+        "model" in job.input
+          ? job.input.model
+          : job.input.kind === "nano"
+            ? job.input.settings.model
+            : undefined,
     });
   }
   private async run(id: string, signal: AbortSignal) {
@@ -484,6 +615,16 @@ export class JobRunner {
       let job = this.store.snapshot().jobs[id];
       signal.throwIfAborted();
       const assets: Asset[] = [];
+      if (job.input.kind === "render")
+        assets.push(...(await this.renderer.render(job, signal)));
+      if (job.input.kind === "mask")
+        assets.push(...(await composeMask(this.store, job, signal)));
+      if (job.input.kind === "observe")
+        assets.push(...(await observeRegion(this.store, job, signal)));
+      if (job.input.kind === "fit")
+        assets.push(
+          ...(await fitObject(this.store, this.renderer, job, signal)),
+        );
       if (job.input.kind === "contactSheet")
         assets.push(...(await renderContactSheet(this.store, job, signal)));
       if (
@@ -622,26 +763,50 @@ export class JobRunner {
           const existing = Object.values(this.store.snapshot().assets).find(
             (a) => a.jobId === id && a.path.endsWith(`${id}-${i}-${name}`),
           );
-          assets.push(
-            existing ??
-              (await this.store.importFile(
-                await downloadTaskAsset({ url }, signal),
-                `${id}-${i}-${name}`,
+          let downloaded: Blob | undefined;
+          if (!existing) {
+            downloaded = await downloadTaskAsset({ url }, signal);
+            if (
+              job.input.kind === "nano" &&
+              job.input.unchangedMaskAssetId &&
+              (downloaded.type.startsWith("image/") ||
+                /\.(png|jpe?g|webp)$/i.test(name))
+            ) {
+              const raw = await this.store.importFile(
+                downloaded,
+                `${id}-${i}-raw-${name}`,
                 {
                   jobId: id,
-                  ...(job.input.kind === "nano"
-                    ? {
-                        name: `Nano Banana ${i + 1}`,
-                        parentAssetId: job.input.sourceAssetId,
-                        referenceAssetIds: job.input.referenceAssetIds,
-                        ...nanoGeometry(
-                          { ...this.store.snapshot(), ...job.contextSnapshot },
-                          job,
-                        ),
-                      }
-                    : {}),
+                  role: "raw-result",
+                  sourceAssetIds: Object.keys(job.pinnedAssets ?? {}),
                 },
-              )),
+              );
+              downloaded = await preserveUnchangedPixels(
+                this.store,
+                job.input.sourceAssetId,
+                job.input.unchangedMaskAssetId,
+                downloaded,
+                signal,
+              );
+            }
+          }
+          assets.push(
+            existing ??
+              (await this.store.importFile(downloaded!, `${id}-${i}-${name}`, {
+                jobId: id,
+                sourceAssetIds: Object.keys(job.pinnedAssets ?? {}),
+                ...(job.input.kind === "nano"
+                  ? {
+                      name: `Nano Banana ${i + 1}`,
+                      parentAssetId: job.input.sourceAssetId,
+                      referenceAssetIds: job.input.referenceAssetIds,
+                      ...nanoGeometry(
+                        { ...this.store.snapshot(), ...job.contextSnapshot },
+                        job,
+                      ),
+                    }
+                  : {}),
+              })),
           );
         }
         if (job.input.kind === "image") {
@@ -686,6 +851,7 @@ export class JobRunner {
             const childJobId = await this.submit(
               {
                 kind: "reconstruct",
+                unchangedMaskAssetId: job.input.unchangedMaskAssetId,
                 assetIds: [assets[0].id],
                 integrate: false,
               },
@@ -700,7 +866,11 @@ export class JobRunner {
             type: "application/json",
           }),
           `${id}-result.json`,
-          { jobId: id },
+          {
+            jobId: id,
+            role: "raw-result",
+            sourceAssetIds: Object.keys(job.pinnedAssets ?? {}),
+          },
         );
         assets.push(manifest);
       } else if (
@@ -935,7 +1105,8 @@ export class JobRunner {
           },
         ],
       });
-      applyCommand(state, { type: "selection.set", ids: [nodeId] });
+      if (job.interactive)
+        applyCommand(state, { type: "selection.set", ids: [nodeId] });
     });
     return asset;
   }
@@ -951,6 +1122,7 @@ export class JobRunner {
           "Stopped locally; the provider may still finish and bill this request",
       });
     });
+    this.reportJob(this.store.snapshot().jobs[id], "summary");
     this.active.get(id)?.abort(new Error("Cancelled"));
     const childId =
       job.childJobId ??
@@ -992,6 +1164,7 @@ export class JobRunner {
         message: "Resuming request",
       });
     });
+    this.reportJob(this.store.snapshot().jobs[id], "summary");
     this.pump();
     return id;
   }
@@ -1000,5 +1173,6 @@ export class JobRunner {
     for (const controller of this.active.values())
       controller.abort(new Error("Server is stopping"));
     await Promise.allSettled([...this.running]);
+    await this.renderer.close();
   }
 }

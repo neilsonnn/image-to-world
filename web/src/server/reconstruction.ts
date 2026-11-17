@@ -1,3 +1,4 @@
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import type { Images2PosedRGBDPerImageResult } from "@worldlabsai/client";
 import { linearDepth } from "../../../core/depth";
 import { median, registerCameras } from "../../../core/registration";
@@ -31,6 +32,20 @@ export async function reconstructFrames(
   const targets = sources.map((asset) =>
     placement ? undefined : asset?.camera,
   );
+  let unchanged:
+    { data: Uint8ClampedArray; width: number; height: number } | undefined;
+  if (job.input.unchangedMaskAssetId) {
+    const { file } = await store.assetFile(job.input.unchangedMaskAssetId);
+    const image = await loadImage(file),
+      canvas = createCanvas(image.width, image.height),
+      ctx = canvas.getContext("2d");
+    ctx.drawImage(image, 0, 0);
+    unchanged = {
+      data: ctx.getImageData(0, 0, image.width, image.height).data,
+      width: image.width,
+      height: image.height,
+    };
+  }
   let depthScale: number | undefined;
   if (
     targets.some(Boolean) &&
@@ -57,6 +72,22 @@ export async function reconstructFrames(
       );
       for (let y = 0; y < next.height; y += stride)
         for (let x = 0; x < next.width; x += stride) {
+          if (
+            unchanged &&
+            unchanged.data[
+              (Math.min(
+                unchanged.height - 1,
+                Math.floor(((y + 0.5) * unchanged.height) / next.height),
+              ) *
+                unchanged.width +
+                Math.min(
+                  unchanged.width - 1,
+                  Math.floor(((x + 0.5) * unchanged.width) / next.width),
+                )) *
+                4
+            ] < 128
+          )
+            continue;
           const before =
             old.data[
               (Math.min(
@@ -82,6 +113,17 @@ export async function reconstructFrames(
       if (ratios.length < 16)
         throw new Error("Too few valid depth samples to align this edit");
       depthScale = median(ratios);
+      if (
+        unchanged &&
+        ratios.map((v) => Math.abs(v - depthScale!)).sort((a, b) => a - b)[
+          Math.floor(ratios.length / 2)
+        ] /
+          depthScale >
+          0.35
+      )
+        throw new Error(
+          "Unchanged-region depth alignment is inconsistent; retained the previous scene. Review the candidate and mask.",
+        );
       break;
     }
   }
@@ -100,7 +142,26 @@ export async function reconstructFrames(
       ).arrayBuffer(),
     );
     const camera = targets[i]
-      ? { ...frame.camera, extrinsics: targets[i]!.extrinsics }
+      ? {
+          ...targets[i]!,
+          intrinsics: {
+            ...targets[i]!.intrinsics,
+            width: frame.camera.intrinsics.width,
+            height: frame.camera.intrinsics.height,
+            fx:
+              (targets[i]!.intrinsics.fx * frame.camera.intrinsics.width) /
+              targets[i]!.intrinsics.width,
+            fy:
+              (targets[i]!.intrinsics.fy * frame.camera.intrinsics.height) /
+              targets[i]!.intrinsics.height,
+            cx:
+              (targets[i]!.intrinsics.cx * frame.camera.intrinsics.width) /
+              targets[i]!.intrinsics.width,
+            cy:
+              (targets[i]!.intrinsics.cy * frame.camera.intrinsics.height) /
+              targets[i]!.intrinsics.height,
+          },
+        }
       : transformCamera(cameraSchema.parse(frame.camera), registration.matrix);
     assets.push(
       await saveFrame(store, job, { ...frame, camera }, i, signal, {

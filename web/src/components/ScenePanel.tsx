@@ -1,3 +1,4 @@
+import { ActivityBadge } from "./ActivityFeed";
 import { ToolbarMenu } from "./ui";
 import { useWorldbashClient, useWorkspaceData } from "../lib/client";
 import { NodeIcon, nodePresentation } from "./NodeIcon";
@@ -533,6 +534,7 @@ export function ScenePanel({
                     >
                       <NodeIcon kind={node.kind} />
                       <span>{node.name}</span>
+                      <ActivityBadge id={node.id} />
                     </button>
                   )}
                   <CollectionActions

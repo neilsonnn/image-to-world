@@ -1648,3 +1648,112 @@ button {
   color: var(--action-ready);
   background: var(--action-ready-hover);
 }
+
+.activity-container {
+  flex: 1;
+  min-width: 0;
+}
+.activity-container .footer-operation {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.activity-count {
+  opacity: 0.65;
+  white-space: nowrap;
+  font-size: 10px;
+}
+.activity-drawer {
+  position: fixed;
+  right: 16px;
+  width: min(820px, calc(100vw - 32px));
+  bottom: 30px;
+  height: 290px;
+  min-height: 150px;
+  max-height: 70vh;
+  resize: vertical;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--control-radius) var(--control-radius) 0 0;
+  box-shadow: 0 -8px 35px var(--shadow);
+  z-index: 60;
+}
+.activity-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: var(--panel-padding);
+  border-bottom: 1px solid var(--line);
+}
+.activity-search {
+  flex: 1;
+  min-width: 120px;
+}
+.activity-list {
+  overflow: auto;
+  flex: 1;
+  padding: 0 8px;
+  font-size: 11px;
+}
+.activity-entry {
+  border-bottom: 1px solid var(--gray-4);
+  padding: 7px 0;
+}
+.activity-entry summary {
+  display: flex;
+  gap: 10px;
+  cursor: pointer;
+  align-items: center;
+}
+.activity-entry time {
+  opacity: 0.5;
+  font-variant-numeric: tabular-nums;
+}
+.activity-entry strong {
+  font-weight: 500;
+  flex: 1;
+}
+.activity-entry.error {
+  color: var(--red-11);
+}
+.activity-entry.warning {
+  color: var(--amber-11);
+}
+.activity-details {
+  padding: 8px 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.activity-details p {
+  margin: 3px 0;
+}
+.activity-details button {
+  border: 1px solid var(--gray-6);
+  background: var(--gray-3);
+  color: inherit;
+  border-radius: 3px;
+  margin-right: 4px;
+}
+.activity-badges {
+  display: inline-flex;
+  gap: 3px;
+  font-size: 10px;
+  margin-left: 4px;
+}
+.activity-entry summary {
+  min-width: 0;
+}
+.activity-entry summary strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

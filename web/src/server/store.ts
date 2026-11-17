@@ -1,4 +1,10 @@
+import { validateGlb } from "../../../core/mesh";
 import type { Operation } from "../../../core/activity";
+import {
+  activitySchema,
+  type Activity,
+  type ActivityInput,
+} from "../../../core/activity";
 import { createHash, randomUUID } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
 import {
@@ -13,6 +19,8 @@ import {
   stat,
 } from "node:fs/promises";
 import path from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { Job } from "../../../core/schema";
 import { validateScene } from "../../../core/commands";
 import {
   emptyWorkspace,
@@ -22,6 +30,7 @@ import {
 } from "../../../core/schema";
 
 const formats: Record<string, [Asset["kind"], string]> = {
+  ".glb": ["mesh", "model/gltf-binary"],
   ".png": ["image", "image/png"],
   ".jpg": ["image", "image/jpeg"],
   ".jpeg": ["image", "image/jpeg"],
@@ -36,6 +45,101 @@ const formats: Record<string, [Asset["kind"], string]> = {
   ".mov": ["video", "video/quicktime"],
 };
 export class WorkspaceStore {
+  private jobAssets = new AsyncLocalStorage<Job>();
+  withJobAssets<T>(job: Job, work: () => Promise<T>) {
+    return this.jobAssets.run(job, work);
+  }
+  async pinAssets(snapshot: Workspace, inputs: unknown, includeScene = false) {
+    const ids = new Set<string>();
+    const walk = (value: unknown): void => {
+      if (
+        typeof value === "string" &&
+        snapshot.assets[value] &&
+        !ids.has(value)
+      ) {
+        ids.add(value);
+        const a = snapshot.assets[value];
+        for (const key of [
+          "depthAssetId",
+          "confidenceAssetId",
+          "maskAssetId",
+          "geometrySourceAssetId",
+        ] as const)
+          walk(a[key]);
+      } else if (Array.isArray(value)) value.forEach(walk);
+      else if (value && typeof value === "object")
+        Object.values(value).forEach(walk);
+    };
+    walk(inputs);
+    if (includeScene)
+      for (const node of Object.values(snapshot.nodes)) {
+        walk(node.assetId);
+        walk(node.geometryAssetId);
+      }
+    const pins: NonNullable<Job["pinnedAssets"]> = {};
+    await mkdir(path.join(this.assetsPath, ".snapshots"), { recursive: true });
+    for (const id of ids) {
+      const inherited = this.jobAssets.getStore()?.pinnedAssets?.[id];
+      if (inherited) {
+        pins[id] = inherited;
+        continue;
+      }
+      const { file } = await this.assetFile(id);
+      const before = await stat(file);
+      const expected = snapshot.assets[id];
+      if (
+        before.size !== expected.size ||
+        before.mtimeMs !== expected.modifiedAt
+      )
+        throw new Error(`Asset changed before snapshot: ${id}`);
+      const bytes = await readFile(file);
+      const after = await stat(file);
+      if (after.size !== before.size || after.mtimeMs !== before.mtimeMs)
+        throw new Error(`Asset changed while snapshotting: ${id}`);
+      const hash = createHash("sha256").update(bytes).digest("hex");
+      const relative = `.snapshots/${hash}`;
+      const dest = path.join(this.assetsPath, relative);
+      if (!(await Bun.file(dest).exists())) {
+        const temporary = `${dest}.${randomUUID()}.tmp`;
+        await Bun.write(temporary, bytes);
+        await rename(temporary, dest);
+      }
+      pins[id] = { path: relative, hash };
+    }
+    return pins;
+  }
+  private activity: Activity[] = [];
+  private activityTail: Promise<unknown> = Promise.resolve();
+  activitySnapshot(after = 0) {
+    return {
+      events: this.activity.filter((e) => e.sequence > after),
+      cursor: this.activity.at(-1)?.sequence ?? 0,
+      gap: after > 0 && after < (this.activity[0]?.sequence ?? 1) - 1,
+    };
+  }
+  recordActivity(input: ActivityInput) {
+    const scrub = (value: string) =>
+      value.replace(/https?:\/\/\S+/g, "[URL]").slice(0, 2000);
+    const event = activitySchema.parse({
+      ...input,
+      message: input.message ? scrub(input.message) : undefined,
+      id: randomUUID(),
+      sequence: (this.activity.at(-1)?.sequence ?? 0) + 1,
+      at: Date.now(),
+    });
+    this.activity = [...this.activity, event].slice(-1000);
+    this.emit("activity", event);
+    const snapshot = JSON.stringify(this.activity);
+    this.activityTail = this.activityTail
+      .catch(() => {})
+      .then(async () => {
+        const temporary = path.join(this.root, ".activity.tmp");
+        await Bun.write(temporary, snapshot);
+        await rename(temporary, path.join(this.root, ".activity.json"));
+      })
+      .catch(() => {});
+    return event;
+  }
   lastOperation: Operation | null = null;
   reportOperation(name: string) {
     this.lastOperation = { name, at: Date.now() };
@@ -85,6 +189,16 @@ export class WorkspaceStore {
             `Cannot read workspace.json. Fix it or restore workspace.json.bak: ${error}`,
           );
         await this.write(this.state);
+      }
+      try {
+        this.activity = JSON.parse(
+          await readFile(path.join(this.root, ".activity.json"), "utf8"),
+        )
+          .map((e: unknown) => activitySchema.parse(e))
+          .slice(-1000);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+          this.activity = [];
       }
       await this.syncAssets();
       this.watchers.push(
@@ -280,6 +394,8 @@ export class WorkspaceStore {
     };
   }
   async importFile(file: Blob, name: string, metadata: Partial<Asset> = {}) {
+    if (path.extname(name).toLowerCase() === ".glb")
+      validateGlb(await file.arrayBuffer());
     return this.update(async (state) => {
       const safeName =
         path
@@ -301,6 +417,12 @@ export class WorkspaceStore {
         ...metadata,
         id,
         path: relative,
+        size: info.size,
+        modifiedAt: info.mtimeMs,
+        contentHash: createHash("sha256")
+          .update(new Uint8Array(await file.arrayBuffer()))
+          .digest("hex"),
+        role: metadata.role ?? (safeName.endsWith(".glb") ? "mesh" : undefined),
       };
       state.assets[id] = asset;
       return asset;
@@ -310,6 +432,18 @@ export class WorkspaceStore {
     id: string,
     options: { state?: Workspace; includeTrashed?: boolean } = {},
   ) {
+    const job = this.jobAssets.getStore();
+    const pinned = job?.pinnedAssets?.[id];
+    if (pinned) {
+      const asset = job.contextSnapshot?.assets[id];
+      if (!asset) throw new Error(`Pinned asset metadata missing: ${id}`);
+      if (
+        !/^\.snapshots\/[a-f0-9]{64}$/.test(pinned.path) ||
+        pinned.path !== `.snapshots/${pinned.hash}`
+      )
+        throw new Error("Invalid pinned asset path");
+      return { asset, file: path.join(this.assetsPath, pinned.path) };
+    }
     const asset = (options.state ?? this.state).assets[id];
     if (asset?.trashedAt !== undefined && !options.includeTrashed)
       throw new Error("Restore this asset from Trash before using it");
@@ -330,6 +464,7 @@ export class WorkspaceStore {
     clearTimeout(this.scanTimer);
     for (const watcher of this.watchers) watcher.close();
     await this.tail;
+    await this.activityTail;
     const file = path.join(this.root, ".lock");
     try {
       const lock = JSON.parse(await readFile(file, "utf8"));

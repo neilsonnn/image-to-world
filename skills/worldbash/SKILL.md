@@ -321,3 +321,75 @@ Camera gestures and display edits participate in the scene undo journal. Each
 multi-object gizmo drag is one edit; duplicate/delete undo restores selection.
 Pane sizing and image drafts retain their separate behavior. Nonuniform ancestor
 scaling can make a world rotation require shear; worldbash rejects that transform.
+
+## Decompose a posed image into editable objects
+
+Use independent primitives; there is no mandatory blast sequence or task-folder layout.
+Generated files are ordinary project assets with provenance. Only the command service
+writes scene state. Use `schema generation` and `schema context` to discover exact inputs.
+
+- `models` lists suggested endpoints. `models <endpoint>` fetches its public schema;
+  `models --search text` queries FAL. Any public FAL model can be invoked with
+  `model <endpoint> --file input.json`. `{ "$asset": "asset-id" }` uploads local
+  assets. Results remain assets; `scene place` explicitly creates a scene instance.
+- `observe <capture-id> --region x,y,w,h [--polygon points.json | --mask asset-id]`
+  saves a padded crop, foreground mask, unchanged-background mask, and observation
+  JSON. Coordinates and polygons are normalized, top-left. Depth comes from the
+  active points node, transformed into scene units. Inspect its sample count and
+  dispersion; it does not infer hidden shape or metric scale.
+- `image edit <crop-id> --asset-only --prompt 'Complete and isolate this object…'`
+  can outpaint missing parts. The original observation remains placement evidence.
+  To generate a mesh, pass the completed image to a model such as
+  `fal-ai/hunyuan3d-v3/image-to-3d` with `input_image_url: { "$asset": "..." }`.
+- `scene place <mesh-asset-id>` creates an ordinary transformable mesh node.
+  Self-contained uncompressed GLB 2.0 is supported. Use `nodes.patch` to change its
+  asset binding without sending a stale whole node.
+- `fit <mesh-node-id> --observation <manifest-asset-id> [--quaternion x,y,z,w]`
+  returns a read-only transform proposal and preconditions. It is a starting point
+  based on image extent and depth, not an automatic orientation or quality solver.
+  Export the proposal, extract `command` and `preconditions`, then use
+  `command @command.json --expect preconditions.json`. Reobserve if its source or
+  ancestors changed. A quaternion here specifies world orientation.
+- `render <camera-or-capture-id> [--targets id,id] [--reference image-id]`
+  uses an independent headless Chrome renderer, with the shared scene geometry.
+  It never moves the browser viewport. `--passes color,mask,depth,ids` adds mesh
+  silhouettes, camera-forward linear EXR depth and stable node IDs. Geometry passes
+  require mesh-only targets; color supports points, meshes and splats. Every render
+  includes a JSON manifest and renderer bounds. `generate --file request.json`
+  additionally accepts temporary node transform overrides for candidate review.
+- Inspect at the source camera and from a second camera; correct orientation,
+  size, grounding and occlusion with ordinary scene commands. One image does not
+  determine hidden shape, exact scale or orientation.
+- Coordinate one background cleanup per shared source view after object placement.
+  `mask <mask-id>... --operation union --dilate 24 --feather 16 --invert` combines removed regions
+  into an unchanged mask. Dilation should exceed feathering to avoid blending the original object back into the image. `image edit <source-id> --targets <capture-id>` with
+  `--unchanged-mask <id>` preserves white mask pixels locally, then reconstructs
+  depth using only that evidence. The candidate RGB and new depth apply together
+  through the existing result ownership rules. A failed refresh retains the old
+  scene and candidate assets. `--no-reconstruct` is explicit; edited RGB without
+  matching depth is excluded from Atlas context.
+- Generate the remaining static world with `atlas`. Avoid including another posed
+  view that still contains a removed object. No splat task runs automatically.
+
+## Concurrent workers
+
+Workers may share one live server. Set `WORLDBASH_URL` once and optionally
+`WORLDBASH_ACTOR` per worker; identity also accepts `--actor`. Work on separate
+objects, and nominate one worker to clean a shared source view. Independent local
+rendering and provider generation have separate scheduling slots.
+
+Use `nodes.patch`, `scene transform`, and command batches for narrow changes. Add
+`--expect guards.json` when the result depends on observed fields or parents;
+conflicts return HTTP 409 and do not partially apply. Use a stable `--request-id`
+when retrying the same mutation. Reusing it with different content is rejected.
+Completed receipts survive restart; interrupted submissions with saved jobs recover
+that job. An interrupted file operation without a receipt requires inspecting its
+actual effects before choosing a new request ID. Do not edit workspace.json or
+write into another worker's output file. Job inputs are copied into immutable,
+content-addressed snapshots before running.
+
+CLI changes preserve human selection unless selection was explicitly requested.
+Use `revert <edit-id>` for your own unchanged edit instead of undoing the global
+latest action. Existing dependent changes make a revert fail atomically. No worker
+needs an interactive browser tab. Chrome/Chromium must be installed locally for
+headless rendering; `CHROMIUM_PATH` overrides detection. Startup never downloads it.

@@ -1,3 +1,4 @@
+import { AgentPresence } from "../lib/agent-presence";
 import { ViewportCameraTools } from "./ViewportCameraTools";
 import { sessionFormat } from "../../../core/formats";
 import { atlasCamera } from "../../../core/cameras";
@@ -211,6 +212,7 @@ export function Viewport({
   requestPlacement,
 }: ViewportProps) {
   const {
+    store: clientStore,
     command,
     upload,
     setError: onError,
@@ -458,6 +460,7 @@ export function Viewport({
       color("helper"),
       color("active"),
     );
+    const presence = new AgentPresence(scene);
     const fly = new FlyControls(
       camera,
       renderer.domElement,
@@ -786,6 +789,11 @@ export function Viewport({
       }
       transform.update();
       graph.update();
+      presence.update(
+        clientStore.getState().activity ?? [],
+        graph,
+        clientStore.getState().showPresence !== false,
+      );
       if (
         graph.spatialVersion !== spatialVersion &&
         !runtime.dragging &&
@@ -824,6 +832,7 @@ export function Viewport({
         await captureQueue.current;
         while (spark.sorting)
           await new Promise((resolve) => setTimeout(resolve, 16));
+        presence.dispose();
         graph.dispose();
         spark.dispose();
         grid.geometry.dispose();

@@ -452,7 +452,7 @@ test("placing images poses in the background, preserves edits, and feeds moved c
   const completed = await done(store, jobId);
   expect(completed.error).toBeUndefined();
   expect(poseRequest.canonicalizeToFirstFrame).toBe(false);
-  expect(poseRequest.targetResolution).toEqual([20, 20]);
+  expect(poseRequest.targetResolution).toEqual([960, 720]);
   const workspace = store.snapshot();
   expect(workspace.nodes[rootId].transform.position).toEqual([10, 0, -6]);
   expect(
@@ -622,7 +622,7 @@ test("splats send posed context frames and place the returned SPZ once at the ro
   expect(nodes.map((node) => [node.assetId, node.parentId])).toEqual([
     [asset.id, null],
   ]);
-  expect(workspace.selection).toEqual([nodes[0].id]);
+  expect(workspace.selection).toEqual([]);
 });
 
 test("the newest image edit replaces intervening history choices and remains undoable", async () => {
@@ -1197,10 +1197,13 @@ for (const includeDepth of [true, false]) {
       await generatedSceneFixture(includeDepth);
     const target = structuredClone(camera);
     target.extrinsics.position = [2, 1.5, 0];
-    const result = await commands.execute({
-      type: "generation.submit",
-      request: { kind: "view", camera: target },
-    });
+    const result = await commands.execute(
+      {
+        type: "generation.submit",
+        request: { kind: "view", camera: target },
+      },
+      { interactive: true },
+    );
     expect(store.snapshot().settings.atlasPanel.jobId).toBe(result.jobId!);
     const job = await done(store, result.jobId!);
     expect(job.error).toBeUndefined();
@@ -1253,9 +1256,9 @@ for (const kind of ["nano", "reconstruct"] as const)
       const job = await done(store, id);
       expect(job.status).toBe("succeeded");
       expect(job.outputAssetIds.length).toBeGreaterThan(0);
-      expect(job.applicationError).toContain("missing points child");
-      expect(job.appliedTargets).toEqual(healthySibling ? ["sibling"] : []);
+      if (kind === "nano") expect(job.appliedTargets).toEqual([]);
       const final = kind === "nano" ? await done(store, job.childJobId!) : job;
+      expect(final.appliedTargets).toEqual(healthySibling ? ["sibling"] : []);
       expect(final.status).toBe("succeeded");
       expect(final.applicationError).toContain("missing points child");
       const state = store.snapshot();
@@ -1279,15 +1282,18 @@ test("create image reserves a Frame immediately and reuses posing with yaw, grou
   const placement = structuredClone(camera);
   placement.extrinsics.position = [6, 9, -4];
   placement.extrinsics.quaternion = [0, Math.sin(0.45), 0, Math.cos(0.45)];
-  const { jobId } = await commands.execute({
-    type: "generation.submit",
-    request: {
-      kind: "image.create",
-      prompt: "An abandoned lab",
-      placement,
-      seed: 17,
+  const { jobId } = await commands.execute(
+    {
+      type: "generation.submit",
+      request: {
+        kind: "image.create",
+        prompt: "An abandoned lab",
+        placement,
+        seed: 17,
+      },
     },
-  });
+    { interactive: true },
+  );
   let state = store.snapshot();
   const input = state.jobs[jobId!].input;
   if (input.kind !== "image") throw new Error("Expected image job");

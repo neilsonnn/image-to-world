@@ -102,12 +102,26 @@ export const nanoSettingsSchema = z.object({
   seed: number.int().optional(),
 });
 export const assetSchema = z.object({
+  sourceAssetIds: z.array(z.string()).optional(),
+  role: z
+    .enum([
+      "image",
+      "mesh",
+      "mask",
+      "depth",
+      "thumbnail",
+      "observation",
+      "render",
+      "raw-result",
+    ])
+    .optional(),
+  contentHash: z.string().optional(),
   parentAssetId: z.string().optional(),
   referenceAssetIds: z.array(z.string()).optional(),
   id: z.string(),
   name: z.string(),
   path: z.string(),
-  kind: z.enum(["image", "depth", "splat", "video", "file"]),
+  kind: z.enum(["image", "depth", "splat", "mesh", "video", "file"]),
   mimeType: z.string(),
   size: number,
   modifiedAt: number,
@@ -150,6 +164,7 @@ export const nodeSchema = z
       "points",
       "image",
       "splat",
+      "mesh",
       "camera",
       "path",
       "clip",
@@ -240,8 +255,8 @@ export const collectionSettingsSchema = z.object({
   expandedNodeIds: z.array(z.string()).default([]),
   assetView: z.enum(["list", "grid"]).default("list"),
   assetKinds: z
-    .array(z.enum(["image", "depth", "splat", "video", "file"]))
-    .default(["image", "splat", "video", "file"]),
+    .array(z.enum(["image", "depth", "splat", "mesh", "video", "file"]))
+    .default(["image", "splat", "mesh", "video", "file"]),
 });
 export const settingsSchema = z.object({
   atlas: atlasContextSchema.default({}),
@@ -313,7 +328,59 @@ export const settingsSchema = z.object({
   fps: number.int().min(1).max(60),
   targetFrameCount: number.int().min(2).max(600),
 });
+export const renderInputSchema = z.object({
+  kind: z.literal("render"),
+  camera: cameraSchema,
+  nodeIds: z.array(z.string()).min(1).optional(),
+  passes: z
+    .array(z.enum(["color", "mask", "depth", "ids"]))
+    .min(1)
+    .default(["color"]),
+  referenceAssetId: z.string().optional(),
+  overrides: z.record(transformSchema).default({}),
+  near: number.positive().default(0.01),
+  far: number.positive().default(10000),
+});
+export const maskInputSchema = z.object({
+  kind: z.literal("mask"),
+  assetIds: z.array(z.string()).min(1),
+  operation: z.enum(["union", "intersection"]).default("union"),
+  invert: z.boolean().default(false),
+  dilate: number.int().min(0).max(32).default(0),
+  feather: number.int().min(0).max(64).default(0),
+});
+export const observeInputSchema = z.object({
+  kind: z.literal("observe"),
+  nodeId: z.string(),
+  region: z.object({
+    x: number.min(0).max(1),
+    y: number.min(0).max(1),
+    width: number.positive().max(1),
+    height: number.positive().max(1),
+  }),
+  polygon: z
+    .array(z.tuple([number.min(0).max(1), number.min(0).max(1)]))
+    .min(3)
+    .optional(),
+  maskAssetId: z.string().optional(),
+  padding: number.min(0).max(1).default(0.1),
+});
+export const fitInputSchema = z.object({
+  kind: z.literal("fit"),
+  nodeId: z.string(),
+  observationAssetId: z.string(),
+  quaternion: z.tuple([number, number, number, number]).optional(),
+});
+export const modelInputSchema = z.object({
+  kind: z.literal("model"),
+  model: z.string().min(1),
+  input: z.record(z.unknown()),
+});
 export const jobInputSchema = z.discriminatedUnion("kind", [
+  renderInputSchema,
+  observeInputSchema,
+  fitInputSchema,
+  maskInputSchema,
   z.object({
     kind: z.literal("inspect"),
     nodeIds: z.array(z.string()).min(1).optional(),
@@ -380,6 +447,8 @@ export const jobInputSchema = z.discriminatedUnion("kind", [
     kind: z.literal("nano"),
     applyToScene: z.boolean().default(true),
     reconstruct: z.boolean().default(true),
+    targetNodeIds: z.array(z.string()).min(1).optional(),
+    unchangedMaskAssetId: z.string().optional(),
     sourceAssetId: z.string(),
     referenceAssetIds: z.array(z.string()).default([]),
     prompt: z.string().trim().min(1),
@@ -388,6 +457,7 @@ export const jobInputSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("reconstruct"),
+    unchangedMaskAssetId: z.string().optional(),
     assetIds: z.array(z.string()).default([]),
     placement: cameraSchema.optional(),
     parentId: z.string().nullable().optional(),
@@ -401,6 +471,13 @@ export const jobInputSchema = z.discriminatedUnion("kind", [
 ]);
 export type JobInput = z.infer<typeof jobInputSchema>;
 export const jobSchema = z.object({
+  interactive: z.boolean().optional(),
+  snapshotRevision: number.int().optional(),
+  actorId: z.string().optional(),
+  requestId: z.string().optional(),
+  pinnedAssets: z
+    .record(z.object({ path: z.string(), hash: z.string() }))
+    .optional(),
   id: z.string(),
   input: jobInputSchema,
   status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]),
@@ -473,6 +550,9 @@ const editSelectionSchema = z.object({
   selectionAnchor: z.string().nullable(),
 });
 export const editSchema = z.object({
+  id: z.string().optional(),
+  actorId: z.string().optional(),
+  requestId: z.string().optional(),
   selection: z
     .object({ before: editSelectionSchema, after: editSelectionSchema })
     .optional(),
@@ -486,11 +566,27 @@ export const workspaceSchema = z.object({
   selectionAnchor: z.string().nullable().default(null),
   undo: z.array(editSchema).max(100).default([]),
   redo: z.array(editSchema).max(100).default([]),
-  version: z.literal(4),
+  version: z.literal(5),
   revision: number.int().nonnegative(),
   name: z.string().min(1),
   imageDrafts: z.record(imageDraftSchema).default({}),
   imageVersions: z.record(z.string()).default({}),
+  receipts: z
+    .record(
+      z.object({
+        body: z.string(),
+        result: z
+          .object({
+            revision: number,
+            jobId: z.string().optional(),
+            jobIds: z.array(z.string()).optional(),
+            nodeIds: z.array(z.string()).optional(),
+            editId: z.string().optional(),
+          })
+          .nullable(),
+      }),
+    )
+    .default({}),
   resultOwners: z.record(z.string()).default({}),
   assets: z.record(assetSchema),
   nodes: z.record(nodeSchema),
@@ -505,12 +601,13 @@ export function emptyWorkspace(): Workspace {
     selectionAnchor: null,
     undo: [],
     redo: [],
-    version: 4,
+    version: 5,
     revision: 0,
     name: "Untitled workspace",
     imageDrafts: {},
     imageVersions: {},
     resultOwners: {},
+    receipts: {},
     assets: {},
     nodes: {},
     jobs: {},
@@ -550,6 +647,19 @@ export function emptyWorkspace(): Workspace {
   };
 }
 const localEditSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("nodes.patch"),
+    id: z.string(),
+    patch: nodeSchema
+      .omit({ id: true, kind: true, parentId: true, transform: true })
+      .partial()
+      .strict(),
+  }),
+  z.object({
+    type: z.literal("nodes.transform"),
+    ids: z.array(z.string()).min(1),
+    transform: transformSchema.partial().strict(),
+  }),
   z.object({
     type: z.literal("image.activate"),
     assetId: z.string(),
@@ -595,6 +705,11 @@ const localEditSchema = z.discriminatedUnion("type", [
 ]);
 
 export const generationSchema = z.discriminatedUnion("kind", [
+  modelInputSchema,
+  renderInputSchema,
+  observeInputSchema,
+  fitInputSchema,
+  maskInputSchema,
   z.object({
     kind: z.literal("image.create"),
     prompt: z.string().trim().min(1),
@@ -604,6 +719,8 @@ export const generationSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("image.edit"),
+    targetNodeIds: z.array(z.string()).min(1).optional(),
+    unchangedMaskAssetId: z.string().optional(),
     sourceAssetId: z.string().optional(),
     prompt: z.string().optional(),
     referenceAssetIds: z.array(z.string()).optional(),
@@ -746,6 +863,7 @@ export const commandSchema = z.discriminatedUnion("type", [
     type: z.literal("nodes.duplicate"),
     ids: z.array(z.string()).min(1),
   }),
+  z.object({ type: z.literal("history.revert"), editId: z.string() }),
   z.object({ type: z.literal("history.undo"), assetId: z.string().optional() }),
   z.object({ type: z.literal("history.redo"), assetId: z.string().optional() }),
   ...localEditSchema.options,
@@ -765,6 +883,8 @@ export const commandSchema = z.discriminatedUnion("type", [
 export type Command = z.input<typeof commandSchema>;
 export type CommandResult = {
   revision: number;
+  nodeIds?: string[];
+  editId?: string;
   jobId?: string;
   jobIds?: string[];
 };

@@ -1,3 +1,4 @@
+import { ActivityBadge } from "./ActivityFeed";
 import { useWorldbashClient, useWorkspaceData } from "../lib/client";
 import { Button, Checkbox, Flex, Popover, Text } from "@radix-ui/themes";
 import {
@@ -24,6 +25,7 @@ import { Hint } from "./ui";
 const ASSET_KINDS = [
   { kind: "image", label: "Images" },
   { kind: "depth", label: "Depth and confidence" },
+  { kind: "mesh", label: "Meshes" },
   { kind: "splat", label: "Splats" },
   { kind: "video", label: "Videos" },
   { kind: "file", label: "Other files" },
@@ -420,7 +422,10 @@ const AssetRow = memo(function AssetRow({
             }}
           />
         ) : (
-          <span className="asset-name">{asset.name}</span>
+          <span className="asset-name">
+            {asset.name}
+            <ActivityBadge id={asset.id} />
+          </span>
         )}
         <span className="asset-kind">{asset.kind}</span>
       </div>

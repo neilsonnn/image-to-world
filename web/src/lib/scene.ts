@@ -1,3 +1,5 @@
+import { validateGlb } from "../../../core/mesh";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { inspectScene } from "../../../core/inspection";
 import { isVisible } from "../../../core/captures";
 import { nodeImageAsset } from "../../../core/images";
@@ -10,6 +12,8 @@ import {
 } from "@sparkjsdev/spark";
 import {
   Box3,
+  AmbientLight,
+  DirectionalLight,
   BoxGeometry,
   BufferGeometry,
   Color,
@@ -92,6 +96,7 @@ function applyTransform(object: Object3D, node: SceneNode) {
 }
 
 function disposeObject(object: Object3D) {
+  const disposed = new Set<Texture>();
   object.traverse((child) => {
     if (child instanceof SplatMesh) child.dispose();
     const video = child.userData.video as HTMLVideoElement | undefined;
@@ -108,11 +113,12 @@ function disposeObject(object: Object3D) {
         ? [mesh.material]
         : [];
     for (const material of materials) {
-      const texture = (material as MeshBasicMaterial).map;
-      if (texture) {
-        const source = texture.image as { close?: () => void } | undefined;
-        texture.dispose();
-        if (source && typeof source.close === "function") source.close();
+      for (const value of Object.values(material)) {
+        if (!(value instanceof Texture) || disposed.has(value)) continue;
+        disposed.add(value);
+        const source = value.image as { close?: () => void } | undefined;
+        value.dispose();
+        source?.close?.();
       }
       material.dispose();
     }
@@ -167,7 +173,7 @@ function resourceKey(node: SceneNode, workspace: SceneWorkspace) {
       asset?.modifiedAt,
       asset?.missing,
     ]);
-  if (node.kind === "splat" || node.kind === "video")
+  if (node.kind === "splat" || node.kind === "mesh" || node.kind === "video")
     return JSON.stringify([
       node.kind,
       asset?.id,
@@ -329,6 +335,7 @@ function makeClip(entry: Entry, color: string) {
 }
 
 export class SceneGraph {
+  private lights: Object3D[] = [];
   spatialVersion = 0;
   readonly entries = new Map<string, Entry>();
   readonly selectionOutline = new Group();
@@ -346,6 +353,11 @@ export class SceneGraph {
     private readonly activeColor: string,
   ) {
     scene.add(this.selectionOutline);
+    const ambient = new AmbientLight(0xffffff, 2);
+    const sun = new DirectionalLight(0xffffff, 3);
+    sun.position.set(4, 8, 5);
+    scene.add(ambient, sun);
+    this.lights = [ambient, sun];
   }
 
   private track(promise: Promise<void>) {
@@ -480,6 +492,7 @@ export class SceneGraph {
       (entry.node.kind === "image" ||
         entry.node.kind === "points" ||
         entry.node.kind === "splat" ||
+        entry.node.kind === "mesh" ||
         entry.node.kind === "video") &&
       !asset
     ) {
@@ -494,6 +507,23 @@ export class SceneGraph {
       return;
     }
 
+    if (entry.node.kind === "mesh" && asset) {
+      this.track(
+        (async () => {
+          const response = await fetch(assetUrl(asset), { signal });
+          if (!response.ok) throw new Error(`Failed to load ${asset.name}`);
+          const buffer = await response.arrayBuffer();
+          validateGlb(buffer);
+          const gltf = await new GLTFLoader().parseAsync(buffer, "");
+          if (signal.aborted) {
+            disposeObject(gltf.scene);
+            return;
+          }
+          finish(gltf.scene);
+        })().catch(fail),
+      );
+      return;
+    }
     if (entry.node.kind === "splat" && asset) {
       const mesh = new SplatMesh({
         url: assetUrl(asset),
@@ -921,6 +951,9 @@ export class SceneGraph {
       object.visible = false;
     };
     hide(this.selectionOutline);
+    this.scene.children
+      .filter((child) => child.userData.editorOverlay)
+      .forEach(hide);
     for (const entry of this.entries.values()) {
       hide(entry.frustum);
       if (entry.node.kind === "clip" || entry.node.kind === "path")
@@ -943,6 +976,7 @@ export class SceneGraph {
 
   dispose() {
     this.disposed = true;
+    this.lights.forEach((light) => light.removeFromParent());
     for (const entry of [...this.entries.values()]) this.removeEntry(entry);
     this.selectionOutline.removeFromParent();
     disposeObject(this.selectionOutline);

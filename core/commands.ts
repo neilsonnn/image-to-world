@@ -220,6 +220,33 @@ function mutate(workspace: Workspace, input: Command) {
         throw new Error("Selection anchor is unknown");
       break;
     }
+    case "nodes.patch": {
+      const node = workspace.nodes[command.id];
+      if (!node) throw new Error(`Unknown node ${command.id}`);
+      mutate(workspace, {
+        type: "nodes.put",
+        nodes: [{ ...node, ...command.patch }],
+      });
+      break;
+    }
+    case "nodes.transform": {
+      const nodes = command.ids.map((id) => {
+        const node = workspace.nodes[id];
+        if (!node) throw new Error(`Unknown node ${id}`);
+        return {
+          ...node,
+          transform: { ...node.transform, ...command.transform },
+        };
+      });
+      mutate(workspace, { type: "nodes.put", nodes });
+      break;
+    }
+    case "history.revert": {
+      const edit = workspace.undo.find((edit) => edit.id === command.editId);
+      if (!edit) throw new Error("Edit is no longer available to revert");
+      restoreEdit(workspace, { ...edit, selection: undefined }, "undo");
+      break;
+    }
     case "nodes.put": {
       const nodes = { ...workspace.nodes };
       for (const node of command.nodes) {
@@ -348,9 +375,24 @@ function mutate(workspace: Workspace, input: Command) {
   }
 }
 
-export function applyCommand(workspace: Workspace, input: Command) {
+export function applyCommand(
+  workspace: Workspace,
+  input: Command,
+  options: { preserveSelection?: boolean } = {},
+) {
   const next = structuredClone(workspace);
   mutate(next, input);
+  if (
+    options.preserveSelection &&
+    ![
+      "selection.set",
+      "selection.visibility",
+      "nodes.remove",
+      "history.undo",
+      "history.redo",
+    ].includes(input.type)
+  )
+    Object.assign(next, editSelection(workspace));
   next.selection = next.selection.filter(
     (id) => next.nodes[id] || next.assets[id],
   );
@@ -383,7 +425,7 @@ export function applyCommand(workspace: Workspace, input: Command) {
   for (const node of Object.values(next.nodes))
     for (const id of [node.assetId, node.geometryAssetId])
       if (id && !next.assets[id]) throw new Error(`Unknown asset ${id}`);
-  if (!input.type.startsWith("history.")) {
+  if (!input.type.startsWith("history.") || input.type === "history.revert") {
     const changes = editChanges(workspace, next);
     if (changes.length) {
       const scope = input.type === "image.draft" ? input.assetId : undefined;
@@ -392,7 +434,13 @@ export function applyCommand(workspace: Workspace, input: Command) {
         : undefined;
       next.undo = [
         ...next.undo,
-        { label: input.type, scope, changes, selection },
+        {
+          id: crypto.randomUUID(),
+          label: input.type,
+          scope,
+          changes,
+          selection,
+        },
       ].slice(-100);
       next.redo = next.redo.filter((edit) => edit.scope !== scope);
     }

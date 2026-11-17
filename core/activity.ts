@@ -1,6 +1,85 @@
 import type { Command, JobInput } from "./schema";
+import { z } from "zod";
+export const activitySchema = z.object({
+  id: z.string(),
+  sequence: z.number().int(),
+  at: z.number(),
+  actorId: z.string(),
+  requestId: z.string().optional(),
+  jobId: z.string().optional(),
+  operation: z.string(),
+  name: z.string(),
+  phase: z.enum([
+    "started",
+    "queued",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+  ]),
+  severity: z.enum(["info", "warning", "error"]),
+  detail: z.enum(["summary", "actions", "trace"]),
+  nodeIds: z.array(z.string()).default([]),
+  assetIds: z.array(z.string()).default([]),
+  model: z.string().optional(),
+  message: z.string().optional(),
+  camera: z
+    .object({
+      position: z.tuple([z.number(), z.number(), z.number()]),
+      quaternion: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+      fov: z.number().optional(),
+      aspect: z.number().optional(),
+    })
+    .optional(),
+});
+export type Activity = z.infer<typeof activitySchema>;
+export type ActivityInput = Omit<
+  Activity,
+  "id" | "sequence" | "at" | "nodeIds" | "assetIds"
+> &
+  Partial<Pick<Activity, "nodeIds" | "assetIds">>;
+export const activityDetails = {
+  summary: "Summary",
+  actions: "Actions",
+  trace: "Trace",
+} as const;
+export const activitySeverities = {
+  info: "Info",
+  warning: "Warnings",
+  error: "Errors",
+} as const;
+
+export function actorColor(actor: string) {
+  let hash = 0;
+  for (const c of actor) hash = (hash * 31 + c.charCodeAt(0)) | 0;
+  return `hsl(${Math.abs(hash) % 360} 65% 65%)`;
+}
+
+export function activityTargets(command: Command) {
+  const nodeIds = new Set<string>(),
+    assetIds = new Set<string>();
+  const walk = (value: unknown, key = "") => {
+    if (typeof value === "string") {
+      if (/asset/i.test(key) || value.startsWith("asset_")) assetIds.add(value);
+      else if (/node/i.test(key) || value.startsWith("node_"))
+        nodeIds.add(value);
+    } else if (Array.isArray(value)) value.forEach((v) => walk(v, key));
+    else if (value && typeof value === "object")
+      for (const [k, v] of Object.entries(value)) {
+        if (["prompt", "input", "values", "draft", "settings"].includes(k))
+          continue;
+        walk(v, k);
+      }
+  };
+  walk(command);
+  return { nodeIds: [...nodeIds], assetIds: [...assetIds] };
+}
 export type Operation = { name: string; at: number };
 export const jobNames: Record<JobInput["kind"], string> = {
+  render: "Render scene",
+  mask: "Compose masks",
+  observe: "Observe image region",
+  fit: "Fit object to observation",
   image: "Create image",
   nano: "Edit image",
   pose: "Pose images",
@@ -8,13 +87,16 @@ export const jobNames: Record<JobInput["kind"], string> = {
   atlas: "Render view",
   video: "Render video",
   splats: "Reconstruct splats",
-  fal: "Run image model",
+  fal: "Run model",
   capture: "Capture viewport",
   inspect: "Inspect scene",
   contactSheet: "Create contact sheet",
 };
 const commandNames: Partial<Record<Command["type"], string>> = {
   "nodes.put": "Edit scene objects",
+  "nodes.patch": "Edit object properties",
+  "nodes.transform": "Transform scene objects",
+  "history.revert": "Revert edit",
   "nodes.remove": "Delete scene objects",
   "nodes.move": "Move scene objects",
   "nodes.reparent": "Reparent scene objects",
@@ -51,6 +133,7 @@ export function operationName(command: Command): string {
       "image.create": jobNames.image,
       "image.edit": jobNames.nano,
       view: jobNames.atlas,
+      model: jobNames.fal,
     }[command.request.kind];
   if (command.type === "edit.batch")
     return [...new Set(command.commands.map(operationName))].join(" · ");
@@ -61,4 +144,35 @@ export function operationName(command: Command): string {
     return "Update workspace settings";
   }
   return commandNames[command.type] ?? command.type;
+}
+
+/** Collapse lifecycle events before applying expiry, so old running stages cannot reappear. */
+export function latestActivities(events: Activity[]) {
+  const requests = new Map<string, string>();
+  for (const event of events)
+    if (event.requestId && event.jobId && !requests.has(event.requestId))
+      requests.set(event.requestId, event.jobId);
+  const latest = new Map<string, Activity>();
+  for (const event of events)
+    latest.set(
+      event.jobId ??
+        (event.requestId &&
+        ["generation.submit", "jobs.submit"].includes(event.operation)
+          ? requests.get(event.requestId)
+          : undefined) ??
+        event.requestId ??
+        event.id,
+      event,
+    );
+  return [...latest.values()].sort((a, b) => a.sequence - b.sequence);
+}
+export function recentActivities(
+  events: Activity[],
+  now = Date.now(),
+  age = 60000,
+) {
+  return latestActivities(events).filter(
+    (event) =>
+      now - event.at < age || ["queued", "running"].includes(event.phase),
+  );
 }

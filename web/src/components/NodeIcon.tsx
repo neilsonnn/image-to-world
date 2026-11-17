@@ -22,6 +22,7 @@ export const nodePresentation = {
   points: { label: "Points", icon: DotsNine },
   clip: { label: "Clip", icon: BoundingBox },
   image: { label: "Image", icon: ImageSquare },
+  mesh: { label: "Mesh", icon: Cube },
   splat: { label: "Splat", icon: Cube },
   path: { label: "Path", icon: Path },
   video: { label: "Video", icon: VideoCamera },

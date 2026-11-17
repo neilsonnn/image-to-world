@@ -62,3 +62,19 @@ export const imageEditRatios = [
   "2:3",
   "9:16",
 ] as const;
+
+/** Suggestions, not an endpoint allowlist. General calls preserve arbitrary model JSON. */
+export const modelSuggestions = [
+  ...Object.entries(imageModels).map(([id, value]) => ({
+    id,
+    label: value.label,
+    operation: value.operation,
+    defaults: value.defaults,
+  })),
+  {
+    id: "fal-ai/hunyuan3d-v3/image-to-3d",
+    label: "Hunyuan 3D v3",
+    operation: "mesh",
+    defaults: { generate_type: "Normal", face_count: 40000, enable_pbr: true },
+  },
+];

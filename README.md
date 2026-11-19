@@ -15,9 +15,11 @@ posing and Atlas require a Developer API key with access to those tasks; Nano
 Banana uses a FAL key. Importing, arranging, annotating, and capturing scenes work
 without either key.
 
-1. Install the locked dependencies:
+1. Clone the repository and install the locked dependencies:
 
    ```sh
+   git clone https://github.com/neilsonnn/image-to-world.git
+   cd image-to-world
    bun install --frozen-lockfile
    ```
 

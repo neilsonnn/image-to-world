@@ -3,8 +3,8 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [tanstackStart(), react()],
-  optimizeDeps: { exclude: ["@napi-rs/canvas"] },
-  ssr: { external: ["@napi-rs/canvas"] },
+  optimizeDeps: { exclude: ["@napi-rs/canvas", "playwright-core"] },
+  ssr: { external: ["@napi-rs/canvas", "playwright-core"] },
   resolve: {
     dedupe: ["react", "react-dom", "three"],
   },

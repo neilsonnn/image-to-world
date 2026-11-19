@@ -72,6 +72,18 @@ export const modelSuggestions = [
     defaults: value.defaults,
   })),
   {
+    id: "speridlabs/idol/max",
+    label: "Idol Max",
+    operation: "mesh",
+    defaults: { enable_pbr: true, rig: false },
+  },
+  {
+    id: "speridlabs/idol/max/turbo",
+    label: "Idol Max Turbo",
+    operation: "mesh",
+    defaults: { enable_pbr: true, rig: false },
+  },
+  {
     id: "fal-ai/hunyuan3d-v3/image-to-3d",
     label: "Hunyuan 3D v3",
     operation: "mesh",

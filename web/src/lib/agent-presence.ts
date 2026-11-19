@@ -1,146 +1,129 @@
 import {
-  Color,
-  Group,
-  Mesh,
-  OctahedronGeometry,
-  MeshBasicMaterial,
-  CameraHelper,
+  Box3,
   PerspectiveCamera,
-  Sprite,
-  SpriteMaterial,
-  CanvasTexture,
-  type Scene,
+  Sphere,
+  Vector3,
+  WebGPUCoordinateSystem,
 } from "three";
-import {
-  recentActivities,
-  actorColor,
-  type Activity,
-} from "../../../core/activity";
+import type { Activity } from "../../../core/activity";
 import type { SceneGraph } from "./scene";
 
-/** Ephemeral editor projection of ordinary activity; never persisted or exported. */
+type Change = NonNullable<Activity["sceneChange"]>;
+
+export function changeBounds(graph: SceneGraph, change: Change) {
+  const bounds = graph.bounds(change.nodeIds);
+  return (
+    bounds ??
+    new Box3().setFromCenterAndSize(
+      new Vector3(...change.position),
+      new Vector3(0.25, 0.25, 0.25),
+    )
+  );
+}
+
+export function followCamera(camera: PerspectiveCamera, bounds: Box3) {
+  const { center, radius } = bounds.getBoundingSphere(new Sphere());
+  const direction = camera.position.clone().sub(center);
+  if (direction.lengthSq() < 0.0001)
+    camera.getWorldDirection(direction).negate();
+  const projection = camera.projectionMatrix.elements;
+  const halfAngle = Math.atan(1 / Math.max(projection[0], projection[5]));
+  const distance = Math.max(1.5, (radius * 1.4) / Math.sin(halfAngle));
+  const target = camera.clone();
+  target.position.copy(center).addScaledVector(direction.normalize(), distance);
+  target.lookAt(center);
+  return target;
+}
+
+// React owns the accessible markers. Only their projection changes at render rate.
 export class AgentPresence {
-  private root = new Group();
-  private actors = new Map<
-    string,
+  private points = new WeakMap<
+    HTMLElement,
     {
-      group: Group;
-      marker: Mesh;
-      camera: PerspectiveCamera;
-      helper: CameraHelper;
-      label: Sprite;
       event: string;
+      version: number;
+      nodes: object;
+      current: Vector3;
+      target: Vector3;
     }
   >();
-  private last = 0;
-  constructor(private scene: Scene) {
-    this.root.userData.editorOverlay = true;
-    scene.add(this.root);
-  }
-  update(events: Activity[], graph: SceneGraph, enabled: boolean) {
-    const now = Date.now();
-    this.root.visible = enabled;
-    if (!enabled || now - this.last < 200) return;
-    this.last = now;
-    const latest = new Map<string, Activity>();
-    for (const event of recentActivities(events, now))
+  private screen = new Vector3();
+
+  update(
+    layer: HTMLElement,
+    graph: SceneGraph,
+    camera: PerspectiveCamera,
+    anchors: Map<string, Activity>,
+    nodes: object,
+    seconds: number,
+    reducedMotion: boolean,
+  ) {
+    const placed: { x: number; y: number; width: number; height: number }[] =
+      [];
+    for (const child of layer.children) {
+      const marker = child as HTMLElement;
+      const anchor = anchors.get(marker.dataset.actor!);
+      if (!anchor?.sceneChange) {
+        marker.hidden = true;
+        continue;
+      }
+      let point = this.points.get(marker);
       if (
-        !["You", "System"].includes(event.actorId) &&
-        (event.camera || event.nodeIds.length)
-      )
-        latest.set(event.actorId, event);
-    for (const [actor, entry] of this.actors)
-      if (!latest.has(actor)) {
-        this.release(entry);
-        this.actors.delete(actor);
-      }
-    for (const [actor, event] of latest) {
-      let entry = this.actors.get(actor);
-      if (!entry) {
-        const color = actorColor(actor),
-          group = new Group();
-        const marker = new Mesh(
-          new OctahedronGeometry(0.08),
-          new MeshBasicMaterial({ color, transparent: true, depthTest: false }),
+        !point ||
+        point.event !== anchor.id ||
+        point.version !== graph.spatialVersion ||
+        point.nodes !== nodes
+      ) {
+        const target = changeBounds(graph, anchor.sceneChange).getCenter(
+          new Vector3(),
         );
-        group.add(marker);
-        const camera = new PerspectiveCamera(50, 16 / 9, 0.03, 0.4);
-        group.add(camera);
-        const helper = new CameraHelper(camera);
-        helper.setColors(
-          new Color(color),
-          new Color(color),
-          new Color(color),
-          new Color(color),
-          new Color(color),
-        );
-        helper.raycast = () => {};
-        helper.renderOrder = 1000;
-        this.root.add(helper);
-        const canvas = document.createElement("canvas");
-        canvas.width = 384;
-        canvas.height = 48;
-        const ctx = canvas.getContext("2d")!;
-        ctx.font = "24px sans-serif";
-        ctx.fillStyle = color;
-        ctx.fillText(actor.slice(0, 28), 6, 32);
-        const texture = new CanvasTexture(canvas),
-          label = new Sprite(
-            new SpriteMaterial({
-              map: texture,
-              transparent: true,
-              depthTest: false,
-            }),
-          );
-        label.scale.set(0.9, 0.1125, 1);
-        label.position.set(0.35, 0.16, 0);
-        group.add(label);
-        group.traverse((o) => {
-          o.raycast = () => {};
-          o.renderOrder = 1000;
-        });
-        this.root.add(group);
-        entry = { group, marker, camera, helper, label, event: "" };
-        this.actors.set(actor, entry);
+        point = {
+          event: anchor.id,
+          version: graph.spatialVersion,
+          nodes,
+          current: point?.current ?? target.clone(),
+          target,
+        };
+        this.points.set(marker, point);
       }
-      const opacity = ["queued", "running"].includes(event.phase)
-        ? 1
-        : Math.min(1, (60000 - (now - event.at)) / 15000);
-      (entry.marker.material as MeshBasicMaterial).opacity = opacity;
-      entry.label.material.opacity = opacity;
-      if (entry.event === event.id) continue;
-      entry.event = event.id;
-      if (event.camera) {
-        entry.group.position.fromArray(event.camera.position);
-        entry.group.quaternion.fromArray(event.camera.quaternion);
-        entry.helper.visible = true;
-      } else {
-        const center = event.nodeIds
-          .map((id) => graph.center(id))
-          .find(Boolean);
-        entry.group.visible = !!center;
-        if (center) entry.group.position.copy(center);
-        entry.group.quaternion.identity();
-        entry.helper.visible = false;
-      }
+      point.current.lerp(
+        point.target,
+        reducedMotion ? 1 : 1 - Math.exp(-9 * seconds),
+      );
+      const p = this.screen.copy(point.current).project(camera);
+      marker.hidden =
+        p.z < (camera.coordinateSystem === WebGPUCoordinateSystem ? 0 : -1) ||
+        p.z > 1 ||
+        Math.abs(p.x) > 1 ||
+        Math.abs(p.y) > 1;
+      if (marker.hidden) continue;
+      const width = marker.offsetWidth,
+        height = marker.offsetHeight;
+      const x = Math.min(
+        layer.clientWidth - width,
+        ((p.x + 1) * layer.clientWidth) / 2,
+      );
+      const top = Math.min(
+        layer.clientHeight - height,
+        ((1 - p.y) * layer.clientHeight) / 2,
+      );
+      const overlaps = placed.filter(
+        (r) => x + width > r.x && x < r.x + r.width,
+      );
+      const y =
+        [
+          top,
+          ...overlaps.flatMap((r) => [r.y + r.height + 2, r.y - height - 2]),
+        ]
+          .sort((a, b) => Math.abs(a - top) - Math.abs(b - top))
+          .find(
+            (y) =>
+              y >= 0 &&
+              y + height <= layer.clientHeight &&
+              overlaps.every((r) => y >= r.y + r.height || y + height <= r.y),
+          ) ?? top;
+      placed.push({ x, y, width, height });
+      marker.style.transform = `translate3d(${x}px,${y}px,0)`;
     }
-  }
-  private release(entry: {
-    group: Group;
-    marker: Mesh;
-    helper: CameraHelper;
-    label: Sprite;
-  }) {
-    this.root.remove(entry.group, entry.helper);
-    entry.marker.geometry.dispose();
-    (entry.marker.material as MeshBasicMaterial).dispose();
-    entry.helper.dispose();
-    entry.label.material.map?.dispose();
-    entry.label.material.dispose();
-  }
-  dispose() {
-    for (const entry of this.actors.values()) this.release(entry);
-    this.actors.clear();
-    this.scene.remove(this.root);
   }
 }

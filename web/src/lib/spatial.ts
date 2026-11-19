@@ -17,11 +17,17 @@ export function geometrySpatial(object: Object3D): NodeSpatial {
           (() => Box3) | undefined;
         if (localBounds)
           bounds.union(localBounds().clone().applyMatrix4(matrix));
-        const geometry = (child as Mesh).geometry;
-        if (geometry) {
-          if (!geometry.boundingBox) geometry.computeBoundingBox();
-          if (geometry.boundingBox)
-            bounds.union(geometry.boundingBox.clone().applyMatrix4(matrix));
+        // Instancing, batching and skinning can give an Object3D its own bounds
+        // beyond the prototype geometry. Follow Three's object-first contract.
+        const mesh = child as Mesh & {
+          boundingBox?: Box3 | null;
+          computeBoundingBox?: () => void;
+        };
+        const extent = mesh.boundingBox !== undefined ? mesh : mesh.geometry;
+        if (extent) {
+          if (!extent.boundingBox) extent.computeBoundingBox?.();
+          if (extent.boundingBox)
+            bounds.union(extent.boundingBox.clone().applyMatrix4(matrix));
         }
         for (const nested of child.children) {
           if (nested.matrixAutoUpdate) nested.updateMatrix();

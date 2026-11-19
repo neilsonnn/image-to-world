@@ -1,3 +1,4 @@
+import { playerResponse } from "./player-export";
 import { modelSuggestions } from "../../../core/models";
 import { rendererExecutable } from "./render-worker";
 import { inspectScene, inspectionSchema } from "../../../core/inspection";
@@ -46,6 +47,14 @@ export async function createService(root: string) {
         );
       try {
         const route = url.pathname.replace(/^\/api\/?/, "");
+        const playerAsset =
+          /^player\/assets\/([A-Za-z0-9_-]+)\/[A-Za-z0-9_.-]+$/.exec(route);
+        if (
+          request.method === "GET" &&
+          route.startsWith("player/") &&
+          !playerAsset
+        )
+          return await playerResponse(route, store);
         if (request.method === "GET" && route === "models") {
           const query = url.searchParams.get("q"),
             endpoint = url.searchParams.get("endpoint");
@@ -153,8 +162,13 @@ export async function createService(root: string) {
             await commands.execute(await request.json(), context),
           );
         }
-        if (request.method === "GET" && route.startsWith("assets/")) {
-          const id = decodeURIComponent(route.slice(7));
+        if (
+          request.method === "GET" &&
+          (route.startsWith("assets/") || playerAsset)
+        ) {
+          const id = playerAsset
+            ? Buffer.from(playerAsset[1], "base64url").toString("utf8")
+            : decodeURIComponent(route.slice(7));
           const { asset, file } = await store.assetFile(id, {
             includeTrashed: true,
           });

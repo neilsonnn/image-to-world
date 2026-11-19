@@ -1,3 +1,5 @@
+import { NewImagePrompt } from "./NewImagePrompt";
+import { liveViewportCamera } from "../lib/viewport-camera";
 import { modelSuggestions } from "../../../core/models";
 import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
 import { Button } from "@radix-ui/themes";
@@ -16,7 +18,12 @@ export function GeneratePanel({
     ffmpegAvailable: boolean;
   } | null;
 }) {
-  const { command, safeCommand, setError: onError } = useImageToWorldClient();
+  const {
+    command,
+    safeCommand,
+    getWorkspace,
+    setError: onError,
+  } = useImageToWorldClient();
   const workspace = useWorkspaceData(
     ["assets", "selection"],
     ["falModel", "falInput"],
@@ -62,6 +69,11 @@ export function GeneratePanel({
   };
   return (
     <div className="panel-body generate-panel">
+      <NewImagePrompt
+        camera={() =>
+          liveViewportCamera() ?? getWorkspace().settings.viewportCamera
+        }
+      />
       <section className="recipe-card">
         <div className="recipe-title">
           <ImageIcon />

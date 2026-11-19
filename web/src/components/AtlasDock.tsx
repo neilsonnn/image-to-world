@@ -1,3 +1,5 @@
+import { FrameState } from "./FrameLabels";
+import { frameSlugs, frameTasks } from "../../../core/frame-work";
 import { SplatPanel } from "./SplatPanel";
 import {
   Aperture,
@@ -28,6 +30,7 @@ import {
   atlasContextNodes,
   captureFrameStatus,
   captureOrigin,
+  frameGuideDisplay,
   isVisible,
   spatialContextFrames,
   selectedPath,
@@ -71,6 +74,7 @@ function useDockWorkspace() {
     [
       "atlas",
       "atlasPanel",
+      "display",
       "prompt",
       "seed",
       "seedMode",
@@ -116,7 +120,7 @@ function SpatialContext({
 }: {
   workspace: DockWorkspace;
   requestPlacement: RequestPlacement;
-  /** Generation controls pinned below the vertical context list. */
+  /** Generation controls pinned beside the horizontal context strip. */
   children: ReactNode;
 }) {
   const { safeCommand, upload, setError } = useImageToWorldClient();
@@ -124,12 +128,16 @@ function SpatialContext({
   const strip = useRef<HTMLDivElement>(null);
   const path = selectedPath(workspace);
   const captures = spatialContextFrames(workspace);
+  const slugs = frameSlugs(workspace.nodes);
   const captureIds = captures.map(({ id }) => id);
   const context = atlasContextNodes(workspace, undefined, path?.id);
   const generating = Object.values(workspace.jobs)
     .filter((job) => job.input.kind === "atlas" && isActive(job))
     .sort((a, b) => a.createdAt - b.createdAt);
   const inputCount = context.length;
+  const guidesVisible =
+    workspace.settings.display.showFrameGuides &&
+    workspace.settings.display.showPoints;
   const full = inputCount >= MAX_CONTEXT_FRAMES;
 
   const collection = useCollection({
@@ -164,7 +172,7 @@ function SpatialContext({
     const before = seen.current;
     seen.current = new Set(itemKey.split(","));
     if ([...seen.current].some((id) => id && !before.has(id)))
-      strip.current?.scrollTo({ top: strip.current.scrollHeight });
+      strip.current?.scrollTo({ left: strip.current.scrollWidth });
   }, [itemKey]);
 
   const importFiles = (files: File[]) =>
@@ -201,6 +209,25 @@ function SpatialContext({
           </span>
         }
       >
+        <Tooltip
+          delayDuration={0}
+          content="Show depth guides for arranging and outpainting Frames"
+        >
+          <Button
+            size="1"
+            variant={guidesVisible ? "soft" : "surface"}
+            color="gray"
+            aria-pressed={guidesVisible}
+            onClick={() =>
+              void safeCommand({
+                type: "workspace.update",
+                settings: { display: frameGuideDisplay(!guidesVisible) },
+              })
+            }
+          >
+            Frame guides
+          </Button>
+        </Tooltip>
         <Hint
           label={
             full
@@ -236,12 +263,14 @@ function SpatialContext({
           className="spatial-context-strip"
           role="listbox"
           aria-label="Spatial context captures"
+          aria-orientation="horizontal"
           aria-multiselectable="true"
         >
           {captures.map((node) => (
             <CaptureTile
               key={node.id}
               id={node.id}
+              slug={slugs.get(node.id)!}
               workspace={workspace}
               inContext={context.some((item) => item.id === node.id)}
               itemProps={collection.getItemProps(node.id)}
@@ -267,6 +296,7 @@ function SpatialContext({
 }
 
 function CaptureTile({
+  slug,
   id,
   workspace,
   inContext,
@@ -274,6 +304,7 @@ function CaptureTile({
   onSelect,
 }: {
   id: string;
+  slug: string;
   workspace: DockWorkspace;
   inContext: boolean;
   itemProps: ReturnType<ReturnType<typeof useCollection>["getItemProps"]>;
@@ -307,8 +338,9 @@ function CaptureTile({
     const current = getWorkspace().nodes[id];
     if (current)
       void safeCommand({
-        type: "nodes.put",
-        nodes: [{ ...current, contextFrozen: !current.contextFrozen }],
+        type: "nodes.patch",
+        id,
+        patch: { contextFrozen: !current.contextFrozen },
       });
   };
   return (
@@ -335,18 +367,17 @@ function CaptureTile({
               ) : (
                 <ImageSquare size={18} />
               )}
-              {pending && (
-                <span className="context-tile-status">
-                  <SpinnerGap className="spin" />
-                </span>
-              )}
+              <span className="context-tile-status">
+                <FrameState tasks={frameTasks(node, workspace.jobs)} />
+                <span className="context-frame-slug">{slug}</span>
+              </span>
             </div>
           </Tooltip>
           {generated && (
             <Hint
               label={
                 node.contextFrozen
-                  ? "Frozen: grouped with imports; editing stays enabled"
+                  ? "Frozen · grouped with imports at full guide opacity"
                   : "Generated view"
               }
             >

@@ -1,3 +1,4 @@
+import { availableSlug, frameSlugs } from "./frame-work";
 import { frameAt } from "./frames";
 import { activateImage } from "./images";
 import { currentCamera } from "./generation";
@@ -11,6 +12,7 @@ import { sceneCamera, pathFromCameras, cameraNode } from "./captures";
 import { moveNodes, orderedChildren, selectedRoots } from "./scene";
 import { editChanges, editSelection, restoreEdit } from "./undo";
 import { transformCapabilities } from "./node-capabilities";
+import { supportsNodePhysics } from "./physics";
 import {
   commandSchema,
   type Command,
@@ -19,7 +21,15 @@ import {
 } from "./schema";
 
 export function validateScene(nodes: Record<string, SceneNode>) {
+  const slugs = new Set<string>();
   for (const [id, node] of Object.entries(nodes)) {
+    if (node.frameSlug || node.frameWorkers) {
+      if (node.kind !== "capture")
+        throw new Error("Frame metadata requires an image Frame");
+      if (node.frameSlug && slugs.has(node.frameSlug))
+        throw new Error("Frame slug is already in use");
+      if (node.frameSlug) slugs.add(node.frameSlug);
+    }
     if (id !== node.id) throw new Error("Scene node key must match its ID");
     const ancestors = new Set([node.id]);
     let parentId = node.parentId;
@@ -31,6 +41,10 @@ export function validateScene(nodes: Record<string, SceneNode>) {
       ancestors.add(parentId);
       parentId = parent.parentId;
     }
+    if (node.lighting && node.kind !== "capture")
+      throw new Error("Reference lighting belongs to a Frame");
+    if (node.physics && !supportsNodePhysics(node.kind))
+      throw new Error("Physics needs mesh or procedural geometry");
     if (node.kind === "camera" && !node.projection)
       throw new Error("Camera nodes need projection intrinsics");
     if (node.kind === "clip" && !node.clip)
@@ -45,6 +59,19 @@ export function validateScene(nodes: Record<string, SceneNode>) {
 function mutate(workspace: Workspace, input: Command) {
   const command = commandSchema.parse(input);
   switch (command.type) {
+    case "frame.work": {
+      const frame = workspace.nodes[command.id];
+      if (frame?.kind !== "capture") throw new Error("Choose an image Frame");
+      frame.frameWorkers = (frame.frameWorkers ?? []).filter(
+        (worker) => worker.actor !== command.actor,
+      );
+      if (command.description)
+        frame.frameWorkers.push({
+          actor: command.actor,
+          description: command.description,
+        });
+      break;
+    }
     case "selection.visibility": {
       const nodes = workspace.selection.flatMap(
         (id) => workspace.nodes[id] ?? [],
@@ -185,7 +212,7 @@ function mutate(workspace: Workspace, input: Command) {
     case "workspace.update":
       if (command.name !== undefined) workspace.name = command.name;
       if (command.settings) {
-        const { collections, ...settings } = command.settings;
+        const { collections, display, ...settings } = command.settings;
         if (
           settings.prompt !== undefined &&
           settings.prompt !== workspace.settings.prompt
@@ -195,6 +222,7 @@ function mutate(workspace: Workspace, input: Command) {
             (workspace.settings.captionEpoch ?? 0) + 1;
         }
         Object.assign(workspace.settings, settings);
+        if (display) Object.assign(workspace.settings.display, display);
         if (collections)
           Object.assign(workspace.settings.collections, collections);
       }
@@ -270,6 +298,16 @@ function mutate(workspace: Workspace, input: Command) {
           )
             throw new Error(`${node.name} does not support ${label}`);
         }
+        for (const id of node.observationAssetIds ?? []) {
+          if (previous?.observationAssetIds?.includes(id)) continue;
+          const asset = workspace.assets[id];
+          if (
+            asset?.role !== "observation" ||
+            asset.trashedAt !== undefined ||
+            asset.missing
+          )
+            throw new Error(`Choose an available observation: ${id}`);
+        }
         if (workspace.assets[node.id])
           throw new Error("Node IDs cannot collide with asset IDs");
         if (node.assetId && !workspace.assets[node.assetId])
@@ -277,6 +315,12 @@ function mutate(workspace: Workspace, input: Command) {
         const siblings = orderedChildren(nodes, node.parentId);
         nodes[node.id] = {
           ...node,
+          ...(node.kind === "capture" &&
+            !node.frameSlug && {
+              frameSlug:
+                frameSlugs(nodes).get(node.id) ??
+                availableSlug(node.name, new Set(frameSlugs(nodes).values())),
+            }),
           order:
             node.order ??
             nodes[node.id]?.order ??
@@ -312,6 +356,13 @@ function mutate(workspace: Workspace, input: Command) {
         const original = workspace.nodes[id];
         workspace.nodes[newId] = {
           ...structuredClone(original),
+          ...(original.kind === "capture" && {
+            frameWorkers: [],
+            frameSlug: availableSlug(
+              original.frameSlug ?? original.name,
+              new Set(frameSlugs(workspace.nodes).values()),
+            ),
+          }),
           id: newId,
           name: roots.includes(id) ? `${original.name} copy` : original.name,
           parentId: original.parentId
@@ -423,6 +474,9 @@ export function applyCommand(
       for (const key of ["order", "excludedIds", "soloIds"] as const)
         node.context[key] = node.context[key].filter((id) => next.nodes[id]);
   validateScene(next.nodes);
+  const panorama = next.settings.lighting?.environmentAssetId;
+  if (panorama && next.assets[panorama]?.kind !== "image")
+    throw new Error("Choose an image asset for the scene environment");
   for (const node of Object.values(next.nodes))
     for (const id of [
       node.assetId,

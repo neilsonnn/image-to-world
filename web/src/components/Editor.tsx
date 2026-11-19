@@ -1,3 +1,4 @@
+import { SceneActions } from "./SceneActions";
 import { AgentGuide } from "./AgentGuide";
 import "../agent-guide.css";
 import { EditorFooter } from "./EditorFooter";
@@ -5,11 +6,7 @@ import {
   GlobeHemisphereWest,
   PlugsConnected,
   Plugs,
-  Camera,
-  FilmStrip,
   Gear,
-  SpinnerGap,
-  ChatCircleText,
   Wrench,
   X,
 } from "@phosphor-icons/react";
@@ -20,24 +17,16 @@ import {
   ImageToWorldProvider,
   useImageToWorldClient,
   useClientState,
-  useWorkspace,
   useWorkspaceData,
 } from "../lib/client";
 import { AtlasDock as AtlasDockView } from "./AtlasDock";
-import { AtlasHistory } from "./AtlasHistory";
 import { ImageEditor as ImageEditorView } from "./ImageEditor";
 import {
   ASSET_CLIPBOARD_TYPE,
   clipboardAssetIds,
   useImageImport,
 } from "./ImageImport";
-import {
-  AssetsPanel,
-  GeneratePanel,
-  InspectorPanel,
-  JobsPanel,
-  ScenePanel,
-} from "./Panels";
+import { AssetsPanel, InspectorPanel, ScenePanel } from "./Panels";
 import { ResizableDivider } from "./ResizableDivider";
 import { Hint, PanelHeader, ToolbarIconButton, ToolbarPopover } from "./ui";
 import { Viewport as ViewportView } from "./Viewport";
@@ -52,6 +41,7 @@ const Viewport = memo(ViewportView);
 
 const DEFAULT_LAYOUT = {
   sidebarWidth: 240,
+  contextHeight: 144,
   rightWidth: 280,
   leftSplit: 0.6,
   historyWidth: 160,
@@ -80,24 +70,16 @@ function EditorLoading() {
   );
 }
 
-function WorkspaceTitle() {
-  const name = useWorkspace((state) => state.name);
-  const revision = useWorkspace((state) => state.revision);
-  return (
-    <div className="project-title">
-      <span title={name}>{name}</span>
-      <small>rev {revision}</small>
-    </div>
-  );
-}
-
 function EditorWorkspace() {
   const connected = useClientState((state) => state.connected);
   const client = useImageToWorldClient();
   const [connectionsOpen, setConnectionsOpen] = useState(false);
-  const [agentGuideOpen, setAgentGuideOpen] = useState(true);
+  const [agentGuideOpen, setAgentGuideOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(true);
+  const [imageOpen, setImageOpen] = useState(false);
+  const [playing, setPlaying] = useState(false);
   const { requestPlacement, dialog: imageImportDialog } = useImageImport();
   const [previewNodes, setPreviewNodes] = useState<SceneNode[] | null>(null);
   const [gizmoNodes, setGizmoNodes] = useState<SceneNode[] | null>(null);
@@ -108,11 +90,19 @@ function EditorWorkspace() {
     ["name"],
     ["sidebarWidth", "layout", "editor2d"],
   );
-  const status = useClientState((state) => state.status);
+  const { contextHeight = DEFAULT_LAYOUT.contextHeight } =
+    workspace.settings.layout;
   const error = useClientState((state) => state.error);
   const safeCommand = client.safeCommand;
   useGlobalShortcuts((event) => {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (playing) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setPlaying(false);
+      }
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       void (async () => {
@@ -132,17 +122,11 @@ function EditorWorkspace() {
       type: "workspace.update",
       settings: { layout: { ...workspace.settings.layout, ...patch } },
     });
-  const activeJobs = useWorkspace(
-    (state) =>
-      Object.values(state.jobs).filter(
-        (job) => job.status === "running" || job.status === "queued",
-      ).length,
-  );
 
   return (
     <main
       ref={editorRef}
-      className={`editor${agentGuideOpen ? " agent-guide-open" : ""}`}
+      className={`editor${contextOpen ? "" : " context-closed"}${agentGuideOpen ? " agent-guide-open" : ""}`}
       onCopy={(event) => {
         const workspace = client.getWorkspace();
         if (event.defaultPrevented || window.getSelection()?.toString()) return;
@@ -217,7 +201,7 @@ function EditorWorkspace() {
       style={
         {
           "--agent-guide-width": `${workspace.settings.layout.agentGuideWidth}px`,
-          "--context-column-width": `${workspace.settings.layout.contextWidth}px`,
+          "--context-height": `${contextHeight}px`,
           "--left-width": `${workspace.settings.sidebarWidth}px`,
           "--right-width": `${workspace.settings.layout.rightWidth}px`,
           "--left-split": workspace.settings.layout.leftSplit,
@@ -253,17 +237,12 @@ function EditorWorkspace() {
           <Wrench />
           <strong>IMAGE-TO-WORLD</strong>
         </div>
-        <WorkspaceTitle />
+        <SceneActions
+          playing={playing}
+          onPlay={() => setPlaying(!playing)}
+          requestPlacement={requestPlacement}
+        />
         <div className="topbar-actions">
-          <span className="agent-guide-toggle">
-            <ToolbarIconButton
-              label={agentGuideOpen ? "Hide agent guide" : "Show agent guide"}
-              aria-pressed={agentGuideOpen}
-              onClick={() => setAgentGuideOpen((open) => !open)}
-            >
-              <ChatCircleText />
-            </ToolbarIconButton>
-          </span>
           <Hint
             label={
               connected
@@ -281,51 +260,6 @@ function EditorWorkspace() {
               {connected ? <PlugsConnected /> : <Plugs />}
             </span>
           </Hint>
-          <ToolbarPopover
-            label="Generation tools"
-            icon={<Wrench />}
-            width={330}
-          >
-            <PanelHeader title="Generate" />
-            <GeneratePanel status={status} />
-          </ToolbarPopover>
-          <ToolbarPopover
-            label="Generation history"
-            icon={<FilmStrip />}
-            width={420}
-          >
-            <PanelHeader title="Generations" />
-            <div className="history-popover">
-              <AtlasHistory />
-            </div>
-          </ToolbarPopover>
-          <ToolbarPopover
-            label={activeJobs ? `Jobs, ${activeJobs} active` : "Jobs"}
-            icon={
-              <span className="jobs-trigger">
-                <SpinnerGap className={activeJobs ? "spin" : undefined} />
-                {activeJobs > 0 && <i>{activeJobs}</i>}
-              </span>
-            }
-            width={320}
-          >
-            <PanelHeader title="Jobs" />
-            <JobsPanel />
-          </ToolbarPopover>
-          <ToolbarIconButton
-            label="Capture viewport"
-            onClick={() =>
-              void safeCommand({
-                type: "jobs.submit",
-                input: {
-                  kind: "capture",
-                  camera: client.getWorkspace().settings.viewportCamera,
-                },
-              })
-            }
-          >
-            <Camera />
-          </ToolbarIconButton>
           <ToolbarPopover
             label="Workspace settings"
             icon={<Gear />}
@@ -385,6 +319,7 @@ function EditorWorkspace() {
                         sidebarWidth: DEFAULT_LAYOUT.sidebarWidth,
                         layout: {
                           rightWidth: DEFAULT_LAYOUT.rightWidth,
+                          contextHeight: DEFAULT_LAYOUT.contextHeight,
                           leftSplit: DEFAULT_LAYOUT.leftSplit,
                           historyWidth: DEFAULT_LAYOUT.historyWidth,
                         },
@@ -469,6 +404,8 @@ function EditorWorkspace() {
         <section className="workspace-center">
           <section className="viewport-shell">
             <Viewport
+              playing={playing}
+              setPlaying={setPlaying}
               requestPlacement={requestPlacement}
               previewNodes={previewNodes}
               onPreviewNodes={setGizmoNodes}
@@ -476,32 +413,41 @@ function EditorWorkspace() {
               onPreviewCamera={setPreviewCamera}
             />
           </section>
-          <ResizableDivider
-            label="Resize image panel"
-            orientation="horizontal"
-            value={workspace.settings.editor2d.height}
-            min={240}
-            max={Math.max(
-              240,
-              Math.min(1000, (editorRef.current?.clientHeight ?? 720) - 420),
-            )}
-            step={16}
-            pointerValue={(start, startY, currentY) =>
-              start + startY - currentY
-            }
-            onPreview={(value) => setVariable("--editor-height", `${value}px`)}
-            onCommit={(height) =>
-              void safeCommand({
-                type: "workspace.update",
-                settings: {
-                  editor2d: { ...workspace.settings.editor2d, height },
-                },
-              })
-            }
-          />
-          <section className="image-panel-shell" aria-label="Image">
-            <ImageEditor previewNodes={gizmoNodes ?? previewNodes} />
-          </section>
+          {imageOpen && (
+            <>
+              <ResizableDivider
+                label="Resize image panel"
+                orientation="horizontal"
+                value={workspace.settings.editor2d.height}
+                min={240}
+                max={Math.max(
+                  240,
+                  Math.min(
+                    1000,
+                    (editorRef.current?.clientHeight ?? 720) - 420,
+                  ),
+                )}
+                step={16}
+                pointerValue={(start, startY, currentY) =>
+                  start + startY - currentY
+                }
+                onPreview={(value) =>
+                  setVariable("--editor-height", `${value}px`)
+                }
+                onCommit={(height) =>
+                  void safeCommand({
+                    type: "workspace.update",
+                    settings: {
+                      editor2d: { ...workspace.settings.editor2d, height },
+                    },
+                  })
+                }
+              />
+              <section className="image-panel-shell" aria-label="Image">
+                <ImageEditor previewNodes={gizmoNodes ?? previewNodes} />
+              </section>
+            </>
+          )}
         </section>
 
         {propertiesOpen && (
@@ -530,39 +476,66 @@ function EditorWorkspace() {
           </>
         )}
       </div>
-      <ResizableDivider
-        label="Resize spatial context"
-        orientation="vertical"
-        value={workspace.settings.layout.contextWidth}
-        min={96}
-        max={500}
-        step={16}
-        pointerValue={(start, startX, currentX) => start + startX - currentX}
-        onPreview={(width) =>
-          setVariable("--context-column-width", `${width}px`)
-        }
-        onCommit={(contextWidth) => void updateLayout({ contextWidth })}
-      />
-      <aside
-        className="spatial-context-column"
-        aria-label="Spatial context column"
-      >
-        <AtlasDock requestPlacement={requestPlacement} />
-      </aside>
-
+      {contextOpen && (
+        <>
+          <ResizableDivider
+            label="Resize spatial context"
+            orientation="horizontal"
+            value={contextHeight}
+            min={108}
+            max={360}
+            step={12}
+            pointerValue={(start, startY, currentY) =>
+              start + startY - currentY
+            }
+            onPreview={(height) =>
+              setVariable("--context-height", `${height}px`)
+            }
+            onCommit={(contextHeight) => void updateLayout({ contextHeight })}
+          />
+          <aside
+            className="spatial-context-dock"
+            aria-label="Spatial context dock"
+          >
+            <AtlasDock requestPlacement={requestPlacement} />
+          </aside>
+        </>
+      )}
       <EditorFooter
-        navigationOpen={navigationOpen}
-        propertiesOpen={propertiesOpen}
-        onNavigation={() => {
-          setNavigationOpen((open) => !open);
-          client.setHoveredNode(null);
-        }}
-        onProperties={() => {
-          setPropertiesOpen((open) => !open);
-          setPreviewNodes(null);
-        }}
+        panels={[
+          {
+            label: "Outline and assets",
+            open: navigationOpen,
+            onToggle: () => {
+              setNavigationOpen(!navigationOpen);
+              client.setHoveredNode(null);
+            },
+          },
+          {
+            label: "Image panel",
+            open: imageOpen,
+            onToggle: () => setImageOpen(!imageOpen),
+          },
+          {
+            label: "Spatial context",
+            open: contextOpen,
+            onToggle: () => setContextOpen(!contextOpen),
+          },
+          {
+            label: "Properties",
+            open: propertiesOpen,
+            onToggle: () => {
+              setPropertiesOpen(!propertiesOpen);
+              setPreviewNodes(null);
+            },
+          },
+          {
+            label: "Agent guide",
+            open: agentGuideOpen,
+            onToggle: () => setAgentGuideOpen(!agentGuideOpen),
+          },
+        ]}
       />
-
       {error && (
         <div className="error-toast">
           <span>{error}</span>

@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
-import { Euler, PerspectiveCamera, Vector3 } from "three";
+import {
+  Euler,
+  PerspectiveCamera,
+  Vector3,
+  WebGPUCoordinateSystem,
+} from "three";
 import { defaultCamera } from "../../../core/schema";
 import {
+  applyCalibratedProjection,
   applyCamera,
   cameraInViewfinder,
   viewportProjection,
@@ -9,6 +15,26 @@ import {
   viewfinderCamera,
 } from "./viewport-projection";
 import { lookFlyCamera, moveFlyCamera, zoomFlyCamera } from "./fly";
+
+test("calibrated WebGPU projection keeps the near plane and off-center optical axis", () => {
+  const value = defaultCamera();
+  value.intrinsics = {
+    width: 221,
+    height: 107,
+    fx: 119,
+    fy: 131,
+    cx: 85,
+    cy: 61,
+  };
+  const camera = new PerspectiveCamera(50, 1, 0.4, 7);
+  camera.coordinateSystem = WebGPUCoordinateSystem;
+  applyCalibratedProjection(camera, value);
+  const near = new Vector3(0, 0, -camera.near).project(camera);
+  expect(near.z).toBeCloseTo(0);
+  expect(((near.x + 1) * 221) / 2).toBeCloseTo(85);
+  expect(((1 - near.y) * 107) / 2).toBeCloseTo(61);
+  expect(new Vector3(0, 0, -camera.far).project(camera).z).toBeCloseTo(1);
+});
 
 test("the project viewfinder and Render camera agree across wide, tall, and resized viewports", () => {
   for (const format of [

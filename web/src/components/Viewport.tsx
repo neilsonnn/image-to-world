@@ -1,4 +1,15 @@
-import { AgentPresence } from "../lib/agent-presence";
+import { ViewportAppActions } from "./ViewportAppActions";
+import {
+  frameSourceIds,
+  referenceComparison,
+} from "../../../core/reference-comparison";
+import { AgentCursors } from "./AgentCursors";
+import type { Activity } from "../../../core/activity";
+import {
+  AgentPresence,
+  changeBounds,
+  followCamera,
+} from "../lib/agent-presence";
 import { ViewportCameraTools } from "./ViewportCameraTools";
 import { sessionFormat } from "../../../core/formats";
 import {
@@ -12,7 +23,10 @@ import {
   viewfinderCamera,
 } from "../lib/viewport-projection";
 import { GizmoOptions } from "./GizmoOptions";
-import { NewImagePrompt } from "./NewImagePrompt";
+import { ToolbarPopover } from "./ui";
+import { FrameLabel, FrameEdit, positionFrameLabels } from "./FrameLabels";
+import { frameSlugs, frameTasks } from "../../../core/frame-work";
+import { cameraNode } from "../../../core/captures";
 import {
   useImageToWorldClient,
   useWorkspaceData,
@@ -25,13 +39,17 @@ import {
   spatialContextFieldOfView,
 } from "../../../core/captures";
 import { collectionDragPayload, endCollectionDrag } from "../lib/drag";
-import { SparkRenderer } from "@sparkjsdev/spark";
+import { SceneRenderer } from "../lib/scene-renderer";
+import type { WebGPURenderer } from "three/webgpu";
 import {
   Crosshair,
+  Gear,
+  VideoCamera,
   ImageSquare,
   SlidersHorizontal,
 } from "@phosphor-icons/react";
 import {
+  Button,
   Flex,
   IconButton,
   Popover,
@@ -61,9 +79,10 @@ import {
   Sphere,
   Vector2,
   Vector3,
-  WebGLRenderer,
 } from "three";
 import { FlyControls } from "../lib/fly";
+import { PlayPointer } from "../lib/play-pointer";
+import type { startScenePlay } from "../lib/scene-play";
 import { CameraTransition } from "../lib/camera-transition";
 
 import { selectedNodes, selectedRoots } from "../../../core/scene";
@@ -76,6 +95,7 @@ import {
 } from "../../../core/gizmo";
 import { transformNodes } from "../../../core/cameras";
 import {
+  assetUrl,
   type Camera,
   type Workspace,
   type SceneNode,
@@ -85,6 +105,8 @@ import { registerViewportCamera } from "../lib/viewport-camera";
 import { usePaneShortcuts } from "../lib/shortcuts";
 
 export type ViewportProps = {
+  playing: boolean;
+  setPlaying: (value: boolean) => void;
   previewNodes?: SceneNode[] | null;
   onPreviewNodes: (nodes: SceneNode[] | null) => void;
   previewCamera?: Camera | null;
@@ -94,12 +116,13 @@ export type ViewportProps = {
 
 type Runtime = {
   scene: Scene;
-  renderer: WebGLRenderer;
+  renderer: WebGPURenderer;
   camera: PerspectiveCamera;
   cameraTransition: CameraTransition;
   fly: FlyControls;
   transform: CombinedTransformControls;
-  spark: SparkRenderer;
+  surface: SceneRenderer;
+  ready: Promise<void>;
   graph: SceneGraph;
   grid: GridHelper;
   pivot: Group;
@@ -116,6 +139,11 @@ type Runtime = {
   releasedCameraId?: string;
   releasePromise?: Promise<unknown>;
   persistingCamera?: boolean;
+  play?: {
+    time: number;
+    session?: Awaited<ReturnType<typeof startScenePlay>>;
+    pointer?: PlayPointer;
+  };
 };
 
 function readViewportCamera(
@@ -205,6 +233,8 @@ function DisplaySlider({
 }
 
 export function Viewport({
+  playing,
+  setPlaying,
   previewNodes,
   onPreviewNodes,
   previewCamera,
@@ -236,6 +266,7 @@ export function Viewport({
       "freeCamera",
       "format",
       "viewingCameraId",
+      "lighting",
       "grid",
       "display",
       "pointSize",
@@ -265,6 +296,11 @@ export function Viewport({
         : source,
     [source, previewNodes],
   );
+  const cursorLayer = useRef<HTMLDivElement>(null);
+  const cursorAnchors = useRef(new Map<string, Activity>());
+  const following = useClientState((s) => !!s.followAgentEdits);
+  const labelsRef = useRef<HTMLDivElement>(null);
+  const slugs = useMemo(() => frameSlugs(workspace.nodes), [workspace.nodes]);
   const hostRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<Runtime | undefined>(undefined);
   const previewCameraRef = useRef(previewCamera);
@@ -278,7 +314,19 @@ export function Viewport({
   const captureQueue = useRef(Promise.resolve());
   const captureAttempts = useRef(new Map<string, number>());
   const [captureTick, setCaptureTick] = useState(0);
+  const [playReady, setPlayReady] = useState(false);
   const [syncTick, setSyncTick] = useState(0);
+  const [showInput, setShowInput] = useState(false);
+  const [inputOpacity, setInputOpacity] = useState(100);
+  const viewingId = workspace.settings.viewingCameraId;
+  const compared = useMemo(
+    () =>
+      previewCamera ? undefined : referenceComparison(workspace, viewingId),
+    [workspace.assets, workspace.nodes, viewingId, previewCamera],
+  );
+  useEffect(() => {
+    setShowInput(false);
+  }, [viewingId]);
   const [pivotPlacement, setPivotPlacement] =
     useState<PivotPlacement>("center");
   const [gizmoSpace, setGizmoSpace] = useState<GizmoSpace>("world");
@@ -322,6 +370,11 @@ export function Viewport({
   const pane = usePaneShortcuts(
     "viewport",
     (event) => {
+      if (playing) {
+        if (!event.ctrlKey && !event.metaKey && !event.altKey)
+          runtimeRef.current?.fly.keyDown(event);
+        return;
+      }
       if (event.key === "Escape" && runtimeRef.current?.dragging) {
         event.preventDefault();
         const runtime = runtimeRef.current;
@@ -411,11 +464,12 @@ export function Viewport({
     if (!host) return;
 
     const scene = new Scene();
-    const renderer = new WebGLRenderer({
-      antialias: false,
-      alpha: false,
-      preserveDrawingBuffer: true,
-    });
+    const surface = new SceneRenderer(false, (detail) =>
+      errorRef.current(detail),
+    );
+    const renderer = surface.renderer;
+    const ready = surface.init();
+    let mounted = true;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     const theme = getComputedStyle(host);
     const color = (name: string) =>
@@ -452,22 +506,33 @@ export function Viewport({
     grid.material.transparent = true;
     grid.material.opacity = 0.72;
     scene.add(grid);
-    const spark = new SparkRenderer({ renderer });
-    scene.add(spark);
     const graph = new SceneGraph(
       scene,
       (value) => errorRef.current(value),
       color("helper"),
       color("active"),
+      () => ready.then(() => renderer),
     );
-    const presence = new AgentPresence(scene);
+    const presence = new AgentPresence();
+    const followTransition = new CameraTransition(camera);
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let consumedChange = clientStore.getState().liveSceneChange;
+    let nextShot = 0;
+    let pendingSince = 0;
+    let pending: Activity | undefined;
     const fly = new FlyControls(
       camera,
       renderer.domElement,
       () =>
-        !runtime.dragging && !runtime.capturing && !previewCameraRef.current,
-      () => persistCamera(),
-      () => releaseForNavigation(),
+        !runtime.dragging &&
+        !runtime.capturing &&
+        (runtime.play ? !!runtime.play.session : !previewCameraRef.current),
+      () => {
+        if (!runtime.play) persistCamera();
+      },
+      () => {
+        if (!runtime.play) releaseForNavigation();
+      },
     );
     const runtime: Runtime = {
       scene,
@@ -476,7 +541,8 @@ export function Viewport({
       cameraTransition: new CameraTransition(camera),
       fly,
       transform,
-      spark,
+      surface,
+      ready,
       graph,
       grid,
       pivot,
@@ -607,6 +673,7 @@ export function Viewport({
       setHoveredNode(null);
     };
     const onPointerMove = (event: PointerEvent) => {
+      if (runtime.play) return;
       if (event.buttons || runtime.dragging || runtime.capturing) {
         clearHover();
         return;
@@ -623,10 +690,12 @@ export function Viewport({
     let pointerDown: Vector2 | undefined;
     const onPointerDown = (event: PointerEvent) => {
       renderer.domElement.focus({ preventScroll: true });
+      if (runtime.play) return;
       pointerDown = new Vector2(event.clientX, event.clientY);
     };
     const onPointerUp = (event: PointerEvent) => {
       if (
+        runtime.play ||
         !pointerDown ||
         runtime.dragging ||
         runtime.transformPointer ||
@@ -656,7 +725,7 @@ export function Viewport({
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
     const onDoubleClick = (event: MouseEvent) => {
-      if (runtime.dragging || runtime.capturing) return;
+      if (runtime.play || runtime.dragging || runtime.capturing) return;
       const rect = renderer.domElement.getBoundingClientRect();
       const pointer = new Vector2(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -716,7 +785,7 @@ export function Viewport({
       const state = workspaceRef.current;
       setViewportSize({ width, height });
       const calibrated =
-        runtime.fly.moving || runtime.persistingCamera
+        runtime.play || runtime.fly.moving || runtime.persistingCamera
           ? readViewportCamera(runtime, state)
           : (previewCameraRef.current ??
             (state.settings.viewingCameraId
@@ -740,12 +809,57 @@ export function Viewport({
     let animation = 0;
     let lastFrame = performance.now();
     let spatialVersion = graph.spatialVersion;
+    let lastDrawError: string | undefined;
     const render = () => {
       const now = performance.now();
       const seconds = (now - lastFrame) / 1000;
       lastFrame = now;
       animation = requestAnimationFrame(render);
+      const local = clientStore.getState();
+      const canFollow =
+        local.followAgentEdits &&
+        !runtime.play &&
+        !runtime.capturing &&
+        !runtime.dragging &&
+        !runtime.transformPointer &&
+        !runtime.fly.active &&
+        !runtime.persistingCamera &&
+        !previewCameraRef.current &&
+        !workspaceRef.current.settings.viewingCameraId &&
+        !document.hidden;
+      if (!canFollow || runtime.cameraTransition.active) {
+        followTransition.cancel();
+        pending = undefined;
+      }
+      if (local.liveSceneChange !== consumedChange) {
+        consumedChange = local.liveSceneChange;
+        if (
+          canFollow &&
+          consumedChange &&
+          Date.now() - consumedChange.at < 5000
+        ) {
+          if (!pending) pendingSince = now;
+          pending = consumedChange;
+        }
+      }
+      if (
+        canFollow &&
+        pending?.sceneChange &&
+        !runtime.cameraTransition.active &&
+        now >= nextShot &&
+        now - pendingSince >= 220 &&
+        ((!graph.loadingGeometry &&
+          pending.sceneChange.nodeIds.every((id) => graph.entries.has(id))) ||
+          now - pendingSince >= 2400)
+      ) {
+        const bounds = changeBounds(graph, pending.sceneChange);
+        followTransition.start(followCamera(camera, bounds), now, 850);
+        if (motion.matches) followTransition.finish();
+        nextShot = now + 1300;
+        pending = undefined;
+      }
       if (runtime.capturing) return;
+      followTransition.update(now);
       if (runtime.fly.moving && runtime.cameraTransition.active) {
         runtime.cameraTransition.cancel();
         // Save the interrupted pose when the fly gesture ends, even without a drag.
@@ -756,6 +870,7 @@ export function Viewport({
       if (
         hoverDirty &&
         hoverPointer &&
+        !runtime.play &&
         !runtime.dragging &&
         !runtime.fly.active
       ) {
@@ -764,27 +879,62 @@ export function Viewport({
         runtime.raycaster.setFromCamera(hoverPointer, camera);
         setHoveredNode(graph.pick(runtime.raycaster, hoverPointer) ?? null);
       }
-      graph.sample(performance.now() / 1000, camera);
-      transform.update();
+      if (runtime.play) {
+        if (runtime.play.session) runtime.play.time += Math.min(0.1, seconds);
+        graph.sample(runtime.play.time, camera);
+        runtime.play.pointer?.update();
+        runtime.play.session?.step(seconds);
+      } else {
+        graph.sample(now / 1000, camera);
+        transform.update();
+      }
       graph.update();
-      presence.update(
-        clientStore.getState().activity ?? [],
-        graph,
-        clientStore.getState().showPresence !== false,
-      );
+      if (labelsRef.current)
+        positionFrameLabels(labelsRef.current, graph, camera);
+      if (cursorLayer.current && !runtime.play)
+        presence.update(
+          cursorLayer.current,
+          graph,
+          camera,
+          cursorAnchors.current,
+          workspaceRef.current.nodes,
+          seconds,
+          motion.matches,
+        );
       if (
         graph.spatialVersion !== spatialVersion &&
+        !runtime.play &&
         !runtime.dragging &&
         !runtime.fly.active
       ) {
         spatialVersion = graph.spatialVersion;
         setSyncTick((value) => value + 1);
       }
-      renderer.render(scene, camera);
+      renderer.shadowMap.enabled = graph.keyShadows;
+      try {
+        surface.render(scene, camera);
+        lastDrawError = undefined;
+      } catch (error) {
+        // Invalid authored shader graphs can throw synchronously while Three
+        // builds the draw. Keep the editor responsive for the next module edit.
+        const detail = message(error);
+        if (detail !== lastDrawError) errorRef.current(detail);
+        lastDrawError = detail;
+      }
     };
-    render();
+    void ready
+      .then(() => {
+        if (!mounted) return;
+        camera.coordinateSystem = renderer.coordinateSystem;
+        resize();
+        render();
+      })
+      .catch((error) => {
+        if (mounted) errorRef.current(message(error));
+      });
 
     return () => {
+      mounted = false;
       cancelAnimationFrame(animation);
       for (const controller of captureControllers.current.values())
         controller.abort();
@@ -800,23 +950,15 @@ export function Viewport({
       transform.detach();
       transform.dispose();
       transform.getHelper().removeFromParent();
-      spark.autoUpdate = false;
-      clearTimeout(spark.updateTimeoutId);
-      clearTimeout(spark.sortTimeoutId);
-      spark.sortDirty = false;
       renderer.domElement.remove();
-      // Spark disposal must wait for captures and in-flight GPU readback.
       const disposeRenderer = async () => {
         await captureQueue.current;
-        while (spark.sorting)
-          await new Promise((resolve) => setTimeout(resolve, 16));
-        presence.dispose();
-        graph.dispose();
-        spark.dispose();
-        grid.geometry.dispose();
-        grid.material.dispose();
-        renderer.dispose();
-        renderer.forceContextLoss();
+        await ready.catch(() => {});
+        await surface.dispose(() => {
+          graph.dispose();
+          grid.geometry.dispose();
+          grid.material.dispose();
+        });
       };
       void disposeRenderer().catch((error) => errorRef.current(message(error)));
       runtimeRef.current = undefined;
@@ -824,23 +966,24 @@ export function Viewport({
   }, []);
 
   useEffect(() => {
-    runtimeRef.current?.graph.setHovered(hoveredNodeId);
-  }, [hoveredNodeId]);
+    if (!playing) runtimeRef.current?.graph.setHovered(hoveredNodeId);
+  }, [hoveredNodeId, playing]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
-    if (runtime.dragging || runtime.capturing) {
+    if (playing || runtime.dragging || runtime.capturing) {
       runtime.pendingSync = true;
       return;
     }
     runtime.pendingSync = false;
+    // The overlay controls the viewed image, even if its scene plane is visible.
+    runtime.graph.setReviewSources(compared ? [compared.imageId] : []);
     runtime.graph.sync(workspace);
     runtime.grid.visible = workspace.settings.grid;
-    runtime.spark.falloff =
+    runtime.surface.falloff =
       workspace.settings.display.pointStyle === "gaussian" ? 1 : 0;
-    runtime.spark.minPixelRadius = 0;
-    runtime.spark.maxPixelRadius = workspace.settings.pointSize;
+    runtime.surface.maxPixelRadius = workspace.settings.pointSize;
     const clippingChanged =
       runtime.camera.near !== workspace.settings.viewportOptions.near ||
       runtime.camera.far !== workspace.settings.viewportOptions.far;
@@ -917,6 +1060,8 @@ export function Viewport({
       runtime.transform.attach(runtime.pivot);
     }
   }, [
+    playing,
+    compared,
     workspace.nodes,
     workspace.assets,
     workspace.selection,
@@ -927,6 +1072,7 @@ export function Viewport({
     workspace.settings.pointSize,
     workspace.settings.viewportCamera,
     workspace.settings.viewingCameraId,
+    workspace.settings.lighting,
     workspace.settings.freeCamera,
     workspace.settings.viewportOptions,
     workspace.settings.format,
@@ -938,7 +1084,7 @@ export function Viewport({
 
   useEffect(() => {
     const runtime = runtimeRef.current;
-    if (!runtime) return;
+    if (!runtime || playing) return;
     const now = Date.now();
     let nextRetry = Number.POSITIVE_INFINITY;
     for (const job of Object.values(workspace.jobs)) {
@@ -1012,6 +1158,7 @@ export function Viewport({
               throw new Error(`Inspection upload failed (${response.status})`);
             return;
           }
+          await runtime.ready;
           await runtime.graph.ready(controller.signal);
           const originalSize = runtime.renderer.getSize(new Vector2());
           const originalPixelRatio = runtime.renderer.getPixelRatio();
@@ -1030,6 +1177,7 @@ export function Viewport({
               0.01,
               10_000,
             );
+            captureCamera.coordinateSystem = runtime.renderer.coordinateSystem;
             applyCamera(captureCamera, captureInput.camera);
             applyCalibratedProjection(captureCamera, captureInput.camera);
           }
@@ -1038,55 +1186,43 @@ export function Viewport({
           const transformVisible = transformHelper.visible;
           const transformParent = transformHelper.parent;
           transformHelper.removeFromParent();
+          const reviewSources = runtime.graph.setReviewSources([]);
           const restoreHelpers = runtime.graph.hideCaptureHelpers();
           runtime.grid.visible = false;
           transformHelper.visible = false;
           runtime.fly.stop();
           runtime.capturing = true;
-          const autoUpdate = runtime.spark.autoUpdate;
-          runtime.spark.autoUpdate = false;
-          const waitForSort = async () => {
-            const deadline = performance.now() + 30000;
-            while (runtime.spark.sorting || runtime.spark.sortDirty) {
-              if (controller.signal.aborted)
-                throw new DOMException("Aborted", "AbortError");
-              if (performance.now() > deadline)
-                throw new Error("Splat sorting timed out during capture");
-              await new Promise<void>((resolve) =>
-                requestAnimationFrame(() => resolve()),
-              );
-            }
-          };
           let blob: Blob;
           try {
-            // Spark update can return early while an earlier sort is in flight.
-            await waitForSort();
             runtime.graph.update();
-            await runtime.spark.update({
-              scene: runtime.scene,
-              camera: captureCamera,
-            });
-            await waitForSort();
+            await runtime.surface.settle(
+              runtime.scene,
+              captureCamera,
+              controller.signal,
+            );
             if (controller.signal.aborted)
               throw new DOMException("Aborted", "AbortError");
-            runtime.renderer.render(runtime.scene, captureCamera);
-            blob = await new Promise<Blob>((resolve, reject) => {
-              runtime.renderer.domElement.toBlob(
-                (value) =>
-                  value
-                    ? resolve(value)
-                    : reject(new Error("PNG capture failed")),
-                "image/png",
-              );
+            runtime.renderer.shadowMap.enabled = runtime.graph.keyShadows;
+            blob = await runtime.surface.checked(async () => {
+              runtime.surface.render(runtime.scene, captureCamera);
+              return new Promise<Blob>((resolve, reject) => {
+                runtime.renderer.domElement.toBlob(
+                  (value) =>
+                    value
+                      ? resolve(value)
+                      : reject(new Error("PNG capture failed")),
+                  "image/png",
+                );
+              });
             });
           } finally {
             runtime.capturing = false;
             if (runtimeRef.current === runtime) {
-              runtime.spark.autoUpdate = autoUpdate;
               runtime.grid.visible = gridVisible;
               transformHelper.visible = transformVisible;
               transformParent?.add(transformHelper);
               restoreHelpers();
+              runtime.graph.setReviewSources(reviewSources);
               if (captureInput.camera) {
                 runtime.renderer.setPixelRatio(originalPixelRatio);
                 runtime.renderer.setSize(originalSize.x, originalSize.y, false);
@@ -1152,7 +1288,67 @@ export function Viewport({
       Math.max(250, nextRetry + 50),
     );
     return () => window.clearTimeout(timer);
-  }, [workspace.jobs, captureTick]);
+  }, [workspace.jobs, captureTick, playing]);
+
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!playing || !runtime) return;
+    const controller = new AbortController();
+    const play: NonNullable<Runtime["play"]> = { time: 0 };
+    runtime.fly.stop();
+    runtime.cameraTransition.finish();
+    if (runtime.dragging) runtime.transform.reset();
+    runtime.transform.detach();
+    runtime.play = play;
+    const camera = runtime.camera.clone();
+    const calibration = readViewportCamera(runtime, workspaceRef.current);
+    let restoreHelpers: (() => void) | undefined;
+    let previousSources: readonly string[] | undefined;
+    setPlayReady(false);
+    const start = async () => {
+      // A claimed capture owns the current canvas until its pixels are read.
+      await captureQueue.current;
+      controller.signal.throwIfAborted();
+      await runtime.ready;
+      const { startScenePlay } = await import("../lib/scene-play");
+      controller.signal.throwIfAborted();
+      previousSources = runtime.graph.setReviewSources(
+        frameSourceIds(workspaceRef.current),
+      );
+      const session = await startScenePlay(runtime.graph, controller.signal);
+      if (controller.signal.aborted) {
+        session.dispose();
+        return;
+      }
+      runtime.grid.visible = false;
+      restoreHelpers = runtime.graph.hideCaptureHelpers();
+      play.session = session;
+      play.pointer = new PlayPointer(
+        runtime.renderer.domElement,
+        runtime.camera,
+        session,
+      );
+      setPlayReady(true);
+    };
+    void start().catch((error) => {
+      if (controller.signal.aborted) return;
+      errorRef.current(message(error));
+      setPlaying(false);
+    });
+    return () => {
+      controller.abort();
+      runtime.fly.stop();
+      play.pointer?.dispose();
+      play.session?.dispose();
+      restoreHelpers?.();
+      if (previousSources) runtime.graph.setReviewSources(previousSources);
+      runtime.play = undefined;
+      runtime.camera.copy(camera);
+      const size = runtime.renderer.getSize(new Vector2());
+      viewportProjection(runtime.camera, size.x, size.y, calibration);
+      runtime.camera.updateMatrixWorld();
+    };
+  }, [playing, setPlaying]);
 
   const placementCamera = () => {
     const runtime = runtimeRef.current;
@@ -1222,7 +1418,7 @@ export function Viewport({
     void commandRef
       .current({
         type: "workspace.update",
-        settings: { display: { ...display, ...patch } },
+        settings: { display: patch },
       })
       .catch((error) => errorRef.current(message(error)));
   const updateSetting = (
@@ -1244,6 +1440,12 @@ export function Viewport({
     format,
   );
   const frame = viewfinderRect(viewportSize, format);
+  const referenceScale =
+    compared &&
+    Math.max(
+      frame.width / compared.projection.width,
+      frame.height / compared.projection.height,
+    );
   return (
     <div
       {...paneHandlers}
@@ -1251,6 +1453,7 @@ export function Viewport({
         assignRef(paneRef, value);
       }}
       onDragOver={(event) => {
+        if (playing) return;
         const valid =
           event.dataTransfer.types.includes("Files") ||
           collectionDragPayload(event)?.kind === "assets";
@@ -1264,11 +1467,11 @@ export function Viewport({
         if (!(next instanceof Node) || !event.currentTarget.contains(next))
           setDraggingFiles(false);
       }}
-      onDrop={drop}
-      onPaste={(event) => void paste(event)}
-      className="viewport-panel"
+      onDrop={playing ? undefined : drop}
+      onPaste={playing ? undefined : (event) => void paste(event)}
+      className={playing ? "viewport-panel is-playing" : "viewport-panel"}
     >
-      <div className="viewport-overlay">
+      <div className="viewport-overlay" hidden={playing}>
         <div
           className="viewport-tools floating-toolbar"
           role="toolbar"
@@ -1281,7 +1484,7 @@ export function Viewport({
             onSpace={setGizmoSpace}
           />
         </div>
-        <NewImagePrompt camera={placementCamera} />
+
         <div
           className="viewport-tools floating-toolbar"
           role="toolbar"
@@ -1297,6 +1500,23 @@ export function Viewport({
             >
               <Crosshair />
             </IconButton>
+          </Tooltip>
+          <Tooltip delayDuration={0} content="Follow major agent edits">
+            <Button
+              size="1"
+              color="gray"
+              variant={following ? "solid" : "surface"}
+              aria-label="Auto-follow agent edits"
+              aria-pressed={following}
+              onClick={() =>
+                clientStore.setState({
+                  followAgentEdits: !following,
+                  liveSceneChange: undefined,
+                })
+              }
+            >
+              <VideoCamera /> Auto
+            </Button>
           </Tooltip>
         </div>
         <div
@@ -1432,7 +1652,7 @@ export function Viewport({
                     step={0.1}
                     onPreview={(pointSize) => {
                       if (runtimeRef.current)
-                        runtimeRef.current.spark.maxPixelRadius = pointSize;
+                        runtimeRef.current.surface.maxPixelRadius = pointSize;
                     }}
                     onCommit={(pointSize) => updateSetting({ pointSize })}
                   />
@@ -1453,6 +1673,65 @@ export function Viewport({
                     />
                   </Tooltip>
                 </Flex>
+                {(
+                  [
+                    ["passepartout", "Passepartout"],
+                    ["frameThumbnails", "Frame thumbnails"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Flex key={key} justify="between" align="center">
+                    <Text size="1">{label}</Text>
+                    <Switch
+                      aria-label={label}
+                      size="1"
+                      checked={workspace.settings.viewportOptions[key] ?? true}
+                      onCheckedChange={(value) =>
+                        void commandRef
+                          .current({
+                            type: "workspace.update",
+                            settings: {
+                              viewportOptions: {
+                                ...workspaceRef.current.settings
+                                  .viewportOptions,
+                                [key]: value,
+                              },
+                            },
+                          })
+                          .catch((e) => errorRef.current(message(e)))
+                      }
+                    />
+                  </Flex>
+                ))}
+                <Text size="1" color="gray">
+                  Mask opacity ·{" "}
+                  {Math.round(
+                    workspace.settings.viewportOptions.maskOpacity * 100,
+                  )}
+                  %
+                </Text>
+                <Slider
+                  key={workspace.settings.viewportOptions.maskOpacity}
+                  aria-label="Passepartout opacity"
+                  defaultValue={[
+                    workspace.settings.viewportOptions.maskOpacity,
+                  ]}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  onValueCommit={([maskOpacity]) =>
+                    void commandRef
+                      .current({
+                        type: "workspace.update",
+                        settings: {
+                          viewportOptions: {
+                            ...workspaceRef.current.settings.viewportOptions,
+                            maskOpacity,
+                          },
+                        },
+                      })
+                      .catch((e) => errorRef.current(message(e)))
+                  }
+                />
                 <Flex justify="between" align="center">
                   <Text size="1">Grid</Text>
                   <Tooltip delayDuration={0} content="Ground grid">
@@ -1468,9 +1747,136 @@ export function Viewport({
             </Popover.Content>
           </Popover.Root>
         </div>
+        <ViewportAppActions />
       </div>
       <div ref={hostRef} className="viewport-canvas">
-        {workspace.settings.viewportOptions.passepartout && (
+        {!playing && (
+          <AgentCursors layer={cursorLayer} anchors={cursorAnchors} />
+        )}
+        {!playing && (
+          <div className="frame-label-layer" ref={labelsRef}>
+            {[...slugs].map(([id, slug]) => {
+              if (id === compared?.frameId) return null;
+              const node = workspace.nodes[id],
+                cam = cameraNode(workspace, id);
+              const ref = referenceComparison(workspace, id);
+              return (
+                <div
+                  key={id}
+                  className="projected-frame"
+                  data-frame={id}
+                  data-anchor={cam?.id ?? id}
+                  hidden
+                >
+                  <FrameLabel
+                    slug={slug}
+                    tasks={frameTasks(node, workspace.jobs)}
+                    selected={workspace.selection.includes(id)}
+                    onSelect={() =>
+                      void commandRef
+                        .current({ type: "selection.set", ids: [id] })
+                        .catch((e) => errorRef.current(message(e)))
+                    }
+                    thumbnail={
+                      workspace.settings.viewportOptions.frameThumbnails !==
+                      false
+                        ? ref?.asset
+                        : undefined
+                    }
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {!playing && compared && (
+          <div className="view-frame-actions floating-toolbar">
+            <FrameLabel
+              slug={slugs.get(compared.frameId)!}
+              tasks={frameTasks(
+                workspace.nodes[compared.frameId],
+                workspace.jobs,
+              )}
+              selected={workspace.selection.includes(compared.frameId)}
+              onSelect={() =>
+                void commandRef
+                  .current({ type: "selection.set", ids: [compared.frameId] })
+                  .catch((e) => errorRef.current(message(e)))
+              }
+            />
+            <Button
+              size="1"
+              color="gray"
+              variant="surface"
+              aria-pressed={showInput}
+              onClick={() => setShowInput(!showInput)}
+            >
+              <ImageSquare aria-hidden="true" /> Input
+            </Button>
+            <FrameEdit
+              key={compared.imageId + compared.asset.id}
+              frameId={compared.frameId}
+              asset={compared.asset}
+            />
+            <ToolbarPopover
+              label="Reference image settings"
+              icon={<Gear />}
+              width={200}
+              side="top"
+            >
+              <label className="settings-popover">
+                <Flex as="span" justify="between" align="center">
+                  <Text size="1">Input opacity</Text>
+                  <Text size="1" color="gray">
+                    {inputOpacity}%
+                  </Text>
+                </Flex>
+                <input
+                  className="frame-input-opacity"
+                  type="range"
+                  aria-label="Input opacity"
+                  aria-valuetext={`${inputOpacity}%`}
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={inputOpacity}
+                  onChange={(event) =>
+                    setInputOpacity(event.currentTarget.valueAsNumber)
+                  }
+                />
+              </label>
+            </ToolbarPopover>
+          </div>
+        )}
+        {playing && (
+          <div className="play-instructions" role="status">
+            {playReady
+              ? "Drag to grab · Right-drag to look · WASD to fly · Esc to stop"
+              : "Preparing physics…"}
+          </div>
+        )}
+        {!playing && compared && showInput && referenceScale && (
+          <div
+            className="viewport-reference-image"
+            style={{
+              opacity: inputOpacity / 100,
+              left: frame.left,
+              top: frame.top,
+              width: frame.width,
+              height: frame.height,
+            }}
+          >
+            <img
+              src={assetUrl(compared.asset)}
+              alt={`Reference: ${compared.asset.name}`}
+              style={{
+                width: compared.projection.width * referenceScale,
+                height: compared.projection.height * referenceScale,
+              }}
+            />
+          </div>
+        )}
+        {!playing && workspace.settings.viewportOptions.passepartout && (
           <div
             className="viewport-passepartout"
             aria-hidden="true"
@@ -1486,34 +1892,38 @@ export function Viewport({
             }
           />
         )}
-        {empty && (
+        {!playing && empty && (
           <div className="viewport-empty">
-            Import an image or splat to begin
+            Drop a reference image to start a set
             <br />
-            <span>Drop files here or use Assets</span>
+            <span>Paste an image or place an asset from the library</span>
           </div>
         )}
-        {draggingFiles && <div className="viewport-drop">Drop to import</div>}
-      </div>
-      <ViewportCameraTools
-        camera={viewCamera}
-        autoFov={spatialContextFieldOfView(
-          workspace,
-          selectedPath(workspace)?.id,
+        {!playing && draggingFiles && (
+          <div className="viewport-drop">Drop to import</div>
         )}
-        format={format}
-        options={workspace.settings.viewportOptions}
-        overrideName={
-          viewingNode?.name ?? (previewCamera ? "Path preview" : undefined)
-        }
-        onRelease={() => {
-          runtimeRef.current?.fly.stop();
-          onPreviewCamera(null);
-          void commandRef
-            .current({ type: "camera.release" })
-            .catch((error) => errorRef.current(message(error)));
-        }}
-      />
+      </div>
+      {!playing && (
+        <ViewportCameraTools
+          camera={viewCamera}
+          autoFov={spatialContextFieldOfView(
+            workspace,
+            selectedPath(workspace)?.id,
+          )}
+          format={format}
+          options={workspace.settings.viewportOptions}
+          overrideName={
+            viewingNode?.name ?? (previewCamera ? "Path preview" : undefined)
+          }
+          onRelease={() => {
+            runtimeRef.current?.fly.stop();
+            onPreviewCamera(null);
+            void commandRef
+              .current({ type: "camera.release" })
+              .catch((error) => errorRef.current(message(error)));
+          }}
+        />
+      )}
     </div>
   );
 }

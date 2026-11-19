@@ -1,4 +1,11 @@
 #!/usr/bin/env bun
+import { objectInventory } from "../core/object-inventory";
+import {
+  defaultLighting,
+  frameRig,
+  lightRigSchema,
+  projectLightSchema,
+} from "../core/lighting";
 import { compileModule } from "./modules";
 import { proceduralSchema, moduleParameters } from "../core/procedural";
 import { commandContextSchema } from "../core/command-context";
@@ -13,7 +20,9 @@ import { doctor, openProject } from "./launch";
 import { collectionMatches } from "../core/collections";
 import { frameAssets } from "../core/frames";
 import {
-  atlasContext,
+  atlasContextNodes,
+  captureFrameStatus,
+  frameGuideDisplay,
   spatialContextFrames,
   contextSettings,
 } from "../core/captures";
@@ -25,6 +34,7 @@ import { imageHistory } from "../core/history";
 import {
   cameraSchema,
   cameraAimSchema,
+  vec3,
   jobInputSchema,
   commandSchema,
   identity,
@@ -59,9 +69,11 @@ const HELP = `image-to-world controls the same filesystem workspace as the brows
   bun run image-to-world image draft <asset-id> --file draft.json
   bun run image-to-world image undo|redo <asset-id>       Undo/redo this image's draft
   bun run image-to-world export <asset-id> <file>        Write binary output to a local file
-  bun run image-to-world module add <source.ts> [--assets id,id] [--file params.json] [--seed 1]
+  bun run image-to-world module add <source.ts> [--parent frame-id] [--assets id,id] [--file params.json] [--seed 1]
   bun run image-to-world module update <node-id> <source.ts>   Recompile and replace code undoably
   bun run image-to-world module params <node-id> --file params.json
+  bun run image-to-world frame work <frame-id> "<two to four words>"|done --actor <name>
+  bun run image-to-world lighting [frame-id] [--file rig.json | --inherit]   Inspect or set lighting; omitting Frame edits the scene
   bun run image-to-world module inspect <node-id>
   bun run image-to-world scene                          List scene objects
   bun run image-to-world scene inspect [node-id...] [--headless] [--out report.json]
@@ -81,16 +93,17 @@ const HELP = `image-to-world controls the same filesystem workspace as the brows
   bun run image-to-world camera [--file camera.json]    Read/set viewport camera
   bun run image-to-world path update <path-id> [--fov 60] [--target-frames 36]
   bun run image-to-world path keyframe <path-id> [--index 0] [--file camera.json] [--id keyframe-id] [--remove]
-  bun run image-to-world scene place <asset-id>... [--camera camera.json] [--reconstruct]  Place images individually or reconstruct together
+  bun run image-to-world scene place <asset-id>... [--parent frame-id] [--camera camera.json] [--reference-only | --reconstruct]  Place a local reference Frame, jointly pose images, or place assets
   bun run image-to-world camera solve --position x,y,z --look-at x,y,z [--relative-to node-id]
                    [--up x,y,z] [--fov 60] [--out camera.json]  Calculate orientation from your position/target; no scene edit
   bun run image-to-world camera place [--position x,y,z --look-at x,y,z --relative-to node-id]
                    [--name 'Camera'] [--file camera.json]  Record your chosen camera, undoably; extend selection (viewport C)
   bun run image-to-world camera view <node-id> | camera free
+  bun run image-to-world context guides on|off            Show depth guides for layout or hide them for modeling
   bun run image-to-world context [list|include|exclude|solo|show|hide|freeze|unfreeze] <capture-id>...
   bun run image-to-world path create <camera-id>... [--target-frames 36]
   bun run image-to-world pose <asset-id>... [--camera camera.json]
-  bun run image-to-world atlas [--camera camera.json] [--path path-id] [--prompt '...']
+  bun run image-to-world atlas [--depth] [--camera camera.json] [--path path-id] [--prompt '...']
   bun run image-to-world splats [capture-id...] [--path path-id] [--prompt '...'] [--refine]
                    Reconstruct splats from posed captures (draft unless --refine)
   bun run image-to-world video [--path path-id] [--fps 12] [--target-frames 36]
@@ -101,7 +114,8 @@ const HELP = `image-to-world controls the same filesystem workspace as the brows
   bun run image-to-world video reconstruct <job-id> [--indices 0,4,8]
   bun run image-to-world reconstruct <asset-id>... [--video video-asset-id]
                    [--fps 1] [--max-frames 60]
-  bun run image-to-world render <camera-or-capture-id> [--camera file.json] [--targets id,id]
+  bun run image-to-world probe <camera-or-frame-id> [--position x,y,z] [--width 1024] [--targets id,id] [--wait]   Capture local LDR environment PNG
+  bun run image-to-world render <camera-or-capture-id> [--set] [--camera file.json] [--targets id,id]
                    [--passes color,mask,depth,ids] [--reference image-id]  Independent headless renderer
   bun run image-to-world mask <asset-id>... [--operation union|intersection] [--invert] [--dilate pixels] [--feather pixels]
   bun run image-to-world observe <capture-id> --region x,y,w,h [--mask asset-id] [--padding .1]
@@ -109,7 +123,8 @@ const HELP = `image-to-world controls the same filesystem workspace as the brows
   bun run image-to-world fit <mesh-node-id> --observation manifest-asset-id [--quaternion x,y,z,w]
                    Read-only placement proposal; use its command and preconditions after reviewing
   bun run image-to-world models [endpoint] [--search text]  Suggestions or live provider schema
-  bun run image-to-world model <endpoint> --file input.json  General image/3D model call; {"$asset":"id"}
+  bun run image-to-world inventory                        List reference Frames, instances and shared builds
+  bun run image-to-world model <endpoint> [--build-key key] --file input.json  General image/3D model call; {"$asset":"id"}
   bun run image-to-world generate --file request.json   All generation and local inspection workflows
   bun run image-to-world activity [--after sequence]    Automatic action history
   bun run image-to-world revert <edit-id>               Revert only an unchanged edit
@@ -135,6 +150,8 @@ export async function run(argv: string[]) {
     allowPositionals: true,
     strict: true,
     options: {
+      set: { type: "boolean" },
+      inherit: { type: "boolean" },
       actor: { type: "string" },
       feather: { type: "string" },
       polygon: { type: "string" },
@@ -150,6 +167,7 @@ export async function run(argv: string[]) {
       "asset-only": { type: "boolean" },
       after: { type: "string" },
       "request-id": { type: "string" },
+      "build-key": { type: "string" },
       expect: { type: "string" },
       out: { type: "string" },
       "look-at": { type: "string" },
@@ -187,6 +205,7 @@ export async function run(argv: string[]) {
       remove: { type: "boolean" },
       "no-reconstruct": { type: "boolean" },
       reconstruct: { type: "boolean" },
+      "reference-only": { type: "boolean" },
       camera: { type: "string" },
       depth: { type: "boolean" },
       path: { type: "string" },
@@ -223,14 +242,18 @@ export async function run(argv: string[]) {
     field?: string;
     expected: unknown;
   }> = [];
+  const thread = process.env.CODEX_THREAD_ID ?? process.env.CODEX_SESSION_ID;
+  const actorId =
+    values.actor ??
+    process.env.IMAGE_TO_WORLD_ACTOR ??
+    (thread ? `Agent ${thread.slice(-12)}` : "CLI session");
   const request = async (route: string, init?: RequestInit) => {
     const response = await fetch(`${base}/api/${route}`, {
       ...init,
       headers: {
         "X-Image-To-World-Client": "cli",
         "X-Image-To-World-Context": JSON.stringify({
-          actorId:
-            values.actor ?? process.env.IMAGE_TO_WORLD_ACTOR ?? "CLI session",
+          actorId,
           requestId: values["request-id"] ?? crypto.randomUUID(),
           preconditions: [
             ...modulePreconditions,
@@ -435,6 +458,7 @@ export async function run(argv: string[]) {
     output({ ...result, nodeId: id, sourceAssetId, bundleAssetId });
   } else if (action === "schema") {
     const schemas = {
+      lighting: projectLightSchema,
       modules: proceduralSchema,
       commands: commandSchema,
       generation: generationSchema,
@@ -464,10 +488,13 @@ export async function run(argv: string[]) {
         )
       ).json(),
     );
-  } else if (action === "model") {
+  } else if (action === "inventory") {
+    output(objectInventory(await state()));
+  } else if (action === "model" || action === "fal") {
     await generate({
       kind: "model",
       model: need(sub, "model endpoint"),
+      buildKey: values["build-key"],
       input: await jsonFile(values.file),
     });
   } else if (action === "mask") {
@@ -509,7 +536,60 @@ export async function run(argv: string[]) {
       observationAssetId: need(values.observation, "--observation asset ID"),
       quaternion,
     });
+  } else if (action === "frame" && sub === "work") {
+    const [id, ...words] = rest;
+    const task = words.join(" ");
+    output(
+      await command({
+        type: "frame.work",
+        id: need(id, "Frame ID"),
+        actor: actorId,
+        description: task === "done" ? null : task,
+      }),
+    );
+  } else if (action === "lighting") {
+    const w = await state();
+    if (sub && w.nodes[sub]?.kind !== "capture")
+      throw new Error("Choose a Frame for reference lighting");
+    if (values.inherit && (!sub || values.file))
+      throw new Error("--inherit requires a Frame and no --file");
+    if (values.file || values.inherit) {
+      const data = values.file ? await jsonFile(values.file) : undefined;
+      output(
+        sub
+          ? await command({
+              type: "nodes.patch",
+              id: sub,
+              patch: {
+                lighting: values.inherit ? null : lightRigSchema.parse(data),
+              },
+            })
+          : await command({
+              type: "workspace.update",
+              settings: { lighting: projectLightSchema.parse(data) },
+            }),
+      );
+    } else if (sub) {
+      const project = w.settings.lighting ?? defaultLighting;
+      output({
+        frameId: sub,
+        inherited: !w.nodes[sub].lighting,
+        lighting: w.nodes[sub].lighting ?? frameRig(project),
+      });
+    } else output(w.settings.lighting ?? defaultLighting);
+  } else if (action === "probe") {
+    await generate({
+      kind: "probe",
+      position: values.position
+        ? vec3.parse(values.position.split(",").map(Number))
+        : undefined,
+      nodeId: need(sub, "camera or Frame ID"),
+      width: finite(values.width, 1024),
+      nodeIds: values.targets?.split(","),
+    });
   } else if (action === "render") {
+    if (values.set && !sub)
+      throw new Error("Pass a reference Frame or its camera with --set");
     const w = await state();
     const camera = values.camera
       ? cameraSchema.parse(await jsonFile(values.camera))
@@ -522,6 +602,8 @@ export async function run(argv: string[]) {
       );
     await generate({
       kind: "render",
+      lightingViewId: sub,
+      setOnly: values.set,
       camera,
       nodeIds: values.targets?.split(","),
       passes: values.passes?.split(",") as
@@ -788,10 +870,16 @@ export async function run(argv: string[]) {
         ...(values.out ? { file: path.resolve(values.out) } : {}),
       });
     } else if (sub === "place") {
+      if (values["reference-only"] && values.reconstruct)
+        throw new Error("Choose either --reference-only or --reconstruct");
       output(
         await command({
           type: "assets.place",
-          mode: values.reconstruct ? "reconstruct" : "individual",
+          mode: values["reference-only"]
+            ? "reference"
+            : values.reconstruct
+              ? "reconstruct"
+              : "individual",
           assetIds: rest,
           ...(values.parent
             ? { parentId: values.parent === "root" ? null : values.parent }
@@ -874,25 +962,29 @@ export async function run(argv: string[]) {
       throw new Error(
         "Use scene inspect, preview, add, put, move, duplicate, transform, or remove",
       );
+  } else if (action === "context" && sub === "guides") {
+    if (rest.length !== 1 || !["on", "off"].includes(rest[0]))
+      throw new Error("Use context guides on or off");
+    output(
+      await command({
+        type: "workspace.update",
+        settings: { display: frameGuideDisplay(rest[0] === "on") },
+      }),
+    );
   } else if (action === "context") {
     const workspace = await state();
     if (values.path && workspace.nodes[values.path]?.kind !== "path")
       throw new Error("Choose a camera path");
     const context = contextSettings(workspace, values.path);
     const frames = spatialContextFrames(workspace);
-    const active = new Set(
-      atlasContext(workspace, undefined, values.path).map(
-        (frame) => frame.node.id,
-      ),
-    );
     if (!sub || sub === "list")
       output({
         ...context,
         order: frames.map((node) => node.id),
         captures: frames,
-        activeIds: frames
-          .filter((node) => active.has(node.id))
-          .map((node) => node.id),
+        activeIds: atlasContextNodes(workspace, undefined, values.path)
+          .filter((frame) => captureFrameStatus(workspace, frame.id).frame)
+          .map((frame) => frame.id),
       });
     else {
       const captures = frames;
@@ -911,10 +1003,11 @@ export async function run(argv: string[]) {
       else if (sub === "freeze" || sub === "unfreeze")
         output(
           await command({
-            type: "nodes.put",
-            nodes: rest.map((id) => ({
-              ...workspace.nodes[id],
-              contextFrozen: sub === "freeze",
+            type: "edit.batch",
+            commands: rest.map((id) => ({
+              type: "nodes.patch",
+              id,
+              patch: { contextFrozen: sub === "freeze" },
             })),
           }),
         );
@@ -1007,6 +1100,7 @@ export async function run(argv: string[]) {
   else if (action === "atlas")
     await generate({
       kind: "view",
+      returnDepth: values.depth || undefined,
       contextPathId: values.path,
       ...(positionals.length > 1 ? { nodeIds: positionals.slice(1) } : {}),
       ...(values.camera
@@ -1090,12 +1184,6 @@ export async function run(argv: string[]) {
       videoAssetId: values.video,
       fps: finite(values.fps, 1),
       maxFrames: finite(values["max-frames"], 60),
-    });
-  else if (action === "fal")
-    await generate({
-      kind: "model",
-      model: need(sub, "endpoint"),
-      input: await jsonFile(values.file),
     });
   else if (action === "capture")
     await submit({

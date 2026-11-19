@@ -1,23 +1,37 @@
 import { ActivityFeed } from "./ActivityFeed";
 import {
   SidebarSimple,
+  FilmStrip,
+  ImageSquare,
   SlidersHorizontal,
-  SpinnerGap,
+  ChatCircleText,
 } from "@phosphor-icons/react";
 import { jobNames } from "../../../core/activity";
-import { useClientState, useWorkspaceData } from "../lib/client";
-import { Hint } from "./ui";
+import { useClientState, useWorkspaceData, useWorkspace } from "../lib/client";
+import { Hint, ToolbarIconButton } from "./ui";
+
+const icons = {
+  "Outline and assets": SidebarSimple,
+  "Image panel": ImageSquare,
+  "Spatial context": FilmStrip,
+  Properties: SlidersHorizontal,
+  "Agent guide": ChatCircleText,
+};
+function WorkspaceTitle() {
+  const name = useWorkspace((state) => state.name);
+  const revision = useWorkspace((state) => state.revision);
+  return (
+    <div className="project-title">
+      <span title={name}>{name}</span>
+      <small>rev {revision}</small>
+    </div>
+  );
+}
 
 export function EditorFooter({
-  navigationOpen,
-  propertiesOpen,
-  onNavigation,
-  onProperties,
+  panels,
 }: {
-  navigationOpen: boolean;
-  propertiesOpen: boolean;
-  onNavigation: () => void;
-  onProperties: () => void;
+  panels: { label: keyof typeof icons; open: boolean; onToggle: () => void }[];
 }) {
   const workspace = useWorkspaceData(
     ["nodes", "assets", "selection", "primaryId", "jobs"],
@@ -42,39 +56,35 @@ export function EditorFooter({
   const names = selected.map((item) => item.name).join(", ");
   return (
     <footer className="editor-footer" aria-label="Editor status">
-      <Hint
-        label={
-          navigationOpen ? "Hide outline and assets" : "Show outline and assets"
-        }
-      >
-        <button
-          className="footer-panel-toggle"
-          aria-expanded={navigationOpen}
-          aria-controls="workspace-navigation"
-          onClick={onNavigation}
-        >
-          <SidebarSimple />
-          <span>Outline / assets</span>
-        </button>
-      </Hint>
-      <ActivityFeed fallback={activity} />
+      <div className="footer-panels" role="toolbar" aria-label="Editor panels">
+        {panels.map(({ label, open, onToggle }) => {
+          const Icon = icons[label];
+          return (
+            <span
+              key={label}
+              className={
+                label === "Agent guide" ? "agent-guide-toggle" : undefined
+              }
+            >
+              <ToolbarIconButton
+                label={label}
+                aria-pressed={open}
+                onClick={onToggle}
+              >
+                <Icon />
+              </ToolbarIconButton>
+            </span>
+          );
+        })}
+      </div>
+      <WorkspaceTitle />
       <Hint label={names || "No selection"}>
         <div className="footer-selection">
           <span className="footer-selection-name">{names}</span>
           <span>{selected.length} selected</span>
         </div>
       </Hint>
-      <Hint label={propertiesOpen ? "Hide properties" : "Show properties"}>
-        <button
-          className="footer-panel-toggle"
-          aria-expanded={propertiesOpen}
-          aria-controls="workspace-properties"
-          onClick={onProperties}
-        >
-          <SlidersHorizontal />
-          <span>Properties</span>
-        </button>
-      </Hint>
+      <ActivityFeed fallback={activity} />
     </footer>
   );
 }

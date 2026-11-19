@@ -7,6 +7,7 @@ export class CameraTransition {
     from: PerspectiveCamera;
     to: PerspectiveCamera;
     startedAt: number;
+    duration: number;
   };
 
   constructor(private camera: PerspectiveCamera) {}
@@ -15,11 +16,16 @@ export class CameraTransition {
     return this.movement !== undefined;
   }
 
-  start(target: PerspectiveCamera, now: number) {
+  start(
+    target: PerspectiveCamera,
+    now: number,
+    duration = CAMERA_TRANSITION_MS,
+  ) {
     this.movement = {
       from: this.camera.clone(),
       to: target.clone(),
       startedAt: now,
+      duration,
     };
   }
 
@@ -29,16 +35,13 @@ export class CameraTransition {
 
   finish() {
     if (this.movement)
-      this.update(this.movement.startedAt + CAMERA_TRANSITION_MS);
+      this.update(this.movement.startedAt + this.movement.duration);
   }
 
   update(now: number) {
     if (!this.movement) return;
-    const { from, to, startedAt } = this.movement;
-    const progress = Math.max(
-      0,
-      Math.min(1, (now - startedAt) / CAMERA_TRANSITION_MS),
-    );
+    const { from, to, startedAt, duration } = this.movement;
+    const progress = Math.max(0, Math.min(1, (now - startedAt) / duration));
     const alpha = 1 - (1 - progress) ** 3;
     this.camera.position.lerpVectors(from.position, to.position, alpha);
     this.camera.quaternion.slerpQuaternions(

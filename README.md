@@ -1,7 +1,9 @@
 # image-to-world
 
 image-to-world is a local asset creation toolkit for building 3D scenes from
-images, generated meshes, existing assets, and procedural code. Atlas provides
+reference images, parametric Three.js geometry, shader materials, and generated
+or imported assets. Model and light each set in the WebGPU viewport and inspect
+it from independent cameras. Atlas provides
 posed image context, new environment views, and camera-path videos. The browser
 and CLI share a filesystem workspace. Generation runs in the background while
 you keep editing.
@@ -70,12 +72,42 @@ the old server, and launch again. Startup never updates code or dependencies.
 Back up project directories before changing versions; rolling back the app does
 not roll back project data, and older versions may reject newer project formats.
 
+## Play and export a scene
+
+Click **Play** in the center of the header. Drag a loose object from the point you want to hold, or pull a jointed part to move its mechanism. Right-drag to look and use WASD to fly. On a touch screen, drag empty space to look around. **Stop** or **Esc** returns to the authored scene and camera. Simulation runs locally and each visitor has their own session.
+
+Mesh and procedural nodes expose **Rigid body** in Properties. **Automatic** runs an authored rig or treats mesh geometry as static scenery. Choose **Dynamic** for a movable prop. Procedural modules can supply lightweight colliders and jointed assemblies such as the lamps in Canopy Studio. See [bodies and joints](skills/image-to-world/references/modules.md#bodies-and-joints).
+
+**Open in web** opens the current scene in a full-window player. **Export** in the viewport saves a ZIP with an HTML entry point, the Three.js player, scene data and its runtime assets. Unzip it into a directory on a static web host and open that directory's `index.html`. For a local preview, run `python3 -m http.server` inside the extracted directory.
+
+Embed the scene in another site with an iframe, or import the player for direct control of its lifecycle. The archive includes a working page.
+
+```html
+<iframe src="./studio/index.html" title="Canopy Studio" allowfullscreen
+  style="width:100%;height:70vh;border:0"></iframe>
+```
+
+For a custom interaction, mount into a sized element and use the returned Three.js scene and camera from your own code.
+
+```js
+import { mountScene, THREE } from "./studio/scene-player.js";
+
+const player = await mountScene(document.querySelector("#studio"), "./studio/scene.json");
+player.scene.add(new THREE.HemisphereLight(0xfff0cf, 0x46404a, 0.3));
+await player.play();
+// Call player.stop() to reset physics, or await player.dispose() on unmount.
+```
+
+Declare module resources through `assetUrl(id)` so they travel in the ZIP. Any external service your custom JavaScript calls still needs to be reachable from the published site.
+
 ## Editor layout and shortcuts
 
-The viewport sits above the image editor. Spatial context and Atlas generation
-controls occupy the full-height far-right dock. Outline, project assets, and
-properties open in their respective side panels; generation history and agent
-activity are accessible from the top bar. Image versions and edit history open
+Turn on **Auto** beside Focus in the viewport to follow new agent scene edits. The camera eases toward the changed objects in your browser and yields to manual navigation, camera review, and Play. Hover a colored cursor to see its actor’s latest activity. The footer activity monitor lists recently active actors, including those working on global settings, and can hide cursors. The CLI recognizes Codex thread identity automatically. A worker can use its existing `--actor` or `IMAGE_TO_WORLD_ACTOR` name.
+
+The editor opens with Spatial context visible along the bottom. Use the footer buttons to toggle the strip or open the outline, where image Frames start expanded. The centered header row offers Import, the Frame count, Play and Open in web. Select a projected slug to select its Frame, or click its spatial-context thumbnail to view it and describe an image edit. The spinner shows active work on hover. Open the image editor from the footer for layers and history. Spatial context and Atlas generation
+controls share the resizable horizontal dock above the footer. Outline, project assets, and
+properties open in their respective side panels; generation history opens from the viewport and agent
+activity opens from the bottom right. Image versions and edit history open
 from the image editor's floating controls. Its centered edit prompt bar is capped
 at 480px and shrinks with the panel. Drag dividers to resize panes, or focus a
 divider and use arrows, Home, or End. Workspace settings includes Reset layout.
@@ -196,7 +228,9 @@ The CLI composites the same draft on the server before uploading PNG bytes to FA
 ## Build scenes and generate views
 
 Import images, linear EXR depth, logarithmic depth PNGs, SPZ/PLY splats, or video.
-Imported images become posed point clouds after **Pose images** completes. Select
+**Pose images** gives each Frame a camera and depth points. Its depth guide is visible for layout. Use **Input** while viewing its camera to compare the original. **Frame guides** in Spatial context hides the depth guides together when modeling begins. To model directly from a reference
+without depth estimation, use `scene place <image-id> --reference-only`.
+This local operation places the Frame at your chosen camera and makes no provider request. Select
 posed image nodes as Atlas context and generate a view from the current camera.
 The inspector can also attach a depth asset and camera metadata to an image.
 
@@ -446,9 +480,9 @@ Fork the repository, make changes on a branch, and run `bun run check`,
 
 Licensed under [Apache-2.0](LICENSE).
 
-### Create an image in the viewport
+### Create an image at the current view
 
-Type a prompt into the viewport's top bar and press Enter. A Frame and placeholder
+Open **Generation tools** in the viewport, enter an image prompt, and press Enter. A Frame and placeholder
 camera appear immediately at the current horizontal position and yaw. FLUX Schnell
 creates the image through FAL, then the ordinary World Labs image-posing workflow
 fills that same Frame with the calibrated image and points. Solved height
@@ -550,6 +584,14 @@ assets, available through the usual export command. `schema commands` includes
 `camera.aim` and `jobs.submit`; `schema jobs` describes both new local job kinds.
 The bundled [ImageToWorld agent skill](skills/image-to-world/SKILL.md) teaches the same paths.
 
+## Build a movable reference set
+
+Use [SVG & 3D Design](https://chatgpt.com/plugins/Plugin_13c5903473e081919917a1070fad1dd1?open_in_app) for asset construction and composition and the [image-to-world companion](skills/image-to-world/SKILL.md) for editor commands. Ask the agent to build from an image in this editor. The Frame owns the camera and its set. Select the Frame in the Outline and use the viewport gizmo to move or rotate it while workers add objects underneath it. Review through the source camera, tune that shot’s lighting, and fly out to check the arrangement. Start by grounding the posed inputs. Choose who arranges disconnected views, leaving their observed volumes clear of each other. Outpaint the gaps with sparse Atlas cameras before modeling. Generated depth guides display at half opacity until frozen. Turn Frame guides off and use the connected views to build the environment and its assets.
+
+The [Moonlit Workshop example](examples/moonlit-workshop/README.md) rebuilds an
+illustrated attic from six local modules, including the rumpled quilt, wooden
+joinery and a light that projects a shoji window pattern.
+
 ## Image decomposition and parallel agents
 
 Posed views can become independently editable mesh objects. The CLI provides
@@ -566,6 +608,10 @@ the shared scene in a separate worker, so several agents never fight over the
 human viewport. Color works with points, splats and meshes; mask, ID and linear
 EXR depth passes currently require mesh-only targets.
 
+When a point cloud or splat is visible, Spark sorts and draws its Gaussians in a
+WebGL2 layer. Opaque geometry supplies its depth buffer. Transparent meshes
+draw after that layer, so glass crossing a cloud can show a sorting seam.
+
 Commands accept optional actor identities, idempotency keys and field preconditions.
 Jobs retain immutable input bytes. The footer Activity drawer records automatic
 command/job history with Summary, Actions and Trace detail, actor/severity filters,
@@ -573,13 +619,13 @@ search and linked resources. Colored resource badges and optional fading viewpor
 markers indicate recent work. These overlays are local editor state, excluded from
 picking, scene bounds, exports and generated views; agents do not manage them.
 
-This build uses project schema version 5. Older projects are rejected explicitly;
+Older project schemas are rejected explicitly;
 there is no automatic migration or rewriting of existing projects. Open a fresh
 project to try this workflow.
 
 ## Procedural code nodes
 
-Create Three.js content in the existing viewport from a local TypeScript or JavaScript module:
+Author parametric geometry and original materials in the existing viewport from a local TypeScript or JavaScript module. Both the editor and independent camera renders use the Three.js node renderer. It selects WebGPU on a supported device and WebGL2 on other supported browsers. Import node materials from `three/webgpu` and compose their shading with [Three.js Shading Language](https://threejs.org/tsl/).
 
 ```sh
 bun run image-to-world module add examples/procedural-orbit.ts --name "Orbit sculpture"
@@ -589,12 +635,17 @@ bun run image-to-world module inspect <node-id>
 ```
 
 Modules default-export `defineSceneModule({ create(context) { ... } })`, imported from
-`image-to-world/runtime`. The context supplies the editor's `THREE` and `spark`,
-scalar `params`, seeded `random()`, an abort `signal`, and `assetUrl(id)` for dependencies
+`image-to-world/runtime`. The context supplies the editor's `THREE`, `webgpu`, `tsl` and `spark`,
+JSON `params`, seeded `random()`, an abort `signal`, and `assetUrl(id)` for dependencies
 listed with `--assets id,id`. Three.js imports and addons share the editor's engine.
 Local module imports are bundled. Each build retains source files, their relative paths,
 and the compiled bundle in project assets. Code is trusted executable project content;
 it runs in the browser, not in a security sandbox. Only load code you trust.
+
+Use `context.gpu.compute(kernel)` to dispatch TSL compute work on the same renderer
+as the node's material. A module can generate its geometry, shade its own imported
+GLB, or fill GPU attributes for an animated mesh. The [module contract and shader example](skills/image-to-world/references/modules.md)
+cover parameter editing, deterministic sampling, bounds and cleanup.
 
 Return `{ object, sample?, bounds?, dispose? }`. `object` is a Three.js Object3D subtree
 owned by this node. The editor handles selection, transforms, parenting, visibility,

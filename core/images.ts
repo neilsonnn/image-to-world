@@ -138,7 +138,11 @@ export function imageVersionNodes(
       ? workspace.assets[geometryAssetId]
       : undefined;
     nodes[id] = { ...capture, assetId, geometryAssetId };
-    nodes[points.id] = { ...points, assetId, geometryAssetId };
+    nodes[points.id] = {
+      ...points,
+      assetId: geometryAssetId ? assetId : undefined,
+      geometryAssetId,
+    };
     nodes[image.id] = {
       ...image,
       assetId,

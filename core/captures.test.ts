@@ -95,6 +95,10 @@ test("pose completion preserves moved parents and never resurrects deleted captu
     nodes: createCapture(source, "capture", workspace.settings.viewportCamera),
   });
   workspace.nodes.capture.transform.position = [10, 2, 12];
+  expect(workspace.nodes.capture_image.visible).toBe(false);
+  expect(workspace.nodes.capture_points.visible).toBe(false);
+  // A user can enable one guide before the pending pose completes.
+  workspace.nodes.capture_points.visible = true;
   completeCapture(
     workspace,
     "capture",
@@ -103,6 +107,9 @@ test("pose completion preserves moved parents and never resurrects deleted captu
   );
   expect(workspace.nodes.capture.transform.position).toEqual([10, 2, 12]);
   expect(workspace.nodes.capture_camera.transform.position[1]).toBe(1.7);
+  expect(workspace.nodes.capture_points.visible).toBe(true);
+  expect(workspace.nodes.capture_image.visible).toBe(false);
+  expect(atlasContext(workspace)).toHaveLength(1);
   applyCommand(workspace, { type: "nodes.remove", ids: ["capture"] });
   expect(() => completeCapture(workspace, "capture", asset)).toThrow(
     "parent is missing",

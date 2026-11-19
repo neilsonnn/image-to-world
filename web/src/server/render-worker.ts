@@ -86,7 +86,9 @@ export class RenderWorker {
     this.browser = await chromium.launch({
       executablePath,
       headless: true,
-      args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader"],
+      // Prefer the native WebGPU adapter. SwiftShader remains available for
+      // WebGL2 fallback on machines without a hardware adapter.
+      args: ["--enable-unsafe-swiftshader"],
     });
     this.page = await this.browser.newPage();
     await this.page.route("**/*", (route) => {
@@ -104,12 +106,14 @@ export class RenderWorker {
       { timeout: 30000 },
     );
   }
-  render(job: Job, signal: AbortSignal): Promise<Asset[]> {
-    const task = this.tail.then(() => this.run(job, signal));
+  // The page and asset bridge are shared. Serialize GPU work while callers
+  // are free to post-process the returned pixels independently.
+  capture(job: Job, signal: AbortSignal): Promise<RenderResult> {
+    const task = this.tail.then(() => this.captureFrame(job, signal));
     this.tail = task.catch(() => {});
     return task;
   }
-  private async run(job: Job, signal: AbortSignal) {
+  private async captureFrame(job: Job, signal: AbortSignal) {
     if (job.input.kind !== "render")
       throw new Error("Expected a render request");
     const input = job.input;
@@ -121,9 +125,10 @@ export class RenderWorker {
       throw new Error("Invalid render size or clipping planes");
     signal.throwIfAborted();
     await this.init();
-    this.active = job;
+    signal.throwIfAborted();
     if (job.snapshotRevision === undefined || !job.contextSnapshot)
       throw new Error("Render requires a frozen scene snapshot");
+    this.active = job;
     const snapshot = {
       ...this.store.snapshot(),
       ...job.contextSnapshot,
@@ -135,7 +140,10 @@ export class RenderWorker {
     };
     signal.addEventListener("abort", abort, { once: true });
     try {
-      const result = await this.page!.evaluate(
+      const result = await this.page!.evaluate<
+        RenderResult,
+        { workspace: unknown; input: typeof input }
+      >(
         async ({ workspace, input }) => {
           return (
             globalThis as unknown as {
@@ -149,115 +157,105 @@ export class RenderWorker {
         { workspace: snapshot, input },
       );
       signal.throwIfAborted();
-      const outputs: Asset[] = [];
-      for (const [pass, data] of Object.entries(result.outputs)) {
-        let blob = new Blob([Buffer.from(data, "base64")], {
-          type: "image/png",
-        });
-        if (pass === "depth") {
-          const { width, height } = input.camera.intrinsics;
-          const pixels = Buffer.from(data, "base64");
-          const depths = new Float32Array(width * height);
-          if (pixels.length !== depths.length * 4)
-            throw new Error("Invalid depth render buffer");
-          for (let y = 0; y < height; y++)
-            for (let x = 0; x < width; x++) {
-              const at = ((height - 1 - y) * width + x) * 4;
-              const r = pixels[at],
-                g = pixels[at + 1],
-                b = pixels[at + 2],
-                a = pixels[at + 3];
-              const d =
-                r / 256 + g / 65536 + b / 16777216 + a / (255 * 16777216);
-              depths[y * width + x] =
-                r === 0 && g === 0 && b === 0 && a === 0
-                  ? NaN
-                  : (input.near * input.far) /
-                    (input.far - d * (input.far - input.near));
-            }
-          blob = await encodeDepth({ data: depths, width, height, stride: 1 });
-        }
-        outputs.push(
-          await this.store.importFile(
-            blob,
-            `${job.id}-${pass}.${pass === "depth" ? "exr" : "png"}`,
-            {
-              jobId: job.id,
-              role:
-                pass === "depth"
-                  ? "depth"
-                  : pass === "mask"
-                    ? "mask"
-                    : "render",
-              camera: input.camera,
-            },
-          ),
-        );
-      }
-      if (input.referenceAssetId && result.outputs.color) {
-        const { file } = await this.store.assetFile(input.referenceAssetId);
-        const ref = await loadImage(file),
-          render = await loadImage(Buffer.from(result.outputs.color, "base64"));
-        const canvas = createCanvas(render.width * 2, render.height),
-          ctx = canvas.getContext("2d");
-        ctx.drawImage(ref, 0, 0, render.width, render.height);
-        ctx.drawImage(render, render.width, 0);
-        outputs.push(
-          await this.store.importFile(
-            new Blob([new Uint8Array(canvas.toBuffer("image/png"))], {
-              type: "image/png",
-            }),
-            `${job.id}-comparison.png`,
-            { jobId: job.id, role: "render" },
-          ),
-        );
-      }
-      if (input.referenceAssetId && result.outputs.color) {
-        const { file } = await this.store.assetFile(input.referenceAssetId);
-        const ref = await loadImage(file),
-          render = await loadImage(Buffer.from(result.outputs.color, "base64"));
-        const canvas = createCanvas(render.width, render.height),
-          ctx = canvas.getContext("2d");
-        ctx.drawImage(ref, 0, 0, render.width, render.height);
-        ctx.globalAlpha = 0.65;
-        ctx.drawImage(render, 0, 0);
-        outputs.push(
-          await this.store.importFile(
-            new Blob([new Uint8Array(canvas.toBuffer("image/png"))], {
-              type: "image/png",
-            }),
-            `${job.id}-overlay.png`,
-            { jobId: job.id, role: "render" },
-          ),
-        );
-      }
-      const { outputs: _pixels, ...manifest } = result;
-      outputs.push(
-        await this.store.importFile(
-          new Blob(
-            [
-              JSON.stringify(
-                {
-                  ...manifest,
-                  outputAssetIds: outputs.map((a) => a.id),
-                  depthConvention:
-                    "positive camera-forward scene units; top-left pixels; 0 invalid",
-                },
-                null,
-                2,
-              ),
-            ],
-            { type: "application/json" },
-          ),
-          `${job.id}-render.json`,
-          { jobId: job.id, role: "raw-result" },
-        ),
-      );
-      return outputs;
+      return result;
     } finally {
       signal.removeEventListener("abort", abort);
       this.active = undefined;
     }
+  }
+  async render(job: Job, signal: AbortSignal): Promise<Asset[]> {
+    if (job.input.kind !== "render")
+      throw new Error("Expected a render request");
+    const input = job.input;
+    const result = await this.capture(job, signal);
+    const outputs: Asset[] = [];
+    for (const [pass, data] of Object.entries(result.outputs)) {
+      let blob = new Blob([Buffer.from(data, "base64")], {
+        type: "image/png",
+      });
+      if (pass === "depth") {
+        const { width, height } = input.camera.intrinsics;
+        const pixels = Buffer.from(data, "base64");
+        const depths = new Float32Array(width * height);
+        if (pixels.length !== depths.length * 4)
+          throw new Error("Invalid depth render buffer");
+        for (let i = 0; i < depths.length; i++)
+          depths[i] = pixels.readFloatLE(i * 4);
+        blob = await encodeDepth({ data: depths, width, height, stride: 1 });
+      }
+      outputs.push(
+        await this.store.importFile(
+          blob,
+          `${job.id}-${pass}.${pass === "depth" ? "exr" : "png"}`,
+          {
+            jobId: job.id,
+            role:
+              pass === "depth" ? "depth" : pass === "mask" ? "mask" : "render",
+            camera: input.camera,
+          },
+        ),
+      );
+    }
+    if (input.referenceAssetId && result.outputs.color) {
+      const { file } = await this.store.assetFile(input.referenceAssetId);
+      const ref = await loadImage(file),
+        render = await loadImage(Buffer.from(result.outputs.color, "base64"));
+      const canvas = createCanvas(render.width * 2, render.height),
+        ctx = canvas.getContext("2d");
+      ctx.drawImage(ref, 0, 0, render.width, render.height);
+      ctx.drawImage(render, render.width, 0);
+      outputs.push(
+        await this.store.importFile(
+          new Blob([new Uint8Array(canvas.toBuffer("image/png"))], {
+            type: "image/png",
+          }),
+          `${job.id}-comparison.png`,
+          { jobId: job.id, role: "render" },
+        ),
+      );
+    }
+    if (input.referenceAssetId && result.outputs.color) {
+      const { file } = await this.store.assetFile(input.referenceAssetId);
+      const ref = await loadImage(file),
+        render = await loadImage(Buffer.from(result.outputs.color, "base64"));
+      const canvas = createCanvas(render.width, render.height),
+        ctx = canvas.getContext("2d");
+      ctx.drawImage(ref, 0, 0, render.width, render.height);
+      ctx.globalAlpha = 0.65;
+      ctx.drawImage(render, 0, 0);
+      outputs.push(
+        await this.store.importFile(
+          new Blob([new Uint8Array(canvas.toBuffer("image/png"))], {
+            type: "image/png",
+          }),
+          `${job.id}-overlay.png`,
+          { jobId: job.id, role: "render" },
+        ),
+      );
+    }
+    const { outputs: _pixels, ...manifest } = result;
+    outputs.push(
+      await this.store.importFile(
+        new Blob(
+          [
+            JSON.stringify(
+              {
+                ...manifest,
+                outputAssetIds: outputs.map((a) => a.id),
+                depthConvention:
+                  "positive camera-forward scene units; top-left pixels; 0 invalid",
+              },
+              null,
+              2,
+            ),
+          ],
+          { type: "application/json" },
+        ),
+        `${job.id}-render.json`,
+        { jobId: job.id, role: "raw-result" },
+      ),
+    );
+    return outputs;
   }
   async close() {
     await this.tail;

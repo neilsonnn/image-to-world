@@ -1,3 +1,4 @@
+import { LightingProperties } from "./LightingProperties";
 import { ProceduralProperties } from "./ProceduralProperties";
 import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
 import { Button, TextField } from "@radix-ui/themes";
@@ -9,6 +10,7 @@ import { NumericInput } from "./NumericInput";
 import { Field } from "./panelShared";
 import { Hint, PanelHeader } from "./ui";
 import { transformCapabilities } from "../../../core/node-capabilities";
+import { physicsTypes, supportsNodePhysics } from "../../../core/physics";
 
 function common<T>(values: T[]): T | undefined {
   if (!values.length) return undefined;
@@ -291,9 +293,63 @@ export function InspectorPanel({
           </section>
         )}
 
+        {(named.length === 0 ||
+          (named.length === 1 && primaryNode?.kind === "capture")) && (
+          <LightingProperties frameId={primaryNode?.id} />
+        )}
+
         {nodes.length === 1 && primaryNode?.procedural && (
           <ProceduralProperties node={primaryNode} />
         )}
+
+        {nodes.length === 1 &&
+          primaryNode &&
+          supportsNodePhysics(primaryNode.kind) && (
+            <section className="property-section">
+              <h3>Play mode</h3>
+              <Field label="Rigid body">
+                <select
+                  aria-label="Rigid body"
+                  disabled={primaryNode.locked}
+                  value={primaryNode.physics?.type ?? "auto"}
+                  onChange={(event) => {
+                    const type = physicsTypes.find(
+                      (item) => item === event.target.value,
+                    );
+                    const previous = primaryNode.physics;
+                    const solid =
+                      previous?.type === "none" ? undefined : previous;
+                    const physics = !type
+                      ? null
+                      : type === "none"
+                        ? { type }
+                        : {
+                            ...solid,
+                            type,
+                            collider:
+                              type === "dynamic" && solid?.collider === "mesh"
+                                ? undefined
+                                : solid?.collider,
+                          };
+                    void safeCommand({
+                      type: "nodes.patch",
+                      id: primaryNode.id,
+                      patch: { physics },
+                    });
+                  }}
+                >
+                  <option value="auto">
+                    Automatic (authored rig or static)
+                  </option>
+                  {physicsTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type[0].toUpperCase() + type.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </section>
+          )}
 
         {clipNodes.length > 0 && (
           <section className="property-section">

@@ -1,5 +1,6 @@
 import {
   activitySchema,
+  isAgentActivity,
   type Activity,
   type Operation,
 } from "../../../core/activity";
@@ -29,6 +30,8 @@ export type ClientState = {
   lastOperation: Operation | null;
   activity?: Activity[];
   showPresence?: boolean;
+  followAgentEdits?: boolean;
+  liveSceneChange?: Activity;
   error: string | null;
 };
 
@@ -228,6 +231,12 @@ export function createImageToWorldClient() {
           JSON.parse((event as MessageEvent).data),
         );
         store.setState((state) => ({
+          ...(state.followAgentEdits &&
+          activity.phase === "succeeded" &&
+          activity.sceneChange?.major &&
+          isAgentActivity(activity)
+            ? { liveSceneChange: activity }
+            : {}),
           activity: [
             ...(state.activity ?? []).filter((e) => e.id !== activity.id),
             activity,

@@ -84,11 +84,12 @@ export function generationInput(
   switch (r.kind) {
     case "mask":
     case "render":
+    case "probe":
     case "observe":
     case "fit":
       return r;
     case "model":
-      return { kind: "fal", model: r.model, input: r.input };
+      return { ...r, kind: "fal" };
     case "image.create":
       return {
         kind: "image",

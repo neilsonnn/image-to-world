@@ -1,11 +1,120 @@
 import { expect, test, spyOn } from "bun:test";
-import { Scene, Raycaster, Vector2, Vector3 } from "three";
+import {
+  Scene,
+  Raycaster,
+  Vector2,
+  Vector3,
+  Mesh,
+  InstancedMesh,
+  Matrix4,
+  BoxGeometry,
+  Texture,
+  Group,
+  WebGPUCoordinateSystem,
+} from "three";
+import { MeshStandardNodeMaterial, type ComputeNode } from "three/webgpu";
+import { texture } from "three/tsl";
 import { emptyWorkspace, nodeSchema, assetSchema } from "../../../core/schema";
 import { applyCommand } from "../../../core/commands";
 import { SceneGraph } from "./scene";
+import { disposeObject } from "./resources";
+import { createProcedural } from "./procedural";
+import { geometrySpatial } from "./spatial";
+
+test("parametric instances contribute their placed bounds inside transformed groups", () => {
+  const mesh = new InstancedMesh(
+    new BoxGeometry(2, 2, 2),
+    new MeshStandardNodeMaterial(),
+    2,
+  );
+  mesh.setMatrixAt(0, new Matrix4().makeTranslation(-3, 0, 0));
+  mesh.setMatrixAt(1, new Matrix4().makeTranslation(7, 0, 0));
+  const tilted = new Group().add(mesh);
+  tilted.scale.setScalar(2);
+  tilted.rotation.z = Math.PI / 2;
+  tilted.position.set(4, 5, 0);
+  const root = new Group().add(tilted);
+  const bounds = geometrySpatial(root).getBounds();
+  expect(bounds.min.y).toBeCloseTo(-3);
+  expect(bounds.max.y).toBeCloseTo(21);
+  expect(bounds.min.x).toBeCloseTo(2);
+  expect(bounds.max.x).toBeCloseTo(6);
+  disposeObject(root);
+});
+
+test("shared procedural geometry and textures inside a TSL graph release once", () => {
+  const map = new Texture();
+  const material = new MeshStandardNodeMaterial();
+  material.colorNode = texture(map).mul(0.8);
+  material.roughnessNode = texture(map).r;
+  const geometry = new BoxGeometry();
+  const group = new Group().add(
+    new Mesh(geometry, material),
+    new Mesh(geometry, material),
+  );
+  const resources = [map, geometry, material].map((resource) =>
+    spyOn(resource, "dispose"),
+  );
+  disposeObject(group);
+  for (const resource of resources) expect(resource).toHaveBeenCalledTimes(1);
+});
 
 const respond = (text: string): typeof fetch =>
   Object.assign(async () => new Response(text), { preconnect() {} });
+
+test("module compute is scoped to its owning renderer and abort releases dispatched kernels", async () => {
+  const source = `export default { create({THREE, tsl, gpu}) {
+    const kernel = tsl.Fn(() => {})().compute(1);
+    return {object: new THREE.Group(), sample() {gpu.compute(kernel)}};
+  }}`;
+  const fetcher = spyOn(globalThis, "fetch").mockImplementation(
+    respond(source),
+  );
+  const asset = assetSchema.parse({
+    id: "bundle",
+    kind: "file",
+    name: "a.js",
+    mimeType: "text/javascript",
+    path: "a.js",
+    size: 1,
+    modifiedAt: 0,
+  });
+  const node = nodeSchema.parse({
+    id: "module",
+    kind: "procedural",
+    name: "module",
+    procedural: { sourceAssetId: asset.id, bundleAssetId: asset.id },
+  });
+  const controller = new AbortController();
+  const calls: ComputeNode[] = [];
+  try {
+    const instance = await createProcedural(
+      node,
+      { bundle: asset },
+      controller.signal,
+      () => ({
+        initialized: true,
+        coordinateSystem: WebGPUCoordinateSystem,
+        compute(node) {
+          calls.push(...(Array.isArray(node) ? node : [node]));
+          return undefined;
+        },
+      }),
+    );
+    instance!.sample!({ time: 0 });
+    instance!.sample!({ time: 1 });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toBe(calls[1]);
+    const release = spyOn(calls[0], "dispose");
+    controller.abort();
+    expect(() => instance!.sample!({ time: 2 })).toThrow();
+    instance!.dispose();
+    expect(release).toHaveBeenCalledTimes(1);
+  } finally {
+    controller.abort();
+    fetcher.mockRestore();
+  }
+});
 
 const source = `export default { create({THREE, params}) {
  const object = new THREE.Mesh(new THREE.BoxGeometry(Number(params.size ?? 2),2,2), new THREE.MeshBasicMaterial());

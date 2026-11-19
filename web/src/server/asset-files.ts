@@ -11,8 +11,15 @@ function containsId(value: unknown, ids: Set<string>): boolean {
 }
 
 function checkReferences(state: Workspace, ids: Set<string>) {
+  const environmentId = state.settings.lighting?.environmentAssetId;
+  if (environmentId && ids.has(environmentId))
+    throw new Error("Remove this image from scene lighting before trashing it");
   for (const node of Object.values(state.nodes))
-    if (ids.has(node.assetId ?? "") || ids.has(node.geometryAssetId ?? ""))
+    if (
+      ids.has(node.assetId ?? "") ||
+      ids.has(node.geometryAssetId ?? "") ||
+      node.observationAssetIds?.some((id) => ids.has(id))
+    )
       throw new Error(
         `Remove "${node.name}" from the scene before trashing its asset`,
       );

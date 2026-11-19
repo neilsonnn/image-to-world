@@ -1,3 +1,4 @@
+import { useActiveAgents } from "./AgentCursors";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   latestActivities,
@@ -28,21 +29,10 @@ export function ActivityFeed({ fallback }: { fallback: string }) {
   const [actor, setActor] = useState(""),
     [severity, setSeverity] = useState(""),
     [search, setSearch] = useState("");
-  const [now, setNow] = useState(Date.now());
   const list = useRef<HTMLDivElement>(null),
     following = useRef(true);
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 5000);
-    return () => clearInterval(t);
-  }, []);
   const actors = [...new Set(events.map((e) => e.actorId))];
-  const active = [
-    ...new Set(
-      recentActivities(events, now)
-        .filter((e) => !["You", "System"].includes(e.actorId))
-        .map((e) => e.actorId),
-    ),
-  ];
+  const active = useActiveAgents();
   const visible = useMemo(() => {
     const ranks = { summary: 0, actions: 1, trace: 2 };
     const filtered = (
@@ -86,8 +76,8 @@ export function ActivityFeed({ fallback }: { fallback: string }) {
           <span>
             {last ? `${last.actorId} · ${last.name} · ${last.phase}` : fallback}
           </span>
-          {active.length > 0 && (
-            <span className="activity-count">{active.length} active</span>
+          {active.size > 0 && (
+            <span className="activity-count">{active.size} active</span>
           )}
         </button>
       </Hint>
@@ -114,6 +104,17 @@ export function ActivityFeed({ fallback }: { fallback: string }) {
               <X size={14} />
             </ToolbarIconButton>
           </PanelHeader>
+          {active.size > 0 && (
+            <div className="activity-agents" aria-label="Active agents">
+              {[...active].map(([actor, { latest }]) => (
+                <Hint key={actor} label={latest.name + " · " + latest.phase}>
+                  <span tabIndex={0} style={{ color: actorColor(actor) }}>
+                    {actor}
+                  </span>
+                </Hint>
+              ))}
+            </div>
+          )}
           <div className="activity-filters">
             {[
               {

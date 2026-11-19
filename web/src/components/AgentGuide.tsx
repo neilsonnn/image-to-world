@@ -3,8 +3,14 @@ import { Button } from "@radix-ui/themes";
 import { useEffect, useRef, useState } from "react";
 import { PanelHeader, ToolbarIconButton } from "./ui";
 
-const installMessage =
-  "Open https://github.com/neilsonnn/worldbash and follow the README to install image-to-world locally. Read skills/image-to-world/SKILL.md so you know how to use its CLI. Launch a new local project, help me configure any needed API keys through the app's Environment variables screen, and then ask me what I want to build.";
+function agentMessage(editorUrl: string) {
+  return [
+    `Work in my open image-to-world project at ${editorUrl}. Pass --url ${editorUrl} to its CLI and run status to confirm the workspace.`,
+    "Use OpenAI’s SVG & 3D Design skill for construction and visual review. Use image-to-world as the authoring tool. Its editor companion is skills/image-to-world/SKILL.md in https://github.com/neilsonnn/worldbash.",
+    "Give each Frame a distinct two- or three-word frameSlug. Use frame work <frame-id> with a short task description and --actor as you build. Report done with the same actor when you finish.",
+    "Pose and ground the inputs first. For multiple views, ask who will arrange them. Keep disconnected input volumes apart, then use sparse Atlas views to connect the gaps. Turn Frame guides off before building the parametric environment and props. Check the result through several cameras.",
+  ].join("\n\n");
+}
 
 export function AgentGuide({ onClose }: { onClose: () => void }) {
   const [copied, setCopied] = useState(false);
@@ -13,7 +19,7 @@ export function AgentGuide({ onClose }: { onClose: () => void }) {
   useEffect(() => () => clearTimeout(timer.current), []);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(installMessage);
+      await navigator.clipboard.writeText(agentMessage(window.location.origin));
       setCopied(true);
       setCopyError(false);
       clearTimeout(timer.current);

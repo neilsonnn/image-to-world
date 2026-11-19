@@ -38,35 +38,36 @@ export async function integrateAssets(
     captures.push(capture);
   }
   signal?.throwIfAborted();
-  if (captures.length)
-    await store.update((state) => {
-      signal?.throwIfAborted();
-      const current = imageIndex(state).capturesByAsset;
-      const added = captures.flatMap((capture) =>
-        state.nodes[capture[0].id] || current.has(capture[0].assetId!)
-          ? []
-          : capture,
-      );
-      if (added.length) {
-        applyCommand(state, {
-          type: "edit.batch",
-          commands: [
-            { type: "nodes.put", nodes: added },
-            ...(placement?.parentId !== undefined ||
-            placement?.beforeId !== undefined
-              ? [
-                  {
-                    type: "nodes.move" as const,
-                    ids: added
-                      .filter((node) => node.parentId === null)
-                      .map((node) => node.id),
-                    parentId: placement.parentId ?? null,
-                    beforeId: placement.beforeId,
-                  },
-                ]
-              : []),
-          ],
-        });
-      }
-    });
+  if (!captures.length) return [];
+  return store.update((state) => {
+    signal?.throwIfAborted();
+    const current = imageIndex(state).capturesByAsset;
+    const added = captures.flatMap((capture) =>
+      state.nodes[capture[0].id] || current.has(capture[0].assetId!)
+        ? []
+        : capture,
+    );
+    if (added.length) {
+      applyCommand(state, {
+        type: "edit.batch",
+        commands: [
+          { type: "nodes.put", nodes: added },
+          ...(placement?.parentId !== undefined ||
+          placement?.beforeId !== undefined
+            ? [
+                {
+                  type: "nodes.move" as const,
+                  ids: added
+                    .filter((node) => node.parentId === null)
+                    .map((node) => node.id),
+                  parentId: placement.parentId ?? null,
+                  beforeId: placement.beforeId,
+                },
+              ]
+            : []),
+        ],
+      });
+    }
+    return added.map((node) => node.id);
+  });
 }

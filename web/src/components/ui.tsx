@@ -77,11 +77,13 @@ export function ToolbarPopover({
   icon,
   children,
   width,
+  side,
 }: {
   label: string;
   icon: ReactNode;
   children: ReactNode;
   width: number;
+  side?: "top" | "bottom";
 }) {
   return (
     <Popover.Root>
@@ -98,7 +100,11 @@ export function ToolbarPopover({
           </RadixIconButton>
         </Popover.Trigger>
       </Tooltip>
-      <Popover.Content className="toolbar-popover" width={`${width}px`}>
+      <Popover.Content
+        className="toolbar-popover"
+        width={`${width}px`}
+        side={side}
+      >
         {children}
       </Popover.Content>
     </Popover.Root>

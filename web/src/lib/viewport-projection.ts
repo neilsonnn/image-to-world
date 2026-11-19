@@ -61,6 +61,8 @@ export function applyCalibratedProjection(
     (-(height - cy) / fy) * near,
     near,
     camera.far,
+    camera.coordinateSystem,
+    camera.reversedDepth,
   );
   camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
 }

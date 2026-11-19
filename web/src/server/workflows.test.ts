@@ -423,7 +423,9 @@ test("placing images poses in the background, preserves edits, and feeds moved c
     quaternion: [0, 0, 0, 1],
     coordinateSystem: "rub",
   };
-  const [jobId] = await runner.place([source.id], camera);
+  const {
+    jobIds: [jobId],
+  } = await runner.place([source.id], camera);
   await submitted;
   const pose = store.snapshot().jobs[jobId].input;
   if (pose.kind !== "pose") throw new Error("Expected pose");
@@ -1046,6 +1048,96 @@ test("keyframe-to-dense video retains keyframes and frozen cameras, integrates s
   expect(rebuilt.error).toBeUndefined();
   expect(rebuilt.frameAssetIds).toHaveLength(4);
   expect(rebuilt.reconstructionScale).toBeCloseTo(1);
+});
+
+test("local reference placement keeps the chosen camera, makes no jobs, and leaves RGBD context alone", async () => {
+  const { atlasContext, captureFrame, captureNodes, sceneCamera } =
+    await import("../../../core/captures");
+  const { Euler, Quaternion } = await import("three");
+  const service = await createService(await directory());
+  cleanups.push(() => service.close());
+  const store = service.store;
+  const asset = await store.importFile(png(), "Illustration.png");
+  const camera = structuredClone(store.snapshot().settings.viewportCamera);
+  camera.extrinsics.position = [3.2, 2.4, -7];
+  camera.extrinsics.quaternion = new Quaternion()
+    .setFromEuler(new Euler(-0.28, 0.64, 0.15, "YXZ"))
+    .toArray();
+  camera.intrinsics = { width: 40, height: 20, fx: 24, fy: 26, cx: 22, cy: 9 };
+  await service.handle(
+    commandRequest({
+      type: "workspace.update",
+      settings: { viewportCamera: camera },
+    }),
+  );
+  await service.handle(
+    commandRequest({
+      type: "nodes.put",
+      nodes: [
+        {
+          id: "parent",
+          name: "Rig",
+          kind: "group",
+          parentId: null,
+          visible: true,
+          transform: {
+            position: [2, 4, -1],
+            quaternion: [0, Math.SQRT1_2, 0, Math.SQRT1_2],
+            scale: [2, 2, 2],
+          },
+        },
+      ],
+    }),
+  );
+  const response = await service.handle(
+    commandRequest({
+      type: "assets.place",
+      mode: "reference",
+      assetIds: [asset.id],
+      parentId: "parent",
+    }),
+  );
+  expect(response.status).toBe(200);
+  const result = await response.json();
+  expect(result.jobIds).toEqual([]);
+  expect(result.nodeIds).toHaveLength(1);
+  const frameId = result.nodeIds[0];
+  const state = store.snapshot();
+  expect(Object.keys(state.jobs)).toHaveLength(0);
+  const frame = captureNodes(state, frameId);
+  expect(frame.root.parentId).toBe("parent");
+  expect(frame.points.visible).toBe(false);
+  expect(frame.points.assetId).toBeUndefined();
+  expect(frame.image.visible).toBe(false);
+  expect(frame.image.assetId).toBe(asset.id);
+  const shot = sceneCamera(state, frameId)!;
+  shot.extrinsics.position.forEach((v, i) =>
+    expect(v).toBeCloseTo(camera.extrinsics.position[i], 8),
+  );
+  expect(
+    Math.abs(
+      new Quaternion(...shot.extrinsics.quaternion).dot(
+        new Quaternion(...camera.extrinsics.quaternion),
+      ),
+    ),
+  ).toBeCloseTo(1, 8);
+  expect(shot.intrinsics).toEqual({
+    width: 20,
+    height: 20,
+    fx: 24,
+    fy: 26,
+    cx: 12,
+    cy: 9,
+  });
+  expect(frame.image.projection).toEqual(shot.intrinsics);
+  expect(atlasContext(state)).toEqual([]);
+  expect(() => captureFrame(state, frameId)).toThrow("posed depth");
+  expect(() => atlasContext(state, [frameId])).toThrow("posed depth");
+  expect(state.assets[asset.id].camera).toBeUndefined();
+  expect(state.assets[asset.id].depthAssetId).toBeUndefined();
+  await service.handle(commandRequest({ type: "history.undo" }));
+  expect(store.snapshot().nodes[frameId]).toBeUndefined();
+  expect(store.snapshot().assets[asset.id]).toBeDefined();
 });
 
 for (const mode of ["individual", "reconstruct"] as const) {

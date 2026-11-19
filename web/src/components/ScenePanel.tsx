@@ -63,7 +63,24 @@ export function ScenePanel({
     ["nodes", "assets", "selection", "primaryId", "selectionAnchor"],
     ["collections"],
   );
-  const expanded = new Set(workspace.settings.collections.expandedNodeIds);
+  const frameIds = useMemo(
+    () =>
+      Object.values(workspace.nodes)
+        .filter((n) => n.kind === "capture")
+        .map((n) => n.id),
+    [workspace.nodes],
+  );
+  const expanded = useMemo(
+    () =>
+      new Set([
+        ...workspace.settings.collections.expandedNodeIds,
+        ...frameIds.filter(
+          (id) =>
+            !workspace.settings.collections.collapsedFrameIds?.includes(id),
+        ),
+      ]),
+    [workspace.settings.collections, frameIds],
+  );
   const [searchOpen, setSearchOpen] = useState(false);
   const [sceneSearch, setSceneSearch] = useCollectionSearch(
     workspace.settings.collections.sceneSearch,
@@ -79,17 +96,8 @@ export function ScenePanel({
   const [target, setTarget] = useState<Target | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rows = useMemo(
-    () =>
-      collectionTreeRows(
-        workspace.nodes,
-        workspace.settings.collections.expandedNodeIds,
-        sceneSearch,
-      ),
-    [
-      workspace.nodes,
-      workspace.settings.collections.expandedNodeIds,
-      sceneSearch,
-    ],
+    () => collectionTreeRows(workspace.nodes, [...expanded], sceneSearch),
+    [workspace.nodes, expanded, sceneSearch],
   );
   const visibleIds = rows.map(({ node }) => node.id);
   const setSelection = (next: SelectionState) =>
@@ -105,6 +113,7 @@ export function ScenePanel({
       settings: {
         collections: {
           expandedNodeIds: [...next],
+          collapsedFrameIds: frameIds.filter((id) => !next.has(id)),
         },
       },
     });

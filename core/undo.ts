@@ -23,6 +23,7 @@ const record = (value: unknown): value is Record<string, unknown> =>
 export function editChanges(before: Workspace, after: Workspace) {
   const changes: Change[] = [];
   const visit = (a: unknown, b: unknown, path: string[]) => {
+    if (path[0] === "nodes" && path[2] === "frameWorkers") return;
     if (equal(a, b)) return;
     if (record(a) && record(b)) {
       for (const key of new Set([...Object.keys(a), ...Object.keys(b)]))
@@ -43,6 +44,7 @@ export function editChanges(before: Workspace, after: Workspace) {
   ] as const)
     visit(before[key], after[key], [key]);
   for (const key of [
+    "lighting",
     "viewportCamera",
     "viewportOptions",
     "viewingCameraId",
@@ -69,6 +71,7 @@ export function restoreEdit(
         ) ||
         (change.path[0] === "settings" &&
           [
+            "lighting",
             "viewportCamera",
             "viewportOptions",
             "viewingCameraId",

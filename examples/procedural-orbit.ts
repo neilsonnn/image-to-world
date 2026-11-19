@@ -1,13 +1,19 @@
 import { defineSceneModule } from "image-to-world/runtime";
+import { MeshStandardNodeMaterial } from "three/webgpu";
+import { color, positionLocal, sin } from "three/tsl";
 
 export default defineSceneModule({
   create({ THREE, params, random }) {
     const object = new THREE.Group();
-    const material = new THREE.MeshStandardMaterial({
-      color: typeof params.color === "string" ? params.color : "#cd8755",
-      metalness: 0.55,
-      roughness: 0.28,
-    });
+    const material = new MeshStandardNodeMaterial({ metalness: 0.65 });
+    const frequency =
+      typeof params.frequency === "number" ? params.frequency : 42;
+    const grooves = sin(positionLocal.y.mul(frequency)).mul(0.5).add(0.5);
+    const copper = color(
+      typeof params.color === "string" ? params.color : "#cd8755",
+    );
+    material.colorNode = copper.mul(grooves.mul(0.18).add(0.82));
+    material.roughnessNode = grooves.mul(0.18).add(0.21);
     const ring = new THREE.Mesh(
       new THREE.TorusKnotGeometry(0.65, 0.18, 120, 16),
       material,

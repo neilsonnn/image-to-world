@@ -1,7 +1,24 @@
 import { z } from "zod";
-export const moduleParameters = z.record(
-  z.union([z.string(), z.number().finite(), z.boolean()]),
+type ParameterValue =
+  | null
+  | boolean
+  | number
+  | string
+  | ParameterValue[]
+  | { [key: string]: ParameterValue };
+
+const parameterValue: z.ZodType<ParameterValue> = z.lazy(() =>
+  z.union([
+    z.null(),
+    z.boolean(),
+    z.number().finite(),
+    z.string(),
+    z.array(parameterValue),
+    z.record(parameterValue),
+  ]),
 );
+export const moduleParameters = z.record(parameterValue);
+export type ModuleParameters = z.infer<typeof moduleParameters>;
 export const proceduralSchema = z
   .object({
     sourceAssetId: z.string(),

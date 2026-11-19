@@ -1,6 +1,9 @@
+import { setRenderNodes } from "../../../core/reference-comparison";
+import { currentCamera } from "../../../core/generation";
 import { loadImage } from "@napi-rs/canvas";
 import { captureRoot, sceneCamera } from "../../../core/captures";
 import { cameraFromWorld, cameraMatrix } from "../../../core/cameras";
+import { captureEnvironment } from "./probe";
 import { RenderWorker } from "./render-worker";
 import { observeRegion, fitObject, composeMask } from "./observations";
 import {
@@ -21,6 +24,7 @@ import { keyframeIndices } from "../../../core/frames";
 import { captureFrame } from "../../../core/captures";
 import { applyNanoResult, nanoGeometry } from "./image-results";
 import { reconstructFrames } from "./reconstruction";
+import { sceneChange } from "./activity-scene";
 import { integrateAssets } from "./integration";
 import { extractVideoFrames } from "./video";
 import type { z } from "zod";
@@ -28,6 +32,7 @@ import { applyCommand } from "../../../core/commands";
 import {
   atlasContext,
   createCapture,
+  createReferenceCapture,
   spatialContextFrames,
 } from "../../../core/captures";
 import { identity, type Camera } from "../../../core/schema";
@@ -45,6 +50,9 @@ import { samplePath, spansBaseline } from "../../../core/cameras";
 import {
   jobInputSchema,
   type Asset,
+  type Command,
+  type PlacementMode,
+  type SceneNode,
   type Job,
   type JobInput,
 } from "../../../core/schema";
@@ -53,7 +61,7 @@ import {
   buildWorldLabsRequest,
   downloadTaskAsset,
   falClient,
-  falOutputUrls,
+  falOutputs,
   resolveFalInput,
   saveFrame,
   worldLabs,
@@ -102,6 +110,18 @@ export class JobRunner {
       worldLabs();
     }
     let snapshot = this.store.snapshot();
+    if (parsed.kind === "render" && parsed.setOnly) {
+      if (!parsed.lightingViewId)
+        throw new Error("Set rendering requires a reference Frame or camera");
+      snapshot = {
+        ...snapshot,
+        nodes: setRenderNodes(snapshot, parsed.lightingViewId, parsed.nodeIds),
+      };
+    }
+    if (parsed.kind === "probe" && snapshot.settings.lighting) {
+      // A previous panorama is not an input to re-baking the scene.
+      snapshot.settings.lighting.environmentAssetId = null;
+    }
     const sheetItems =
       parsed.kind === "contactSheet"
         ? previewItems(snapshot, parsed)
@@ -309,9 +329,15 @@ export class JobRunner {
     const pinnedAssets = await this.store.pinAssets(
       snapshot,
       parsed,
-      ["atlas", "splats", "video", "render", "observe", "fit"].includes(
-        parsed.kind,
-      ),
+      [
+        "atlas",
+        "splats",
+        "video",
+        "render",
+        "probe",
+        "observe",
+        "fit",
+      ].includes(parsed.kind),
     );
     const index = imageIndex(snapshot);
     const sourceIds =
@@ -419,7 +445,7 @@ export class JobRunner {
     assetIds: string[],
     camera?: Camera,
     destination?: { parentId?: string | null; beforeId?: string | null },
-    mode: "individual" | "reconstruct" = "individual",
+    mode: PlacementMode = "individual",
     context: CommandContext = {},
   ) {
     const snapshot = this.store.snapshot();
@@ -435,11 +461,13 @@ export class JobRunner {
           !["image", "splat", "mesh", "video"].includes(asset.kind),
       )
     )
-      throw new Error("Choose available images, splats, or videos");
-    const placement = camera ?? snapshot.settings.viewportCamera;
+      throw new Error("Choose available images, meshes, splats, or videos");
+    const placement = camera ?? currentCamera(snapshot);
     const jobIds: string[] = [];
     const reconstruct = mode === "reconstruct";
     const images = assets.filter((asset) => asset.kind === "image");
+    if (mode === "reference" && images.length !== assets.length)
+      throw new Error("Reference placement accepts image assets only");
     if (reconstruct) {
       if (images.length < 2)
         throw new Error("Choose at least two images to reconstruct together");
@@ -458,8 +486,20 @@ export class JobRunner {
         ),
       );
     }
+    const ready: SceneNode[] = [];
+    const needsMove: string[] = [];
     for (const asset of assets) {
       if (reconstruct && asset.kind === "image") continue;
+      if (mode === "reference") {
+        const id = `node_${randomUUID()}`;
+        const image = await loadImage(
+          (await this.store.assetFile(asset.id)).file,
+        );
+        ready.push(...createReferenceCapture(asset, id, placement, image));
+        placed.push(id);
+        needsMove.push(id);
+        continue;
+      }
       if (asset.kind === "image" && !(asset.camera && asset.depthAssetId)) {
         const jobId = await this.submit(
           {
@@ -474,60 +514,73 @@ export class JobRunner {
         );
         jobIds.push(jobId);
         const input = this.store.snapshot().jobs[jobId].input;
-        if (input.kind === "pose") placed.push(...input.nodeIds!);
+        if (input.kind === "pose") {
+          placed.push(...input.nodeIds!);
+          needsMove.push(...input.nodeIds!);
+        }
+        continue;
+      }
+      const id = `node_${randomUUID()}`;
+      placed.push(id);
+      if (asset.kind === "image") {
+        ready.push(...createCapture(asset, id, placement));
+        needsMove.push(id);
       } else {
-        const id = `node_${randomUUID()}`;
-        placed.push(id);
-        const nodes =
-          asset.kind === "image"
-            ? createCapture(asset, id, placement)
-            : [
-                {
-                  id,
-                  name: asset.name,
-                  kind: asset.kind as "splat" | "mesh" | "video",
-                  assetId: asset.id,
-                  parentId: null,
-                  visible: true,
-                  transform: identity(),
-                },
-              ];
-        await this.store.update((state) => {
-          applyCommand(state, { type: "nodes.put", nodes });
-          if (context.interactive)
-            applyCommand(state, { type: "selection.set", ids: [id] });
+        // A new object belongs to its destination immediately. Its local pose
+        // stays correct if someone moves the Frame while the asset is prepared.
+        ready.push({
+          id,
+          name: asset.name,
+          kind: asset.kind as "splat" | "mesh" | "video",
+          assetId: asset.id,
+          parentId: destination?.parentId ?? null,
+          visible: true,
+          transform: identity(),
         });
       }
     }
+    const edits: Extract<Command, { type: "edit.batch" }>["commands"] = [];
+    if (ready.length) edits.push({ type: "nodes.put", nodes: ready });
+    const reorder = destination?.beforeId ? placed : needsMove;
     if (
-      placed.length &&
-      (destination?.parentId !== undefined ||
-        destination?.beforeId !== undefined)
-    )
-      await this.store.update((state) =>
-        applyCommand(state, {
-          type: "nodes.move",
-          ids: placed,
-          parentId: destination.parentId ?? null,
-          beforeId: destination.beforeId,
-        }),
-      );
-    return jobIds;
+      reorder.length &&
+      (destination?.parentId !== undefined || destination?.beforeId)
+    ) {
+      edits.push({
+        type: "nodes.move",
+        ids: reorder,
+        parentId: destination?.parentId ?? null,
+        beforeId: destination?.beforeId,
+      });
+    }
+    const editId = edits.length
+      ? await this.store.update((state) => {
+          checkPreconditions(state, context);
+          const previousEdit = state.undo.at(-1)?.id;
+          applyCommand(
+            state,
+            { type: "edit.batch", commands: edits },
+            { preserveSelection: !context.interactive },
+          );
+          const edit = state.undo.at(-1);
+          if (context.interactive && placed.length)
+            applyCommand(state, { type: "selection.set", ids: placed });
+          return edit?.id === previousEdit ? undefined : edit?.id;
+        })
+      : undefined;
+    return { jobIds, nodeIds: placed, editId };
   }
   private pump() {
     if (this.stopped) return;
-    for (const job of Object.values(this.store.snapshot().jobs)) {
-      const rendering = ["render", "fit"].includes(job.input.kind);
-      const activeJobs = [...this.active.keys()].map(
-        (id) => this.store.snapshot().jobs[id],
+    const jobs = this.store.snapshot().jobs;
+    const renders = (kind: JobInput["kind"]) =>
+      ["render", "fit", "probe"].includes(kind);
+    for (const job of Object.values(jobs)) {
+      const rendering = renders(job.input.kind);
+      const activeInSlot = [...this.active.keys()].filter(
+        (id) => renders(jobs[id].input.kind) === rendering,
       );
-      if (
-        rendering
-          ? activeJobs.some((j) => ["render", "fit"].includes(j.input.kind))
-          : activeJobs.filter((j) => !["render", "fit"].includes(j.input.kind))
-              .length >= 3
-      )
-        continue;
+      if (activeInSlot.length >= (rendering ? 1 : 3)) continue;
       if (
         job.status !== "queued" ||
         ["capture", "inspect"].includes(job.input.kind) ||
@@ -549,7 +602,11 @@ export class JobRunner {
       this.running.add(task);
     }
   }
-  private async patch(id: string, patch: Partial<Job>) {
+  private async patch(
+    id: string,
+    patch: Partial<Job>,
+    addedNodes: string[] = [],
+  ) {
     const previous = this.store.snapshot().jobs[id];
     await this.store.update((state) => {
       const job = state.jobs[id];
@@ -558,15 +615,26 @@ export class JobRunner {
     });
     const job = this.store.snapshot().jobs[id];
     if (patch.status || (patch.message && patch.message !== previous?.message))
-      this.reportJob(job, patch.status ? "summary" : "trace");
+      this.reportJob(job, patch.status ? "summary" : "trace", addedNodes);
   }
-  private reportJob(job: Job, detail: "summary" | "trace") {
+  private reportJob(
+    job: Job,
+    detail: "summary" | "trace",
+    addedNodes: string[] = [],
+  ) {
     this.store.recordActivity({
       actorId: job.actorId ?? "System",
       requestId: job.requestId,
       jobId: job.id,
       operation: job.input.kind,
       name: jobNames[job.input.kind],
+      sceneChange:
+        job.status === "succeeded"
+          ? sceneChange(
+              [...job.appliedTargets, ...addedNodes],
+              this.store.snapshot().nodes,
+            )
+          : undefined,
       phase: job.status,
       severity:
         job.status === "failed"
@@ -584,6 +652,7 @@ export class JobRunner {
       ],
       nodeIds: [
         ...new Set([
+          ...addedNodes,
           ...(job.applyTargets?.map((t) => t.nodeId) ?? []),
           ...("nodeIds" in job.input ? (job.input.nodeIds ?? []) : []),
           ...("nodeId" in job.input ? [job.input.nodeId] : []),
@@ -595,7 +664,7 @@ export class JobRunner {
               job.input.camera.intrinsics,
               cameraMatrix(job.input.camera),
             ).extrinsics
-          : job.input.kind === "observe"
+          : job.input.kind === "observe" || job.input.kind === "probe"
             ? sceneCamera(
                 { nodes: job.contextSnapshot!.nodes },
                 job.input.nodeId,
@@ -615,8 +684,13 @@ export class JobRunner {
       let job = this.store.snapshot().jobs[id];
       signal.throwIfAborted();
       const assets: Asset[] = [];
+      const addedNodes: string[] = [];
       if (job.input.kind === "render")
         assets.push(...(await this.renderer.render(job, signal)));
+      if (job.input.kind === "probe")
+        assets.push(
+          await captureEnvironment(this.store, this.renderer, job, signal),
+        );
       if (job.input.kind === "mask")
         assets.push(...(await composeMask(this.store, job, signal)));
       if (job.input.kind === "observe")
@@ -755,10 +829,10 @@ export class JobRunner {
           requestId: job.remoteId!,
           abortSignal: signal,
         });
-        const urls = falOutputUrls(result.data);
-        for (let i = 0; i < urls.length; i++) {
+        const outputs = falOutputs(result.data);
+        for (let i = 0; i < outputs.length; i++) {
           signal.throwIfAborted();
-          const url = urls[i];
+          const { url, paths } = outputs[i];
           const name = new URL(url).pathname.split("/").pop() || `output-${i}`;
           const existing = Object.values(this.store.snapshot().assets).find(
             (a) => a.jobId === id && a.path.endsWith(`${id}-${i}-${name}`),
@@ -793,6 +867,7 @@ export class JobRunner {
           assets.push(
             existing ??
               (await this.store.importFile(downloaded!, `${id}-${i}-${name}`, {
+                providerOutputPaths: paths,
                 jobId: id,
                 sourceAssetIds: Object.keys(job.pinnedAssets ?? {}),
                 ...(job.input.kind === "nano"
@@ -952,15 +1027,15 @@ export class JobRunner {
             });
           }
         }
-        if (job.input.kind === "splats")
-          assets.push(
-            await this.saveSplats(
-              job,
-              completed.response as PosedImages2SplatsResponse,
-              signal,
-            ),
+        if (job.input.kind === "splats") {
+          const result = await this.saveSplats(
+            job,
+            completed.response as PosedImages2SplatsResponse,
+            signal,
           );
-        else {
+          assets.push(result.asset);
+          addedNodes.push(...result.nodeIds);
+        } else {
           const frames =
             job.input.kind === "pose" || job.input.kind === "reconstruct"
               ? (completed.response as Images2PosedRGBDResponse).frames
@@ -979,16 +1054,16 @@ export class JobRunner {
             job.poseOrigin = frames[0].camera.extrinsics.position;
             await this.patch(id, { poseOrigin: job.poseOrigin });
           }
-          if (job.input.kind === "reconstruct")
-            assets.push(
-              ...(await reconstructFrames(
-                this.store,
-                job,
-                frames as Images2PosedRGBDPerImageResult[],
-                signal,
-              )),
+          if (job.input.kind === "reconstruct") {
+            const result = await reconstructFrames(
+              this.store,
+              job,
+              frames as Images2PosedRGBDPerImageResult[],
+              signal,
             );
-          else
+            assets.push(...result.assets);
+            addedNodes.push(...result.nodeIds);
+          } else
             for (let i = 0; i < frames.length; i++) {
               signal.throwIfAborted();
               await this.patch(id, {
@@ -999,10 +1074,12 @@ export class JobRunner {
               );
             }
           if (job.input.kind === "atlas")
-            await integrateAssets(
-              this.store,
-              assets.map((asset) => asset.id),
-              signal,
+            addedNodes.push(
+              ...(await integrateAssets(
+                this.store,
+                assets.map((asset) => asset.id),
+                signal,
+              )),
             );
           if (job.input.kind === "video") {
             if (job.input.sourceJobId) {
@@ -1040,17 +1117,21 @@ export class JobRunner {
         }
       }
       signal.throwIfAborted();
-      await this.patch(id, {
-        status: "succeeded",
-        outputAssetIds: assets.map((a) => a.id),
-        frameAssetIds: assets
-          .filter((a) => a.kind === "image")
-          .map((a) => a.id),
-        message: this.store.snapshot().jobs[id].applicationError
-          ? `Saved ${assets.length} outputs; scene application failed: ${this.store.snapshot().jobs[id].applicationError}`
-          : `Saved ${assets.length} outputs`,
-        error: undefined,
-      });
+      await this.patch(
+        id,
+        {
+          status: "succeeded",
+          outputAssetIds: assets.map((a) => a.id),
+          frameAssetIds: assets
+            .filter((a) => a.kind === "image")
+            .map((a) => a.id),
+          message: this.store.snapshot().jobs[id].applicationError
+            ? `Saved ${assets.length} outputs; scene application failed: ${this.store.snapshot().jobs[id].applicationError}`
+            : `Saved ${assets.length} outputs`,
+          error: undefined,
+        },
+        addedNodes,
+      );
     } catch (error) {
       if (
         !this.stopped &&
@@ -1073,7 +1154,7 @@ export class JobRunner {
     const existing = Object.values(this.store.snapshot().assets).find(
       (asset) => asset.jobId === job.id && asset.path.endsWith(name),
     );
-    if (existing) return existing;
+    if (existing) return { asset: existing, nodeIds: [] as string[] };
     const levels = Object.entries(response.refinedSplats ?? {}).sort(
       (a, b) => Number(b[0]) - Number(a[0]),
     );
@@ -1108,7 +1189,7 @@ export class JobRunner {
       if (job.interactive)
         applyCommand(state, { type: "selection.set", ids: [nodeId] });
     });
-    return asset;
+    return { asset, nodeIds: [nodeId] };
   }
   async cancel(id: string) {
     const job = this.store.snapshot().jobs[id];

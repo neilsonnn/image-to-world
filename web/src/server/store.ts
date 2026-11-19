@@ -71,12 +71,14 @@ export class WorkspaceStore {
         Object.values(value).forEach(walk);
     };
     walk(inputs);
-    if (includeScene)
+    if (includeScene) {
+      walk(snapshot.settings.lighting?.environmentAssetId);
       for (const node of Object.values(snapshot.nodes)) {
         walk(node.assetId);
         walk(node.geometryAssetId);
         walk(node.procedural);
       }
+    }
     const pins: NonNullable<Job["pinnedAssets"]> = {};
     await mkdir(path.join(this.assetsPath, ".snapshots"), { recursive: true });
     for (const id of ids) {

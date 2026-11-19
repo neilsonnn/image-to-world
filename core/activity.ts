@@ -23,6 +23,13 @@ export const activitySchema = z.object({
   assetIds: z.array(z.string()).default([]),
   model: z.string().optional(),
   message: z.string().optional(),
+  sceneChange: z
+    .object({
+      nodeIds: z.array(z.string()),
+      position: z.tuple([z.number(), z.number(), z.number()]),
+      major: z.boolean(),
+    })
+    .optional(),
   camera: z
     .object({
       position: z.tuple([z.number(), z.number(), z.number()]),
@@ -77,6 +84,7 @@ export function activityTargets(command: Command) {
 export type Operation = { name: string; at: number };
 export const jobNames: Record<JobInput["kind"], string> = {
   render: "Render scene",
+  probe: "Capture environment panorama",
   mask: "Compose masks",
   observe: "Observe image region",
   fit: "Fit object to observation",
@@ -121,6 +129,7 @@ const commandNames: Partial<Record<Command["type"], string>> = {
   "path.update": "Edit camera path",
   "environment.configure": "Configure environment",
   "caption.clear": "Clear enhanced caption",
+  "frame.work": "Update Frame activity",
   "frames.integrate": "Integrate frames",
   "jobs.cancel": "Cancel job",
   "jobs.retry": "Retry job",
@@ -175,4 +184,21 @@ export function recentActivities(
     (event) =>
       now - event.at < age || ["queued", "running"].includes(event.phase),
   );
+}
+
+export function isAgentActivity(event: Activity) {
+  return event.actorId !== "You" && event.actorId !== "System";
+}
+
+export function activeAgents(events: Activity[], now: number) {
+  const actors = new Map<string, { latest: Activity; anchor?: Activity }>();
+  for (const event of recentActivities(events, now)) {
+    if (isAgentActivity(event)) actors.set(event.actorId, { latest: event });
+  }
+  for (const event of events) {
+    const actor = actors.get(event.actorId);
+    if (actor && event.sceneChange && event.phase === "succeeded")
+      actor.anchor = event;
+  }
+  return actors;
 }

@@ -5,7 +5,7 @@ import {
   Pause,
   Play,
 } from "@phosphor-icons/react";
-import { Dialog, Select } from "@radix-ui/themes";
+import { Button, Dialog, Flex, Select } from "@radix-ui/themes";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ATLAS_FORMATS,
@@ -15,7 +15,13 @@ import {
   type CropPosition,
   type Resolution,
 } from "../../../core/formats";
-import { assetUrl, type Asset, type Camera } from "../../../core/schema";
+import {
+  assetUrl,
+  type Asset,
+  type Camera,
+  type CommandResult,
+  type PlacementMode,
+} from "../../../core/schema";
 import { useImageToWorldClient, useWorkspace } from "../lib/client";
 
 export const ASSET_CLIPBOARD_TYPE = "application/x-image-to-world-assets+json";
@@ -33,6 +39,7 @@ export type RequestPlacement = (
 
 type PendingPlacement = {
   images: Asset[];
+  posedIds: string[];
   camera?: Camera;
   destination?: PlacementDestination;
 };
@@ -104,16 +111,35 @@ export function useImageImport() {
   const locked = useWorkspace(lockedFormat);
   const [pending, setPending] = useState<PendingPlacement[]>([]);
   const active = pending[0];
+  const [layouts, setLayouts] = useState<string[]>([]);
+  const askLayout = useCallback(
+    (frameIds: string[], jointJobs: string[] = []) => {
+      if (frameIds.length < 2 && !jointJobs.length) return;
+      const targets = [
+        frameIds.length ? "Frames " + frameIds.join(", ") : "",
+        jointJobs.length
+          ? "Frames from reconstruction jobs " + jointJobs.join(", ")
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" and ");
+      setLayouts((queue) => [
+        ...queue,
+        `In my image-to-world project at ${window.location.origin}, arrange ${targets}. Wait for posed depth, inspect the point clouds from above and from the side, ground the Frames, and space disconnected views so their observed volumes do not overlap. Preserve the relative poses of any jointly reconstructed photos. Verify the layout before generating connecting views.`,
+      ]);
+    },
+    [],
+  );
 
   const place = useCallback(
     async (
       assets: Asset[],
-      mode: "individual" | "reconstruct",
+      mode: PlacementMode,
       camera?: Camera,
       destination?: PlacementDestination,
     ) => {
       if (!assets.length) return;
-      await client.command({
+      return client.command({
         type: "assets.place",
         assetIds: assets.map((asset) => asset.id),
         mode,
@@ -137,30 +163,68 @@ export function useImageImport() {
       const posed = unique.filter(
         (asset) => asset.kind === "image" && asset.camera && asset.depthAssetId,
       );
-      void place(
-        [...others, ...posed],
-        "individual",
-        camera,
-        destination,
-      ).catch((cause) =>
+      void (async () => {
+        await place(others, "individual", camera, destination);
+        const posedResult = await place(
+          posed,
+          "individual",
+          camera,
+          destination,
+        );
+        const posedIds = posedResult?.nodeIds ?? [];
+        if (images.length) {
+          setPending((queue) => [
+            ...queue,
+            { images, camera, destination, posedIds },
+          ]);
+        } else askLayout(posedIds);
+      })().catch((cause) =>
         client.setError(cause instanceof Error ? cause.message : String(cause)),
       );
-      if (images.length)
-        setPending((queue) => [...queue, { images, camera, destination }]);
     },
-    [client, place],
+    [client, place, askLayout],
   );
 
   const choose = async (
-    mode: "individual" | "reconstruct",
+    mode: PlacementMode,
     images: PreviewImage[],
     format: Resolution,
     crops: ReadonlyMap<string, CropPosition>,
   ) => {
     if (!active) return;
-    const { camera, destination } = active;
+    const { camera, destination, posedIds } = active;
+    const offerLayout = (result?: CommandResult) =>
+      askLayout(
+        [...posedIds, ...(result?.nodeIds ?? [])],
+        mode === "reconstruct" ? result?.jobIds : undefined,
+      );
     setPending((queue) => queue.slice(1));
     try {
+      if (mode === "reference") {
+        const references = await Promise.all(
+          images.map(async (image) => {
+            const position = crops.get(image.asset.id);
+            const crop = importCropRect(image, format, position);
+            if (
+              Math.abs(crop.width - image.width) < 0.5 &&
+              Math.abs(crop.height - image.height) < 0.5
+            )
+              return image.asset;
+            const file = await cropToFormat(
+              image,
+              {
+                width: Math.round(crop.width),
+                height: Math.round(crop.height),
+              },
+              position,
+            );
+            return (await client.upload([file]))[0];
+          }),
+        );
+        await place(references, mode, camera, destination);
+        askLayout(posedIds);
+        return;
+      }
       if (!locked)
         await client.command({
           type: "workspace.update",
@@ -171,44 +235,85 @@ export function useImageImport() {
           cropToFormat(image, format, crops.get(image.asset.id)),
         ),
       );
-      await place(await client.upload(files), mode, camera, destination);
+      offerLayout(
+        await place(await client.upload(files), mode, camera, destination),
+      );
     } catch (cause) {
       client.setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
 
+  const dismissLayout = () => setLayouts((queue) => queue.slice(1));
   const dialog = (
-    <Dialog.Root
-      open={Boolean(active)}
-      onOpenChange={(open) => {
-        if (!open) setPending((queue) => queue.slice(1));
-      }}
-    >
-      <Dialog.Content className="image-import-dialog" maxWidth="720px">
-        <Dialog.Title className="image-import-title">Add images</Dialog.Title>
-        <Dialog.Description className="image-import-description">
-          {active?.images.length === 1
-            ? "Review the image format, then choose Image to import."
-            : `Review the image format, then choose how to import these ${active?.images.length ?? 0} images.`}
-        </Dialog.Description>
-        {pending.length > 1 && (
-          <p className="image-import-queued">
-            {pending.length - 1} more import
-            {pending.length === 2 ? " is" : "s are"} waiting.
-          </p>
-        )}
-        {active && (
-          <ImportBody
-            key={active.images.map((asset) => asset.id).join()}
-            assets={active.images}
-            locked={locked}
-            onChoose={(mode, images, format, crops) =>
-              void choose(mode, images, format, crops)
-            }
-          />
-        )}
-      </Dialog.Content>
-    </Dialog.Root>
+    <>
+      <Dialog.Root
+        open={Boolean(active)}
+        onOpenChange={(open) => {
+          if (!open) setPending((queue) => queue.slice(1));
+        }}
+      >
+        <Dialog.Content className="image-import-dialog" maxWidth="720px">
+          <Dialog.Title className="image-import-title">Add images</Dialog.Title>
+          <Dialog.Description className="image-import-description">
+            Choose a crop and pose the images to begin the world layout.
+          </Dialog.Description>
+          {pending.length > 1 && (
+            <p className="image-import-queued">
+              {pending.length - 1} more import
+              {pending.length === 2 ? " is" : "s are"} waiting.
+            </p>
+          )}
+          {active && (
+            <ImportBody
+              key={active.images.map((asset) => asset.id).join()}
+              assets={active.images}
+              locked={locked}
+              onChoose={(mode, images, format, crops) =>
+                void choose(mode, images, format, crops)
+              }
+            />
+          )}
+        </Dialog.Content>
+      </Dialog.Root>
+      <Dialog.Root
+        open={!active && layouts.length > 0}
+        onOpenChange={(open) => {
+          if (!open) dismissLayout();
+        }}
+      >
+        <Dialog.Content size="2" maxWidth="420px">
+          <Dialog.Title size="3">Who will arrange these views?</Dialog.Title>
+          <Dialog.Description size="2">
+            Move the Frames yourself, or copy the arrangement request into your
+            agent chat.
+          </Dialog.Description>
+          <Flex justify="end" gap="2" mt="4">
+            <Button
+              size="1"
+              color="gray"
+              variant="surface"
+              onClick={dismissLayout}
+            >
+              I’ll arrange them
+            </Button>
+            <Button
+              size="1"
+              color="gray"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(layouts[0]);
+                  dismissLayout();
+                } catch {
+                  client.setError("Could not copy the arrangement request.");
+                }
+              }}
+            >
+              Copy request for agent
+            </Button>
+          </Flex>
+        </Dialog.Content>
+      </Dialog.Root>
+    </>
   );
 
   return { requestPlacement, dialog };
@@ -222,7 +327,7 @@ function ImportBody({
   assets: Asset[];
   locked: Resolution | null;
   onChoose: (
-    mode: "individual" | "reconstruct",
+    mode: PlacementMode,
     images: PreviewImage[],
     format: Resolution,
     crops: ReadonlyMap<string, CropPosition>,
@@ -281,6 +386,20 @@ function ImportBody({
         <button
           className="image-import-choice"
           type="button"
+          disabled={!images || !format}
+          onClick={() =>
+            images && format && onChoose("individual", images, format, crops)
+          }
+        >
+          <span className="image-import-art is-single" aria-hidden>
+            <img src={assetUrl(assets[0])} alt="" draggable={false} />
+          </span>
+          <strong>{count === 1 ? "Pose image" : "Pose individually"}</strong>
+          <span>Estimate a camera and depth per image with Atlas.</span>
+        </button>
+        <button
+          className="image-import-choice"
+          type="button"
           disabled={!images || !format || count < 2}
           onClick={() =>
             images && format && onChoose("reconstruct", images, format, crops)
@@ -306,20 +425,16 @@ function ImportBody({
         <button
           className="image-import-choice"
           type="button"
-          disabled={!images || !format || count > 1}
+          disabled={!images || !format}
           onClick={() =>
-            images && format && onChoose("individual", images, format, crops)
+            images && format && onChoose("reference", images, format, crops)
           }
         >
           <span className="image-import-art is-single" aria-hidden>
             <img src={assetUrl(assets[0])} alt="" draggable={false} />
           </span>
-          <strong>Image</strong>
-          <span>
-            {count > 1
-              ? "Upload one image to use this option."
-              : "Build a scene from one image at a time"}
-          </span>
+          <strong>Reference only</strong>
+          <span>Place a movable Frame at this camera. Runs locally.</span>
         </button>
       </div>
     </div>

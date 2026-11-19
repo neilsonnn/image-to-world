@@ -1,5 +1,7 @@
+import { defaultLighting } from "../../../core/lighting";
 import { disposeObject } from "./resources";
-import { createProcedural } from "./procedural";
+import type { ModulePhysics } from "../../../core/physics";
+import { createProcedural, type ModuleRenderer } from "./procedural";
 import type { Camera as RuntimeCamera } from "three";
 import { validateGlb } from "../../../core/mesh";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -17,6 +19,8 @@ import {
   Box3,
   AmbientLight,
   DirectionalLight,
+  EquirectangularReflectionMapping,
+  MathUtils,
   BoxGeometry,
   BufferGeometry,
   Color,
@@ -44,6 +48,7 @@ import {
 import { cameraMatrix } from "../../../core/cameras";
 import {
   captureRoot,
+  isGeneratedGuide,
   contextSettings,
   selectedPath,
 } from "../../../core/captures";
@@ -54,7 +59,7 @@ import {
   type SceneNode,
   type Workspace,
 } from "../../../core/schema";
-import { clipAppliesToNode } from "../../../core/clips";
+import { clipAppliesToNode, isNodeInSubtree } from "../../../core/clips";
 import { loadDepthPoints } from "./depth";
 import { geometrySpatial, type NodeSpatial } from "./spatial";
 
@@ -67,12 +72,14 @@ type Entry = {
   generation: number;
   abort?: AbortController;
   content?: Object3D;
+  modulePhysics?: ModulePhysics;
   imagePlane?: Mesh;
   pointCloud?: SplatMesh;
   frustum?: Object3D;
   clipEdits?: Map<SplatMesh | null, { edit: SplatEdit; sdf: SplatEditSdf }>;
   bounds?: Box3;
   spatial?: NodeSpatial;
+  shadowExtents?: () => Box3;
   error?: string;
   cleanup?: () => void;
   sample?: (input: { time: number; camera?: RuntimeCamera }) => void;
@@ -80,9 +87,10 @@ type Entry = {
 
 type SceneWorkspace = Pick<
   Workspace,
-  "revision" | "nodes" | "assets" | "selection" | "primaryId"
+  "revision" | "nodes" | "assets" | "jobs" | "selection" | "primaryId"
 > & {
-  settings: Pick<Workspace["settings"], "display" | "atlas">;
+  settings: Pick<Workspace["settings"], "display" | "atlas"> &
+    Partial<Pick<Workspace["settings"], "lighting" | "viewingCameraId">>;
 };
 
 type DisplaySettings = Workspace["settings"]["display"];
@@ -106,7 +114,7 @@ function tagPickables(object: Object3D, nodeId: string) {
   });
 }
 
-function effectivelyVisible(object: Object3D) {
+export function effectivelyVisible(object: Object3D) {
   let current: Object3D | null = object;
   while (current) {
     if (!current.visible) return false;
@@ -211,15 +219,14 @@ function makeFrustum(projection: Projection, color: string) {
 async function textureFromAsset(
   asset: Asset,
   signal: AbortSignal,
+  locateAsset: (asset: Asset) => string,
   projection?: Projection,
 ) {
-  const response = await fetch(assetUrl(asset), { signal });
+  const response = await fetch(locateAsset(asset), { signal });
   if (!response.ok)
     throw new Error(`Failed to load ${asset.name} (${response.status})`);
-  // WebGL ignores Texture.flipY for ImageBitmap; orient pixels at decode time.
-  const bitmap = await createImageBitmap(await response.blob(), {
-    imageOrientation: "flipY",
-  });
+  // The node renderer handles ImageBitmap orientation on both backends.
+  const bitmap = await createImageBitmap(await response.blob());
   const texture = new Texture(bitmap);
   texture.colorSpace = SRGBColorSpace;
   if (projection) {
@@ -321,7 +328,17 @@ function makeClip(entry: Entry, color: string) {
 }
 
 export class SceneGraph {
-  private lights: Object3D[] = [];
+  private readonly fill = new AmbientLight();
+  private readonly key = new DirectionalLight();
+  private readonly keyDirection = new Vector3();
+  private lightingRoot?: Object3D;
+  private shadowFrameId?: string;
+  private shadowBounds = new Box3();
+  private shadowPart = new Box3();
+  private shadowSize = new Vector3();
+  private environmentKey = "";
+  private environmentLoad?: AbortController;
+  private environmentTexture?: Texture;
   spatialVersion = 0;
   readonly entries = new Map<string, Entry>();
   readonly selectionOutline = new Group();
@@ -330,6 +347,7 @@ export class SceneGraph {
   private disposed = false;
   private pending = new Set<Promise<void>>();
   private display?: DisplaySettings;
+  private reviewSources: readonly string[] = [];
   private workspace?: SceneWorkspace;
 
   constructor(
@@ -337,19 +355,22 @@ export class SceneGraph {
     private readonly onError: (message: string) => void,
     private readonly helperColor: string,
     private readonly activeColor: string,
+    private readonly moduleRenderer?: ModuleRenderer,
+    private readonly locateAsset: (asset: Asset) => string = assetUrl,
   ) {
     scene.add(this.selectionOutline);
-    const ambient = new AmbientLight(0xffffff, 2);
-    const sun = new DirectionalLight(0xffffff, 3);
-    sun.position.set(4, 8, 5);
-    scene.add(ambient, sun);
-    this.lights = [ambient, sun];
+    this.key.shadow.mapSize.set(1024, 1024);
+    scene.add(this.fill, this.key, this.key.target);
   }
 
   private track(promise: Promise<void>) {
     let tracked: Promise<void>;
     tracked = promise.finally(() => this.pending.delete(tracked));
     this.pending.add(tracked);
+  }
+
+  get loadingGeometry() {
+    return this.pending.size > 0;
   }
 
   async ready(signal: AbortSignal) {
@@ -367,7 +388,123 @@ export class SceneGraph {
     }
   }
 
-  sync(workspace: SceneWorkspace) {
+  private clearEnvironment() {
+    this.environmentLoad?.abort();
+    this.scene.environment = null;
+    this.environmentTexture?.dispose();
+    (this.environmentTexture?.image as ImageBitmap | undefined)?.close();
+    this.environmentTexture = undefined;
+  }
+
+  private syncLighting(workspace: SceneWorkspace, viewId?: string | null) {
+    const project = workspace.settings.lighting ?? defaultLighting;
+    const frame = viewId ? captureRoot(workspace, viewId) : undefined;
+    const rig = frame?.lighting ?? project;
+    this.lightingRoot = frame?.lighting
+      ? this.entries.get(frame.id)?.root
+      : undefined;
+    this.key.castShadow = rig.keyShadows;
+    this.shadowFrameId = frame?.id;
+    this.fill.color.set(rig.fillColor);
+    this.fill.intensity = rig.fillIntensity;
+    this.key.color.set(rig.keyColor);
+    this.key.intensity = rig.keyIntensity;
+    this.keyDirection.setFromSphericalCoords(
+      1,
+      MathUtils.degToRad(90 - rig.elevation),
+      MathUtils.degToRad(rig.azimuth),
+    );
+    this.updateLightDirection();
+    this.scene.background = rig.background ? new Color(rig.background) : null;
+    this.scene.environmentIntensity = project.environmentIntensity;
+    this.scene.environmentRotation.y = MathUtils.degToRad(
+      project.environmentYaw,
+    );
+    const asset = project.environmentAssetId
+      ? workspace.assets[project.environmentAssetId]
+      : undefined;
+    const key = asset
+      ? JSON.stringify([asset.id, asset.modifiedAt, asset.missing])
+      : "";
+    if (this.environmentKey === key) return;
+    this.environmentKey = key;
+    this.clearEnvironment();
+    if (!asset) return;
+    const controller = new AbortController();
+    this.environmentLoad = controller;
+    this.track(
+      textureFromAsset(asset, controller.signal, this.locateAsset)
+        .then(({ texture }) => {
+          if (controller.signal.aborted) {
+            texture.dispose();
+            texture.image?.close?.();
+            return;
+          }
+          texture.mapping = EquirectangularReflectionMapping;
+          this.scene.environment = this.environmentTexture = texture;
+        })
+        .catch((error) => {
+          if (!controller.signal.aborted)
+            this.onError(
+              `Environment map: ${error instanceof Error ? error.message : String(error)}`,
+            );
+        }),
+    );
+  }
+
+  get keyShadows() {
+    return this.key.castShadow;
+  }
+
+  private updateLightDirection() {
+    this.key.position.copy(this.keyDirection);
+    if (this.lightingRoot) {
+      this.lightingRoot.updateWorldMatrix(true, false);
+      this.key.position.transformDirection(this.lightingRoot.matrixWorld);
+    }
+    this.key.target.position.set(0, 0, 0);
+    if (!this.key.castShadow) return;
+    this.shadowBounds.makeEmpty();
+    for (const entry of this.entries.values()) {
+      if (
+        !entry.shadowExtents ||
+        !entry.spatial ||
+        !effectivelyVisible(entry.spatial.object)
+      )
+        continue;
+      if (
+        this.shadowFrameId &&
+        !isNodeInSubtree(this.workspace!, this.shadowFrameId, entry.node.id)
+      )
+        continue;
+      const surface = entry.spatial.object;
+      surface.updateWorldMatrix(true, false);
+      this.shadowPart
+        .copy(entry.shadowExtents())
+        .applyMatrix4(surface.matrixWorld);
+      this.shadowBounds.union(this.shadowPart);
+    }
+    if (this.shadowBounds.isEmpty()) return;
+    this.shadowBounds.getCenter(this.key.target.position);
+    const radius = Math.max(
+      0.01,
+      this.shadowBounds.getSize(this.shadowSize).length() * 0.53,
+    );
+    this.key.position.multiplyScalar(radius * 2).add(this.key.target.position);
+    const camera = this.key.shadow.camera;
+    camera.left = camera.bottom = -radius;
+    camera.right = camera.top = radius;
+    camera.near = radius * 0.5;
+    camera.far = radius * 3.5;
+    camera.updateProjectionMatrix();
+    this.key.shadow.normalBias = radius / this.key.shadow.mapSize.x;
+    this.key.shadow.bias = -0.0001;
+  }
+
+  sync(
+    workspace: SceneWorkspace,
+    lightingViewId: string | null = workspace.settings.viewingCameraId ?? null,
+  ) {
     this.workspace = workspace;
     for (const [id, entry] of this.entries) {
       if (!workspace.nodes[id]) this.removeEntry(entry);
@@ -415,6 +552,7 @@ export class SceneGraph {
         this.loadEntry(entry, workspace);
       }
     }
+    this.syncLighting(workspace, lightingViewId);
     this.scene.updateMatrixWorld(true);
     this.setDisplay(workspace.settings.display);
     this.updateClips();
@@ -437,6 +575,7 @@ export class SceneGraph {
       entry.content = undefined;
       entry.bounds = undefined;
       entry.spatial = undefined;
+      entry.shadowExtents = undefined;
       entry.imagePlane = undefined;
       entry.pointCloud = undefined;
       entry.frustum = undefined;
@@ -476,7 +615,13 @@ export class SceneGraph {
 
     if (entry.node.kind === "procedural") {
       this.track(
-        createProcedural(entry.node, workspace.assets, signal)
+        createProcedural(
+          entry.node,
+          workspace.assets,
+          signal,
+          this.moduleRenderer,
+          this.locateAsset,
+        )
           .then((instance) => {
             if (!instance) return;
             if (this.disposed || entry.generation !== generation) {
@@ -487,7 +632,17 @@ export class SceneGraph {
               }
               return;
             }
-            finish(instance.object, instance.spatial);
+            if (finish(instance.object, instance.spatial)) {
+              entry.modulePhysics = instance.physics;
+              // A module can opt individual meshes into shadows using Three.js flags.
+              instance.object.traverse((part) => {
+                if (
+                  part instanceof Mesh &&
+                  (part.castShadow || part.receiveShadow)
+                )
+                  entry.shadowExtents = instance.spatial.getBounds;
+              });
+            }
             entry.cleanup = instance.dispose?.bind(instance);
             entry.sample = instance.sample?.bind(instance);
           })
@@ -519,7 +674,7 @@ export class SceneGraph {
     if (entry.node.kind === "mesh" && asset) {
       this.track(
         (async () => {
-          const response = await fetch(assetUrl(asset), { signal });
+          const response = await fetch(this.locateAsset(asset), { signal });
           if (!response.ok) throw new Error(`Failed to load ${asset.name}`);
           const buffer = await response.arrayBuffer();
           validateGlb(buffer);
@@ -528,14 +683,26 @@ export class SceneGraph {
             disposeObject(gltf.scene);
             return;
           }
-          finish(gltf.scene);
+          gltf.scene.traverse((part) => {
+            if (part instanceof Mesh) {
+              // The shadow vertex shader samples normals even for flat-shaded GLBs.
+              if (!part.geometry.attributes.normal)
+                part.geometry.computeVertexNormals();
+              part.castShadow = part.receiveShadow = true;
+            }
+          });
+          if (finish(gltf.scene)) {
+            // Imported mesh assets keep their local extents as the set moves.
+            let local: Box3;
+            entry.shadowExtents = () => (local ??= entry.spatial!.getBounds());
+          }
         })().catch(fail),
       );
       return;
     }
     if (entry.node.kind === "splat" && asset) {
       const mesh = new SplatMesh({
-        url: assetUrl(asset),
+        url: this.locateAsset(asset),
         fileName: asset.path || asset.name,
         editable: true,
         raycastable: true,
@@ -567,9 +734,9 @@ export class SceneGraph {
       if (!depth || !asset.camera) return;
       this.track(
         loadDepthPoints({
-          depthUrl: assetUrl(depth),
-          imageUrl: assetUrl(asset),
-          confidenceUrl: confidence ? assetUrl(confidence) : undefined,
+          depthUrl: this.locateAsset(depth),
+          imageUrl: this.locateAsset(asset),
+          confidenceUrl: confidence ? this.locateAsset(confidence) : undefined,
           confidenceMimeType: confidence?.mimeType,
           camera: asset.camera,
           depthEncoding: depth.depthEncoding ?? asset.depthEncoding,
@@ -643,7 +810,7 @@ export class SceneGraph {
     }
     if (entry.node.kind === "video" && asset) {
       const video = document.createElement("video");
-      video.src = assetUrl(asset);
+      video.src = this.locateAsset(asset);
       video.crossOrigin = "anonymous";
       video.loop = true;
       video.muted = true;
@@ -684,7 +851,7 @@ export class SceneGraph {
     if (entry.node.kind === "image" && asset) {
       entry.getSelectionTarget = () => this.captureChildTarget(entry);
       this.track(
-        textureFromAsset(asset, signal, entry.node.projection)
+        textureFromAsset(asset, signal, this.locateAsset, entry.node.projection)
           .then(({ texture, width, height }) => {
             const plane = imagePlane(
               texture,
@@ -701,6 +868,18 @@ export class SceneGraph {
     }
   }
 
+  setReviewSources(ids: readonly string[]) {
+    const previouslyHidden = this.reviewSources;
+    this.reviewSources = ids;
+    if (this.display) {
+      for (const id of new Set([...previouslyHidden, ...ids])) {
+        const entry = this.entries.get(id);
+        if (entry) this.applyDisplay(entry, this.display);
+      }
+    }
+    return previouslyHidden;
+  }
+
   setDisplay(display: DisplaySettings) {
     this.display = display;
     for (const entry of this.entries.values())
@@ -709,7 +888,8 @@ export class SceneGraph {
 
   private applyDisplay(entry: Entry, display: DisplaySettings) {
     if (entry.imagePlane) {
-      entry.imagePlane.visible = display.showImages;
+      entry.imagePlane.visible =
+        display.showImages && !this.reviewSources.includes(entry.node.id);
       const material = entry.imagePlane.material as MeshBasicMaterial;
       const transparent = display.imageOpacity < 1;
       if (material.transparent !== transparent) {
@@ -728,7 +908,20 @@ export class SceneGraph {
         entry.imagePlane.scale.y *= ratio;
       }
     }
-    if (entry.pointCloud) entry.pointCloud.visible = display.showPoints;
+    if (entry.pointCloud) {
+      const workspace = this.workspace;
+      const parent =
+        entry.node.kind === "points" &&
+        entry.node.parentId &&
+        workspace?.nodes[entry.node.parentId];
+      const frame = parent && parent.kind === "capture" ? parent : undefined;
+      entry.pointCloud.visible =
+        display.showPoints &&
+        (!frame || display.showFrameGuides) &&
+        !this.reviewSources.includes(entry.node.id);
+      entry.pointCloud.opacity =
+        frame && workspace && isGeneratedGuide(workspace, frame) ? 0.5 : 1;
+    }
     if (entry.frustum) {
       this.applyCameraHighlight(entry);
       entry.frustum.scale.setScalar(display.imageDistance);
@@ -849,6 +1042,7 @@ export class SceneGraph {
   }
 
   update() {
+    if (this.lightingRoot || this.key.castShadow) this.updateLightDirection();
     this.updateClips();
     for (const marker of this.selectionOutline.children) {
       const id = marker.userData.selectionId as string;
@@ -990,6 +1184,7 @@ export class SceneGraph {
   private cleanupEntry(entry: Entry) {
     const cleanup = entry.cleanup;
     entry.cleanup = undefined;
+    entry.modulePhysics = undefined;
     entry.sample = undefined;
     try {
       cleanup?.();
@@ -1011,7 +1206,11 @@ export class SceneGraph {
 
   dispose() {
     this.disposed = true;
-    this.lights.forEach((light) => light.removeFromParent());
+    this.clearEnvironment();
+    this.fill.removeFromParent();
+    this.key.target.removeFromParent();
+    this.key.dispose();
+    this.key.removeFromParent();
     for (const entry of [...this.entries.values()]) this.removeEntry(entry);
     this.selectionOutline.removeFromParent();
     disposeObject(this.selectionOutline);

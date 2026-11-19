@@ -1,8 +1,11 @@
+import { sceneChange, editSceneChange } from "./activity-scene";
+import type { Activity } from "../../../core/activity";
 import { createHash } from "node:crypto";
 import {
   canonical,
   checkPreconditions,
   commandContextSchema,
+  CommandConflict,
   type CommandContext,
 } from "../../../core/command-context";
 import { operationName, activityTargets } from "../../../core/activity";
@@ -34,6 +37,31 @@ export class CommandService {
     this.tail = task.catch(() => {});
     return task;
   }
+  private submissionId(command: Command, requestId: string) {
+    const request =
+      command.type === "generation.submit"
+        ? command.request
+        : command.type === "jobs.submit"
+          ? command.input
+          : undefined;
+    if (
+      !request ||
+      !(request.kind === "model" || request.kind === "fal") ||
+      !request.buildKey
+    )
+      return `job_${requestId}`;
+    // One reservation across actors and receipt IDs, durable in the job table.
+    const id = `build_${createHash("sha256").update(request.buildKey).digest("hex")}`;
+    const existing = this.store.snapshot().jobs[id]?.input;
+    if (
+      existing &&
+      canonical(existing) !== canonical({ ...request, kind: "fal" })
+    )
+      throw new CommandConflict([
+        `Build "${request.buildKey}" already has different inputs; choose a new key for a variant`,
+      ]);
+    return id;
+  }
   private async executeOnce(
     input: Command,
     metadata: CommandContext,
@@ -55,7 +83,7 @@ export class CommandService {
       if (previous.body !== body)
         throw new Error("Request ID was already used for another command");
       if (!previous.result) {
-        const jobId = `job_${context.requestId}`;
+        const jobId = this.submissionId(command, context.requestId);
         if (
           ["generation.submit", "jobs.submit"].includes(command.type) &&
           this.store.snapshot().jobs[jobId]
@@ -111,15 +139,29 @@ export class CommandService {
         "assets.reveal",
       ].includes(command.type);
       if (!external) {
+        let change: Activity["sceneChange"];
         const result = await this.store.update((state) => {
           checkPreconditions(state, context);
           const nodes = new Set(Object.keys(state.nodes));
+          const beforeNodes = state.nodes;
+          const historyEdit =
+            command.type === "history.undo" || command.type === "history.redo"
+              ? state[
+                  command.type === "history.undo" ? "undo" : "redo"
+                ].findLast((edit) => edit.scope === command.assetId)
+              : undefined;
           const lastEdit = state.undo.at(-1)?.id;
           applyCommand(state, command, {
             preserveSelection: !context.interactive,
           });
           const edit = state.undo.at(-1);
-          const editId = edit?.id !== lastEdit ? edit?.id : undefined;
+          const editId =
+            !historyEdit && edit?.id !== lastEdit ? edit?.id : undefined;
+          change = editSceneChange(
+            historyEdit ?? (editId ? edit : undefined),
+            state.nodes,
+            beforeNodes,
+          );
           if (editId)
             Object.assign(edit!, {
               actorId: context.actorId,
@@ -136,8 +178,13 @@ export class CommandService {
         this.store.recordActivity({
           ...activity,
           nodeIds: [
-            ...new Set([...activity.nodeIds, ...(result.nodeIds ?? [])]),
+            ...new Set([
+              ...activity.nodeIds,
+              ...(result.nodeIds ?? []),
+              ...(change?.nodeIds ?? []),
+            ]),
           ],
+          sceneChange: change,
           phase: "succeeded",
         });
         return result;
@@ -157,12 +204,17 @@ export class CommandService {
           input && (input.kind === "image" || input.kind === "pose")
             ? input.nodeIds
             : [];
-      } else
+      } else if (!result.nodeIds)
         result.nodeIds = Object.keys(after.nodes).filter(
           (id) => !before.nodes[id],
         );
       const edit = after.undo.at(-1);
-      if (edit && edit.id !== before.undo.at(-1)?.id) result.editId = edit.id;
+      if (
+        command.type !== "assets.place" &&
+        edit &&
+        edit.id !== before.undo.at(-1)?.id
+      )
+        result.editId = edit.id;
       await this.store.update((state) => {
         result.revision = state.revision + 1;
         state.receipts[context.requestId!] = { body, result };
@@ -178,6 +230,10 @@ export class CommandService {
       this.store.recordActivity({
         ...activity,
         nodeIds: [...new Set([...activity.nodeIds, ...(result.nodeIds ?? [])])],
+        sceneChange:
+          command.type === "assets.place" || command.type === "frames.integrate"
+            ? sceneChange(result.nodeIds ?? [], after.nodes)
+            : undefined,
         jobId: result.jobId,
         phase: result.jobId
           ? this.store.snapshot().jobs[result.jobId].status
@@ -199,7 +255,7 @@ export class CommandService {
     context: CommandContext,
   ): Promise<CommandResult> {
     this.store.reportOperation(operationName(command));
-    let jobId: string | undefined, jobIds: string[] | undefined;
+    let jobId: string | undefined;
     switch (command.type) {
       case "caption.clear":
         await this.store.update((state) => {
@@ -223,7 +279,7 @@ export class CommandService {
         const { request } = command;
         jobId = await this.jobs.submit(
           generationInput(this.store.snapshot(), request),
-          `job_${context.requestId}`,
+          this.submissionId(command, context.requestId!),
           undefined,
           context,
         );
@@ -240,7 +296,7 @@ export class CommandService {
       case "jobs.submit":
         jobId = await this.jobs.submit(
           command.input,
-          `job_${context.requestId}`,
+          this.submissionId(command, context.requestId!),
           undefined,
           context,
         );
@@ -251,15 +307,16 @@ export class CommandService {
       case "jobs.retry":
         jobId = await this.jobs.retry(command.id);
         break;
-      case "assets.place":
-        jobIds = await this.jobs.place(
+      case "assets.place": {
+        const placement = await this.jobs.place(
           command.assetIds,
           command.camera,
           command,
           command.mode,
           context,
         );
-        break;
+        return { revision: this.store.snapshot().revision, ...placement };
+      }
       case "frames.integrate": {
         const snapshot = this.store.snapshot(),
           job = snapshot.jobs[command.jobId];
@@ -271,11 +328,11 @@ export class CommandService {
           frames;
         if (!selected.length || selected.some((asset) => !asset))
           throw new Error("Choose valid frame indices");
-        await integrateAssets(
+        const nodeIds = await integrateAssets(
           this.store,
           selected.map((asset) => asset!.id),
         );
-        break;
+        return { revision: this.store.snapshot().revision, nodeIds };
       }
       default:
         await this.store.update((state) => {
@@ -288,7 +345,6 @@ export class CommandService {
     return {
       revision: this.store.snapshot().revision,
       ...(jobId ? { jobId } : {}),
-      ...(jobIds ? { jobIds } : {}),
     };
   }
 }

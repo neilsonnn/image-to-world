@@ -348,24 +348,22 @@ export async function resolveFalInput(
   return value;
 }
 
-export function falOutputUrls(value: unknown): string[] {
-  const urls = new Set<string>();
-  const walk = (item: unknown) => {
-    if (Array.isArray(item)) {
-      item.forEach(walk);
-      return;
-    }
+export function falOutputs(value: unknown) {
+  const files = new Map<string, string[]>();
+  function walk(item: unknown, path: string[]) {
     if (!item || typeof item !== "object") return;
     for (const [key, child] of Object.entries(item)) {
       if (
         key === "url" &&
         typeof child === "string" &&
         child.startsWith("https://")
-      )
-        urls.add(child);
-      else walk(child);
+      ) {
+        const names = files.get(child) ?? [];
+        names.push(path.join("."));
+        files.set(child, names);
+      } else walk(child, [...path, key]);
     }
-  };
-  walk(value);
-  return [...urls];
+  }
+  walk(value, []);
+  return Array.from(files, ([url, paths]) => ({ url, paths }));
 }

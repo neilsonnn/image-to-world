@@ -1,4 +1,6 @@
+import { lightRigSchema, projectLightSchema } from "./lighting";
 import { proceduralSchema } from "./procedural";
+import { nodePhysicsSchema } from "./physics";
 import {
   defaultImageModels,
   modelIds,
@@ -116,6 +118,7 @@ export const assetSchema = z.object({
       "raw-result",
     ])
     .optional(),
+  providerOutputPaths: z.array(z.string()).optional(),
   contentHash: z.string().optional(),
   parentAssetId: z.string().optional(),
   referenceAssetIds: z.array(z.string()).optional(),
@@ -155,6 +158,20 @@ export const atlasContextSchema = z.object({
   excludedIds: z.array(z.string()).default([]),
   soloIds: z.array(z.string()).default([]),
 });
+export const placementModeSchema = z.enum([
+  "individual",
+  "reconstruct",
+  "reference",
+]);
+export type PlacementMode = z.infer<typeof placementModeSchema>;
+
+const frameActor = z.string().trim().min(1).max(120);
+const frameDescription = z
+  .string()
+  .trim()
+  .max(80)
+  .regex(/^\S+(?: \S+){1,3}$/, "Describe the task in two to four words");
+
 export const nodeSchema = z
   .object({
     id: z.string().min(1),
@@ -187,6 +204,19 @@ export const nodeSchema = z
       .strict()
       .optional(),
     procedural: proceduralSchema.optional(),
+    frameSlug: z
+      .string()
+      .max(80)
+      .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+){1,2}$/)
+      .optional(),
+    frameWorkers: z
+      .array(z.object({ actor: frameActor, description: frameDescription }))
+      .optional(),
+    physics: nodePhysicsSchema.nullish(),
+    lighting: lightRigSchema
+      .nullish()
+      .describe("Light rig while looking through this Frame"),
+    observationAssetIds: z.array(z.string()).optional(),
     geometryAssetId: z.string().optional(),
     jobId: z.string().optional(),
     clipInitialized: z.boolean().optional(),
@@ -227,7 +257,7 @@ export const panelIds = [
 ] as const;
 export const layoutSchema = z.object({
   agentGuideWidth: number.min(160).max(900).default(240),
-  contextWidth: number.min(96).max(500).default(144),
+  contextHeight: number.min(108).max(360).default(144),
   rightWidth: number.min(220).max(600).default(280),
   leftSplit: number.min(0.2).max(0.8).default(0.6),
   historyWidth: number.min(110).max(320).default(160),
@@ -237,11 +267,13 @@ export const displaySchema = z.object({
   imageOpacity: number.min(0).max(1).default(0.35),
   imageDistance: number.min(0.1).max(10).default(0.25),
   showPoints: z.boolean().default(true),
+  showFrameGuides: z.boolean().default(true),
   pointStyle: z.enum(["gaussian", "points"]).default("gaussian"),
   showFrustums: z.boolean().default(true),
 });
 export const viewportOptionsSchema = z
   .object({
+    frameThumbnails: z.boolean().optional(),
     passepartout: z.boolean().default(false),
     maskOpacity: number.min(0).max(1).default(0.8),
     near: number.min(0.001).max(1000).default(0.01),
@@ -255,6 +287,7 @@ export const collectionSettingsSchema = z.object({
   assetSearch: z.string().default(""),
   sceneSearch: z.string().default(""),
   assetTrash: z.boolean().default(false),
+  collapsedFrameIds: z.array(z.string()).optional(),
   expandedNodeIds: z.array(z.string()).default([]),
   assetView: z.enum(["list", "grid"]).default("list"),
   assetKinds: z
@@ -262,6 +295,7 @@ export const collectionSettingsSchema = z.object({
     .default(["image", "splat", "mesh", "video", "file"]),
 });
 export const settingsSchema = z.object({
+  lighting: projectLightSchema.optional(),
   atlas: atlasContextSchema.default({}),
   atlasPanel: z
     .object({
@@ -332,6 +366,18 @@ export const settingsSchema = z.object({
   targetFrameCount: number.int().min(2).max(600),
 });
 export const renderInputSchema = z.object({
+  setOnly: z
+    .boolean()
+    .optional()
+    .describe(
+      "Isolate the viewed Frame’s authored content, with its source RGB and points suppressed",
+    ),
+  lightingViewId: z
+    .string()
+    .optional()
+    .describe(
+      "Camera or Frame whose lighting applies; omit to use scene lighting",
+    ),
   kind: z.literal("render"),
   camera: cameraSchema,
   nodeIds: z.array(z.string()).min(1).optional(),
@@ -343,6 +389,21 @@ export const renderInputSchema = z.object({
   overrides: z.record(transformSchema).default({}),
   near: number.positive().default(0.01),
   far: number.positive().default(10000),
+});
+export const probeInputSchema = z.object({
+  kind: z.literal("probe"),
+  nodeId: z.string().min(1).describe("Camera or Frame containing the probe"),
+  position: vec3
+    .optional()
+    .describe(
+      "Probe position relative to the named node; defaults to its camera origin",
+    ),
+  nodeIds: z
+    .array(z.string())
+    .min(1)
+    .optional()
+    .describe("Subtrees contributing visible content"),
+  width: number.int().min(128).max(4096).multipleOf(4).default(1024),
 });
 export const maskInputSchema = z.object({
   kind: z.literal("mask"),
@@ -374,13 +435,16 @@ export const fitInputSchema = z.object({
   observationAssetId: z.string(),
   quaternion: z.tuple([number, number, number, number]).optional(),
 });
+const buildKey = z.string().trim().min(1).max(160).optional();
 export const modelInputSchema = z.object({
+  buildKey,
   kind: z.literal("model"),
   model: z.string().min(1),
   input: z.record(z.unknown()),
 });
 export const jobInputSchema = z.discriminatedUnion("kind", [
   renderInputSchema,
+  probeInputSchema,
   observeInputSchema,
   fitInputSchema,
   maskInputSchema,
@@ -443,6 +507,7 @@ export const jobInputSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("fal"),
+    buildKey,
     model: z.string().min(1),
     input: z.record(z.unknown()),
   }),
@@ -626,7 +691,7 @@ export function emptyWorkspace(): Workspace {
       viewportCamera: defaultCamera(),
       viewportOptions: viewportOptionsSchema.parse({}),
       grid: true,
-      pointSize: 2,
+      pointSize: 3,
       atlasReturnDepth: true,
       splatDraft: false,
       atlas: atlasContextSchema.parse({}),
@@ -650,6 +715,12 @@ export function emptyWorkspace(): Workspace {
   };
 }
 const localEditSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("frame.work"),
+    id: z.string(),
+    actor: frameActor,
+    description: frameDescription.nullable(),
+  }),
   z.object({
     type: z.literal("nodes.patch"),
     id: z.string(),
@@ -710,6 +781,7 @@ const localEditSchema = z.discriminatedUnion("type", [
 export const generationSchema = z.discriminatedUnion("kind", [
   modelInputSchema,
   renderInputSchema,
+  probeInputSchema,
   observeInputSchema,
   fitInputSchema,
   maskInputSchema,
@@ -828,7 +900,7 @@ export const commandSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("assets.place"),
-    mode: z.enum(["individual", "reconstruct"]).optional(),
+    mode: placementModeSchema.optional(),
     assetIds: z.array(z.string()).min(1),
     camera: cameraSchema.optional(),
     parentId: z.string().nullable().optional(),
@@ -857,6 +929,7 @@ export const commandSchema = z.discriminatedUnion("type", [
       .partial()
       .extend({
         collections: collectionSettingsSchema.partial().optional(),
+        display: displaySchema.partial().optional(),
       })
       .optional(),
   }),

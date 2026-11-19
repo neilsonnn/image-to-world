@@ -1,15 +1,9 @@
-import {
-  ArrowUUpLeft,
-  Camera,
-  CornersOut,
-  SlidersHorizontal,
-} from "@phosphor-icons/react";
+import { ArrowUUpLeft, SlidersHorizontal } from "@phosphor-icons/react";
 import {
   Button,
   Flex,
   IconButton,
   Popover,
-  Slider,
   Text,
   Tooltip,
 } from "@radix-ui/themes";
@@ -114,22 +108,6 @@ export function ViewportCameraTools({
       role="toolbar"
       aria-label="Viewport camera settings"
     >
-      <Hint
-        label={
-          overrideName
-            ? `Camera settings overridden by ${overrideName}. Move to explore from here, or press Escape to restore the previous viewport camera.`
-            : "Independent viewport camera; used by Render"
-        }
-      >
-        <span
-          className={`viewport-camera-source${overrideName ? " overridden" : ""}`}
-        >
-          <Camera />
-          <span>
-            {overrideName ? `Overridden · ${overrideName}` : "Viewport"}
-          </span>
-        </span>
-      </Hint>
       <Hint label="Vertical field of view in degrees">
         <div className="viewport-fov">
           <NumericInput
@@ -223,38 +201,9 @@ export function ViewportCameraTools({
                 onCommit={(value) => updateOptions({ [key]: value })}
               />
             ))}
-            <Text size="1" color="gray">
-              Passepartout opacity · {Math.round(options.maskOpacity * 100)}%
-            </Text>
-            <Slider
-              aria-label="Passepartout opacity"
-              key={options.maskOpacity}
-              defaultValue={[options.maskOpacity]}
-              min={0}
-              max={1}
-              step={0.05}
-              onValueCommit={([maskOpacity]) => updateOptions({ maskOpacity })}
-            />
           </Flex>
         </Popover.Content>
       </Popover.Root>
-      <Hint
-        label={`Toggle passepartout · project render frame ${format.width} × ${format.height}`}
-      >
-        <IconButton
-          size="1"
-          variant={options.passepartout ? "soft" : "surface"}
-          color="gray"
-          aria-label="Toggle passepartout"
-          aria-pressed={options.passepartout}
-          onClick={() => updateOptions({ passepartout: !options.passepartout })}
-        >
-          <CornersOut />
-        </IconButton>
-      </Hint>
-      <span className="viewport-camera-format">
-        {format.width} × {format.height}
-      </span>
       {overrideName && (
         <Hint label="Restore viewport camera (Escape)">
           <IconButton

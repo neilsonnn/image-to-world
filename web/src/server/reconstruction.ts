@@ -208,18 +208,19 @@ export async function reconstructFrames(
     state.jobs[job.id].reconstructionScale = registration.scale;
   });
   // A restart can re-run integration; deterministic capture IDs make it idempotent.
-  if (job.input.integrate)
-    await integrateAssets(
-      store,
-      newFrames,
-      signal,
-      placement
-        ? {
-            camera: placement,
-            parentId: job.input.parentId,
-            beforeId: job.input.beforeId,
-          }
-        : undefined,
-    );
-  return assets;
+  const nodeIds = job.input.integrate
+    ? await integrateAssets(
+        store,
+        newFrames,
+        signal,
+        placement
+          ? {
+              camera: placement,
+              parentId: job.input.parentId,
+              beforeId: job.input.beforeId,
+            }
+          : undefined,
+      )
+    : [];
+  return { assets, nodeIds };
 }

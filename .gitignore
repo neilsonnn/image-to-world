@@ -5,6 +5,20 @@ dist/
 .vite/
 .image-to-world/
 /claude-plans/
+# Local planning and contributor notes
+/plans/
+/docs/plans/
+/PLAN.md
+/*_PLAN.md
+/AGENTS.md
+/CLAUDE.md
+/TODO.md
+/docs/image-to-world-journey.md
+
+# Internal evaluations and their output
+/DECOMPOSITION_DEMO.md
+/docs/images/decomposition-demo.jpg
+/examples/paper-moon/
 coverage/
 playwright-report/
 test-results/

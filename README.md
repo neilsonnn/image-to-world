@@ -601,7 +601,7 @@ Posed views can become independently editable mesh objects. The CLI provides
 inputs through `generate`. `models` discovers endpoints and their schemas. Existing
 image edits support asset-only outputs, explicit target captures, and unchanged
 pixel masks; scene replacements wait for reconstructed depth. See the
-[agent workflow](skills/image-to-world/SKILL.md) and [design plan](IMAGE_BLASTER_PLAN.md).
+[agent workflow](skills/image-to-world/SKILL.md) for the commands and review steps.
 
 Mesh imports support self-contained GLB 2.0 with embedded textures. They share the
 editor's transforms, parenting, picking, bounds, properties and undo. Independent

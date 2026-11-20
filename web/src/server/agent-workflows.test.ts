@@ -19,9 +19,11 @@ import { encodeDepth } from "./depth";
 import { lightRigSchema } from "../../../core/lighting";
 import { fitObject } from "./observations";
 const cleanup: Array<() => Promise<unknown>> = [];
+// Playwright can spend up to 30 seconds shutting down a GPU process before
+// terminating it. Await disposal before releasing the test project.
 afterEach(async () => {
   for (const fn of cleanup.splice(0).reverse()) await fn();
-});
+}, 45_000);
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "image-to-world-agent-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));

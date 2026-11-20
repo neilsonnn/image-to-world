@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { projectApi } from "../core/project-url";
 import { objectInventory } from "../core/object-inventory";
 import {
   defaultLighting,
@@ -229,11 +230,9 @@ export async function run(argv: string[]) {
     process.stdout.write(HELP);
     return;
   }
-  const base = (
-    values.url ||
-    process.env.IMAGE_TO_WORLD_URL ||
-    "http://127.0.0.1:4310"
-  ).replace(/\/$/, "");
+  const base = new URL(
+    values.url || process.env.IMAGE_TO_WORLD_URL || "http://127.0.0.1:4310",
+  );
   const output = (value: unknown) =>
     process.stdout.write(JSON.stringify(value, null, 2) + "\n");
   let modulePreconditions: Array<{
@@ -248,21 +247,24 @@ export async function run(argv: string[]) {
     process.env.IMAGE_TO_WORLD_ACTOR ??
     (thread ? `Agent ${thread.slice(-12)}` : "CLI session");
   const request = async (route: string, init?: RequestInit) => {
-    const response = await fetch(`${base}/api/${route}`, {
-      ...init,
-      headers: {
-        "X-Image-To-World-Client": "cli",
-        "X-Image-To-World-Context": JSON.stringify({
-          actorId,
-          requestId: values["request-id"] ?? crypto.randomUUID(),
-          preconditions: [
-            ...modulePreconditions,
-            ...(values.expect ? await Bun.file(values.expect).json() : []),
-          ],
-        }),
-        ...init?.headers,
+    const response = await fetch(
+      new URL(projectApi(route, base.search), base).href,
+      {
+        ...init,
+        headers: {
+          "X-Image-To-World-Client": "cli",
+          "X-Image-To-World-Context": JSON.stringify({
+            actorId,
+            requestId: values["request-id"] ?? crypto.randomUUID(),
+            preconditions: [
+              ...modulePreconditions,
+              ...(values.expect ? await Bun.file(values.expect).json() : []),
+            ],
+          }),
+          ...init?.headers,
+        },
       },
-    });
+    );
     if (!response.ok) {
       const body = (await response
         .json()

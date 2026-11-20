@@ -1,8 +1,10 @@
+import { projectApi } from "../../../core/project-url";
 import { isNavigation, navigate } from "../../../core/commands";
 import { applyDelta, type WorkspaceDelta } from "../../../core/workspace-delta";
 import {
   activitySchema,
   isAgentActivity,
+  latestActivities,
   type Activity,
   type Operation,
 } from "../../../core/activity";
@@ -34,6 +36,9 @@ export type ClientState = {
   showPresence?: boolean;
   followAgentEdits?: boolean;
   liveSceneChange?: Activity;
+  showViewportFeed?: boolean;
+  toasts?: Activity[];
+  inspectActivity?: string;
   error: string | null;
 };
 
@@ -80,7 +85,13 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 export function createImageToWorldClient() {
+  const feedPreference = "image-to-world.viewport-feed";
+  let feedEnabled = true;
+  try {
+    feedEnabled = globalThis.localStorage?.getItem(feedPreference) !== "off";
+  } catch {}
   const store = createStore<ClientState>(() => ({
+    showViewportFeed: feedEnabled,
     workspace: null,
     status: null,
     loading: true,
@@ -144,7 +155,7 @@ export function createImageToWorldClient() {
           while (requested && epoch === connection) {
             requested = false;
             try {
-              const response = await fetch("/api/workspace");
+              const response = await fetch(projectApi("workspace"));
               const next = await readJson<Workspace>(response);
               if (epoch !== connection) return;
               const source = response.headers.get("X-Workspace-Stream");
@@ -193,7 +204,7 @@ export function createImageToWorldClient() {
   };
   const refreshStatus = async () => {
     const epoch = connection;
-    const status = await readJson<Status>(await fetch("/api/status"));
+    const status = await readJson<Status>(await fetch(projectApi("status")));
     if (epoch === connection) store.setState({ status });
   };
   function waitForRevision(revision: number) {
@@ -219,7 +230,7 @@ export function createImageToWorldClient() {
     }
     const send = async () =>
       readJson<CommandResult>(
-        await fetch("/api/commands", {
+        await fetch(projectApi("commands"), {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -260,7 +271,7 @@ export function createImageToWorldClient() {
   const upload = async (files: File[]) => {
     const data = new FormData();
     for (const file of files) data.append("files", file);
-    const response = await fetch("/api/assets", {
+    const response = await fetch(projectApi("assets"), {
       method: "POST",
       headers: { "X-Image-To-World-Client": "web" },
       body: data,
@@ -271,15 +282,21 @@ export function createImageToWorldClient() {
   };
   const connect = () => {
     const epoch = ++connection;
+    try {
+      projectApi("status");
+    } catch (error) {
+      store.setState({ loading: false, error: String(error) });
+      return () => {};
+    }
     refreshing = undefined;
     void refresh();
-    void fetch("/api/status")
+    void fetch(projectApi("status"))
       .then(readJson<Status>)
       .then((status) => {
         if (epoch === connection) store.setState({ status });
       })
       .catch(() => undefined);
-    const events = new EventSource("/api/events");
+    const events = new EventSource(projectApi("events"));
     events.addEventListener("open", () => {
       if (epoch !== connection) return;
       store.setState({ connected: true });
@@ -304,6 +321,18 @@ export function createImageToWorldClient() {
           JSON.parse((event as MessageEvent).data),
         );
         store.setState((state) => ({
+          ...(state.showViewportFeed !== false &&
+          activity.phase !== "started" &&
+          (activity.detail === "summary" ||
+            activity.severity !== "info" ||
+            activity.sceneChange)
+            ? {
+                toasts: latestActivities([
+                  ...(state.toasts ?? []),
+                  activity,
+                ]).slice(-3),
+              }
+            : {}),
           ...(state.followAgentEdits &&
           activity.phase === "succeeded" &&
           activity.sceneChange?.major &&
@@ -374,6 +403,15 @@ export function createImageToWorldClient() {
     acceptWorkspace,
     setError,
     setHoveredNode,
+    setViewportFeed(enabled: boolean) {
+      store.setState({ showViewportFeed: enabled, toasts: [] });
+      try {
+        globalThis.localStorage?.setItem(
+          feedPreference,
+          enabled ? "on" : "off",
+        );
+      } catch {}
+    },
     refresh,
     command,
     safeCommand,

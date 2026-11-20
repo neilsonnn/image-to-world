@@ -1,3 +1,4 @@
+import { projectApi } from "../../../core/project-url";
 import {
   Camera,
   DownloadSimple,
@@ -75,7 +76,7 @@ export function ViewportAppActions() {
       </ToolbarIconButton>
 
       <Button asChild size="1" color="gray" variant="surface">
-        <a href="/api/player/export.zip" download>
+        <a href={projectApi("player/export.zip")} download>
           <DownloadSimple />
           Export
         </a>

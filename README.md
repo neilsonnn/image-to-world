@@ -50,6 +50,16 @@ without either key.
    `--port 4311`; pass `--url http://127.0.0.1:4311` to subsequent CLI commands.
    Use `--no-browser` for agent or terminal-only sessions.
 
+   In the editor, click the project name in the footer. Choose a recent project,
+   browse local folders with **Open folder**, or create a sibling folder with
+   **New project**. Recent projects are remembered on this computer across
+   restarts. Each tab keeps its own project. Pass the entire editor URL in
+   quotes to CLI commands with `--url` to target that tab's project.
+
+   The viewport shows up to three recent actions in the lower right. Hover or
+   keyboard-focus a toast and choose **Go** to frame its scene change or inspect
+   its activity record. The feed button beside **Auto** remembers your preference.
+
 4. Check setup and CLI access:
 
    ```sh

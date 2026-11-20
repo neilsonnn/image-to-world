@@ -66,6 +66,10 @@ function EditorLoading() {
       <GlobeHemisphereWest className="brand-mark spin-slow" />
       <span>{loading ? "Opening workspace" : "Workspace unavailable"}</span>
       {error && <p>{error}</p>}
+      {!loading &&
+        new URLSearchParams(window.location.search).has("project") && (
+          <a href="/">Return to the launch project</a>
+        )}
     </main>
   );
 }

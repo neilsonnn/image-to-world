@@ -9,7 +9,11 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { emptyWorkspace, type Workspace } from "../../../core/schema";
+import {
+  jobSchema as fullJobSchema,
+  emptyWorkspace,
+  type Workspace,
+} from "../../../core/schema";
 import { createService } from "./http";
 import { renderImageDraft } from "./image-edit";
 import { JobRunner } from "./jobs";
@@ -60,7 +64,8 @@ async function depthExr() {
 async function done(store: WorkspaceStore, id: string) {
   for (let i = 0; i < 200; i++) {
     const job = store.snapshot().jobs[id];
-    if (job && ["succeeded", "failed"].includes(job.status)) return job;
+    if (job && ["succeeded", "failed"].includes(job.status))
+      return store.loadJob(id);
     await Bun.sleep(10);
   }
   throw new Error("Job did not settle");
@@ -241,7 +246,7 @@ test("restart resumes a saved World Labs operation without submitting another ta
       type: "nodes.put",
       nodes: createCapture(source, "resume-capture"),
     });
-    state.jobs.resume = {
+    state.jobs.resume = fullJobSchema.parse({
       id: "resume",
       applyRoots: [],
       appliedTargets: [],
@@ -258,7 +263,7 @@ test("restart resumes a saved World Labs operation without submitting another ta
       outputAssetIds: [],
       remoteId: "op-saved",
       applyTargets: [resultTarget(state, "resume-capture")],
-    };
+    });
   });
   await store.update((state) => claimResultTargets(state, state.jobs.resume));
   let submissions = 0;
@@ -702,7 +707,7 @@ test("a pose result is saved without recreating a deleted destination child", as
   const state = store.snapshot();
   const asset = await saveFrame(
     store,
-    state.jobs["pose-deleted"],
+    await store.loadJob("pose-deleted"),
     {
       imageAsset: {
         base64: Buffer.from(await png().arrayBuffer()).toString("base64"),

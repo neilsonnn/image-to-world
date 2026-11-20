@@ -1,3 +1,4 @@
+import { emptyWorkspace } from "../../../core/schema";
 import { chromium, type Browser, type Page } from "playwright-core";
 import path from "node:path";
 import { existsSync } from "node:fs";
@@ -109,7 +110,25 @@ export class RenderWorker {
   // The page and asset bridge are shared. Serialize GPU work while callers
   // are free to post-process the returned pixels independently.
   capture(job: Job, signal: AbortSignal): Promise<RenderResult> {
-    const task = this.tail.then(() => this.captureFrame(job, signal));
+    const task = this.tail.then(async () => {
+      try {
+        return await this.captureFrame(job, signal);
+      } catch (error) {
+        signal.throwIfAborted();
+        const lostPage =
+          this.page?.isClosed() ||
+          this.browser?.isConnected() === false ||
+          (error instanceof Error &&
+            /Target (?:page, context or browser has been closed|crashed)/i.test(
+              error.message,
+            ));
+        if (!lostPage) throw error;
+        // No output assets have been committed yet. Replay the frozen inputs once
+        // in a fresh renderer if Chromium lost the page during GPU work.
+        this.page = undefined;
+        return this.captureFrame(job, signal);
+      }
+    });
     this.tail = task.catch(() => {});
     return task;
   }
@@ -130,7 +149,7 @@ export class RenderWorker {
       throw new Error("Render requires a frozen scene snapshot");
     this.active = job;
     const snapshot = {
-      ...this.store.snapshot(),
+      ...emptyWorkspace(),
       ...job.contextSnapshot,
       revision: job.snapshotRevision,
     } as Workspace;
@@ -142,19 +161,24 @@ export class RenderWorker {
     try {
       const result = await this.page!.evaluate<
         RenderResult,
-        { workspace: unknown; input: typeof input }
+        { workspace: unknown; input: typeof input; guides?: string[] }
       >(
-        async ({ workspace, input }) => {
+        async ({ workspace, input, guides }) => {
           return (
             globalThis as unknown as {
               imageToWorldRender: (
                 w: unknown,
                 i: unknown,
+                guides?: string[],
               ) => Promise<RenderResult>;
             }
-          ).imageToWorldRender(workspace, input);
+          ).imageToWorldRender(workspace, input, guides);
         },
-        { workspace: snapshot, input },
+        {
+          workspace: snapshot,
+          input,
+          guides: job.contextSnapshot.generatedGuideIds,
+        },
       );
       signal.throwIfAborted();
       return result;

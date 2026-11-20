@@ -19,7 +19,7 @@ import {
   selectedPath,
 } from "../../../core/captures";
 import { generationInput } from "../../../core/generation";
-import { assetUrl, type Command, type Job } from "../../../core/schema";
+import { assetUrl, type Command, type JobSummary } from "../../../core/schema";
 import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
 import { Hint, PanelHeader, ToolbarPopover } from "./ui";
 
@@ -75,7 +75,7 @@ export function SplatPanel() {
       description: `Create ${input.refine ? "refined" : "draft"} splats from ${input.nodeIds.length} context Frames? This submits a paid World Labs reconstruction. The result will join the scene automatically.`,
     });
   };
-  const confirmRetry = (job: Job) => {
+  const confirmRetry = (job: JobSummary) => {
     if (job.input.kind !== "splats") return;
     setPending({
       command: { type: "jobs.retry", id: job.id },

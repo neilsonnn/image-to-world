@@ -84,8 +84,13 @@ export async function createService(root: string) {
             );
           return Response.json(await response.json());
         }
+        const cameras = /^jobs\/([a-zA-Z0-9_-]+)\/cameras$/.exec(route);
+        if (request.method === "GET" && cameras)
+          return Response.json((await store.loadJob(cameras[1])).cameras ?? []);
         if (request.method === "GET" && route === "workspace")
-          return Response.json(store.snapshot());
+          return Response.json(store.liveSnapshot(), {
+            headers: { "X-Workspace-Stream": store.streamId },
+          });
         if (request.method === "GET" && route === "activity")
           return Response.json(
             store.activitySnapshot(Number(url.searchParams.get("after") ?? 0)),
@@ -134,7 +139,10 @@ export async function createService(root: string) {
                 } catch {}
               };
               request.signal.addEventListener("abort", abort, { once: true });
-              send("change", { revision: store.snapshot().revision });
+              send("change", {
+                stream: store.streamId,
+                revision: store.revision,
+              });
               if (store.lastOperation) send("operation", store.lastOperation);
               send("activity-history", store.activitySnapshot());
             },
@@ -217,14 +225,16 @@ export async function createService(root: string) {
           const assets = [];
           for (const file of files as File[])
             assets.push(await store.importFile(file, file.name));
-          return Response.json(assets);
+          return Response.json(assets, {
+            headers: { "X-Workspace-Revision": String(store.revision) },
+          });
         }
         const capture = /^viewport-jobs\/([^/]+)(?:\/(claim|fail))?$/.exec(
           route,
         );
         if (request.method === "POST" && capture) {
           const [, id, action] = capture;
-          const job = store.snapshot().jobs[id];
+          const job = store.current.jobs[id];
           if (
             !job ||
             !["capture", "inspect"].includes(job.input.kind) ||
@@ -239,24 +249,24 @@ export async function createService(root: string) {
             )
               return Response.json({ claimed: false });
             claims.set(id, Date.now() + 60000);
-            await store.update((state) => {
-              if (state.jobs[id].status === "cancelled") return;
-              state.jobs[id].status = "running";
-              state.jobs[id].message =
+            await store.updateJob(id, (current) => {
+              if (current.status === "cancelled") return;
+              current.status = "running";
+              current.message =
                 job.input.kind === "inspect"
                   ? "Inspecting scene"
                   : "Capturing viewport";
-              state.jobs[id].updatedAt = Date.now();
+              current.updatedAt = Date.now();
             });
             return Response.json({ claimed: true });
           }
           if (action === "fail") {
             const { error } = (await request.json()) as { error: string };
             claims.delete(id);
-            await store.update((state) => {
-              if (state.jobs[id].status === "cancelled") return;
-              state.jobs[id].status = "failed";
-              state.jobs[id].error = String(error);
+            await store.updateJob(id, (current) => {
+              if (current.status === "cancelled") return;
+              current.status = "failed";
+              current.error = String(error);
             });
             return Response.json({ ok: true });
           }
@@ -280,9 +290,9 @@ export async function createService(root: string) {
               `${id}-inspection.json`,
               { jobId: id, name: "Scene inspection" },
             );
-            await store.update((state) => {
-              if (state.jobs[id].status === "cancelled") return;
-              Object.assign(state.jobs[id], {
+            await store.updateJob(id, (current) => {
+              if (current.status === "cancelled") return;
+              Object.assign(current, {
                 status: "succeeded",
                 outputAssetIds: [asset.id],
                 message: "Saved scene inspection",
@@ -302,9 +312,9 @@ export async function createService(root: string) {
             jobId: id,
             name: "Viewport image",
           });
-          await store.update((state) => {
-            if (state.jobs[id].status === "cancelled") return;
-            Object.assign(state.jobs[id], {
+          await store.updateJob(id, (current) => {
+            if (current.status === "cancelled") return;
+            Object.assign(current, {
               status: "succeeded",
               outputAssetIds: [asset.id],
               message: "Saved viewport image",

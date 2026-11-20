@@ -414,8 +414,13 @@ individual generated frames remain available.
 
 ```text
 <workspace>/
-  workspace.json       Versioned scene, selection, panels, drafts, jobs, provenance
+  workspace.json       Schema 8 scene, settings, asset catalog, undo and result application records
   workspace.json.bak   Previous valid snapshot
+  session.json         Selection and current/free camera, saved after navigation settles
+  jobs/<id>/input.json  Immutable submitted inputs, required asset metadata and content hashes
+  jobs/<id>/job.json    Status, output IDs and history summary
+  jobs/<id>/request.json  Prepared provider request, when applicable
+  assets/.snapshots/   Source bytes keyed by content hash
   assets/              Binary originals, depth, generated frames, captures, video
 ```
 
@@ -425,6 +430,12 @@ appear in the UI through server-sent events. Missing files keep their metadata a
 are marked missing. Symlinks escaping the asset directory are not served. Valid
 external edits to `workspace.json` are reloaded; invalid JSON blocks writes until
 fixed rather than being silently replaced.
+
+Copy the entire project folder to retain queued work and its exact source versions.
+Opening a project requires schema 8. Older projects are rejected without conversion.
+The browser opens with one live snapshot and applies revisioned changes over the event stream.
+A gap or server restart triggers a fresh snapshot. Camera navigation is immediately visible
+to the editor and shared with the CLI as session state. Moving a camera node is an authored edit.
 
 Up to three provider jobs run concurrently. Jobs preserve remote operation IDs
 and resume polling after restart. `jobs retry` resumes the same remote request,

@@ -36,7 +36,7 @@ export async function applyNanoResult(
 ) {
   if (job.input.kind !== "nano" || !job.input.applyToScene) return;
   if (job.input.reconstruct && asset.geometrySourceAssetId) return true;
-  await store.update((state) => {
+  await store.updateSceneAndJob(job.id, (state) => {
     signal.throwIfAborted();
     applyJobResult(state, job, (targets, roots) => {
       const root = imageIndex(state).roots.get(asset.id)!;
@@ -48,7 +48,7 @@ export async function applyNanoResult(
       );
     });
   });
-  const state = store.snapshot();
+  const state = store.current;
   const owner = job.resultOwnerId ?? job.id;
   return (
     job.input.reconstruct &&

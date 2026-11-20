@@ -10,7 +10,7 @@ import {
 } from "../../../core/command-context";
 import { operationName, activityTargets } from "../../../core/activity";
 import { moveAssetsToTrash, revealAsset } from "./asset-files";
-import { applyCommand } from "../../../core/commands";
+import { applyCommand, isNavigation } from "../../../core/commands";
 import { generationInput } from "../../../core/generation";
 import { frameAssets, frameAt } from "../../../core/frames";
 import {
@@ -37,7 +37,7 @@ export class CommandService {
     this.tail = task.catch(() => {});
     return task;
   }
-  private submissionId(command: Command, requestId: string) {
+  private async submissionId(command: Command, requestId: string) {
     const request =
       command.type === "generation.submit"
         ? command.request
@@ -49,10 +49,11 @@ export class CommandService {
       !(request.kind === "model" || request.kind === "fal") ||
       !request.buildKey
     )
-      return `job_${requestId}`;
+      return `job_${/^[a-zA-Z0-9_-]+$/.test(requestId) ? requestId : createHash("sha256").update(requestId).digest("hex")}`;
     // One reservation across actors and receipt IDs, durable in the job table.
     const id = `build_${createHash("sha256").update(request.buildKey).digest("hex")}`;
-    const existing = this.store.snapshot().jobs[id]?.input;
+    const existing =
+      this.store.current.jobs[id] && (await this.store.loadJob(id)).input;
     if (
       existing &&
       canonical(existing) !== canonical({ ...request, kind: "fal" })
@@ -78,21 +79,23 @@ export class CommandService {
         }),
       )
       .digest("hex");
-    const previous = this.store.snapshot().receipts[context.requestId];
+    if (isNavigation(command))
+      return this.store.navigate(command, context, body);
+    const jobCommand =
+      command.type === "generation.submit" || command.type.startsWith("jobs.");
+    const previous = await this.store.commandReceipt(context.requestId);
     if (previous) {
       if (previous.body !== body)
         throw new Error("Request ID was already used for another command");
       if (!previous.result) {
-        const jobId = this.submissionId(command, context.requestId);
+        const jobId = await this.submissionId(command, context.requestId);
         if (
           ["generation.submit", "jobs.submit"].includes(command.type) &&
-          this.store.snapshot().jobs[jobId]
+          this.store.current.jobs[jobId]
         ) {
-          return this.store.update((state) => {
-            const result = { revision: state.revision + 1, jobId };
-            state.receipts[context.requestId!] = { body, result };
-            return result;
-          });
+          const result = { revision: this.store.revision, jobId };
+          await this.store.saveJobReceipt(context.requestId, { body, result });
+          return result;
         }
         throw new Error(
           "This request was interrupted; inspect its effects before submitting a new request",
@@ -119,7 +122,7 @@ export class CommandService {
     };
     this.store.reportOperation(operationName(command));
     this.store.recordActivity({ ...activity, phase: "started" });
-    const before = this.store.snapshot();
+    const before = this.store.current;
     try {
       if (command.type === "environment.configure") {
         const result = await this.perform(command, context);
@@ -140,7 +143,7 @@ export class CommandService {
       ].includes(command.type);
       if (!external) {
         let change: Activity["sceneChange"];
-        const result = await this.store.update((state) => {
+        const result = await this.store.updateScene((state) => {
           checkPreconditions(state, context);
           const nodes = new Set(Object.keys(state.nodes));
           const beforeNodes = state.nodes;
@@ -189,12 +192,19 @@ export class CommandService {
         });
         return result;
       }
-      await this.store.update((state) => {
-        checkPreconditions(state, context);
-        state.receipts[context.requestId!] = { body, result: null };
-      });
+      if (jobCommand) {
+        checkPreconditions(this.store.current, context);
+        await this.store.saveJobReceipt(context.requestId, {
+          body,
+          result: null,
+        });
+      } else
+        await this.store.updateScene((state) => {
+          checkPreconditions(state, context);
+          state.receipts[context.requestId!] = { body, result: null };
+        });
       const result = await this.perform(command, context);
-      const after = this.store.snapshot();
+      const after = this.store.current;
       if (
         result.jobId &&
         ["generation.submit", "jobs.submit"].includes(command.type)
@@ -215,18 +225,22 @@ export class CommandService {
         edit.id !== before.undo.at(-1)?.id
       )
         result.editId = edit.id;
-      await this.store.update((state) => {
-        result.revision = state.revision + 1;
-        state.receipts[context.requestId!] = { body, result };
-        if (result.editId) {
-          const entry = state.undo.find((e) => e.id === result.editId);
-          if (entry)
-            Object.assign(entry, {
-              actorId: context.actorId,
-              requestId: context.requestId,
-            });
-        }
-      });
+      if (!jobCommand || result.editId)
+        await this.store.updateScene((state) => {
+          result.revision = state.revision + 1;
+          if (!jobCommand)
+            state.receipts[context.requestId!] = { body, result };
+          if (result.editId) {
+            const entry = state.undo.find((e) => e.id === result.editId);
+            if (entry)
+              Object.assign(entry, {
+                actorId: context.actorId,
+                requestId: context.requestId,
+              });
+          }
+        });
+      if (jobCommand)
+        await this.store.saveJobReceipt(context.requestId, { body, result });
       this.store.recordActivity({
         ...activity,
         nodeIds: [...new Set([...activity.nodeIds, ...(result.nodeIds ?? [])])],
@@ -236,7 +250,7 @@ export class CommandService {
             : undefined,
         jobId: result.jobId,
         phase: result.jobId
-          ? this.store.snapshot().jobs[result.jobId].status
+          ? this.store.current.jobs[result.jobId].status
           : "succeeded",
       });
       return result;
@@ -258,7 +272,7 @@ export class CommandService {
     let jobId: string | undefined;
     switch (command.type) {
       case "caption.clear":
-        await this.store.update((state) => {
+        await this.store.updateScene((state) => {
           state.settings.enhancedCaption = null;
           state.settings.captionEpoch = (state.settings.captionEpoch ?? 0) + 1;
         });
@@ -278,17 +292,17 @@ export class CommandService {
       case "generation.submit": {
         const { request } = command;
         jobId = await this.jobs.submit(
-          generationInput(this.store.snapshot(), request),
-          this.submissionId(command, context.requestId!),
+          generationInput(this.store.current, request),
+          await this.submissionId(command, context.requestId!),
           undefined,
           context,
         );
         if (
           request.kind === "view" &&
           request.seed === undefined &&
-          this.store.snapshot().settings.seedMode === "auto"
+          this.store.current.settings.seedMode === "auto"
         )
-          await this.store.update((state) => {
+          await this.store.updateScene((state) => {
             state.settings.seed += 1;
           });
         break;
@@ -296,7 +310,7 @@ export class CommandService {
       case "jobs.submit":
         jobId = await this.jobs.submit(
           command.input,
-          this.submissionId(command, context.requestId!),
+          await this.submissionId(command, context.requestId!),
           undefined,
           context,
         );
@@ -315,10 +329,10 @@ export class CommandService {
           command.mode,
           context,
         );
-        return { revision: this.store.snapshot().revision, ...placement };
+        return { revision: this.store.current.revision, ...placement };
       }
       case "frames.integrate": {
-        const snapshot = this.store.snapshot(),
+        const snapshot = this.store.current,
           job = snapshot.jobs[command.jobId];
         if (!job || job.status !== "succeeded")
           throw new Error("Choose a completed generation");
@@ -332,10 +346,10 @@ export class CommandService {
           this.store,
           selected.map((asset) => asset!.id),
         );
-        return { revision: this.store.snapshot().revision, nodeIds };
+        return { revision: this.store.current.revision, nodeIds };
       }
       default:
-        await this.store.update((state) => {
+        await this.store.updateScene((state) => {
           checkPreconditions(state, context);
           applyCommand(state, command, {
             preserveSelection: !context.interactive,
@@ -343,7 +357,7 @@ export class CommandService {
         });
     }
     return {
-      revision: this.store.snapshot().revision,
+      revision: this.store.current.revision,
       ...(jobId ? { jobId } : {}),
     };
   }

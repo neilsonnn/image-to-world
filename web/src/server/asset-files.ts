@@ -10,7 +10,11 @@ function containsId(value: unknown, ids: Set<string>): boolean {
     : false;
 }
 
-function checkReferences(state: Workspace, ids: Set<string>) {
+async function checkReferences(
+  store: WorkspaceStore,
+  state: Workspace,
+  ids: Set<string>,
+) {
   const environmentId = state.settings.lighting?.environmentAssetId;
   if (environmentId && ids.has(environmentId))
     throw new Error("Remove this image from scene lighting before trashing it");
@@ -40,8 +44,9 @@ function checkReferences(state: Workspace, ids: Set<string>) {
       throw new Error(
         `Remove the image layer from "${state.assets[id]?.name ?? id}" before trashing it`,
       );
-  for (const job of Object.values(state.jobs)) {
-    if (!["queued", "running"].includes(job.status)) continue;
+  for (const summary of Object.values(state.jobs)) {
+    if (!["queued", "running"].includes(summary.status)) continue;
+    const job = await store.loadJob(summary.id);
     if (containsId(job.input, ids) || containsId(job.sourceFrameAssetIds, ids))
       throw new Error(
         `Wait for or cancel generation ${job.id} before trashing its inputs`,
@@ -78,7 +83,7 @@ export async function moveAssetsToTrash(
   await store.update(
     async (state) => {
       const selected = new Set(ids);
-      if (!restore) checkReferences(state, selected);
+      if (!restore) await checkReferences(store, state, selected);
       const root = await realpath(store.assetsPath);
       const files = [];
       for (const id of selected) {

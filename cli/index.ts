@@ -1142,6 +1142,9 @@ export async function run(argv: string[]) {
     if (!job || !["video", "atlas", "reconstruct"].includes(job.input.kind))
       throw new Error("Choose a video job");
     if (sub === "frames") {
+      const cameras: Workspace["settings"]["viewportCamera"][] = await (
+        await request(`jobs/${encodeURIComponent(jobId)}/cameras`)
+      ).json();
       const assetIds = frameAssets(workspace, job).map((asset) => asset.id);
       output(
         assetIds.map((assetId, position) => ({
@@ -1151,7 +1154,7 @@ export async function run(argv: string[]) {
             position,
           asset: workspace.assets[assetId],
           camera:
-            job.cameras?.[
+            cameras[
               workspace.assets[assetId]?.frameIndex ??
                 job.frameIndices?.[position] ??
                 position

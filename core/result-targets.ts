@@ -16,7 +16,10 @@ export function resultTarget(
   };
 }
 
-export function claimResultTargets(workspace: Workspace, job: Job) {
+export function claimResultTargets(
+  workspace: Workspace,
+  job: Pick<Job, "applyTargets" | "applyRoots" | "id">,
+) {
   for (const target of job.applyTargets ?? [])
     workspace.resultOwners[`node:${target.nodeId}`] = job.id;
   for (const root of job.applyRoots)
@@ -48,12 +51,19 @@ export function applyJobResult(
   complete = true,
 ) {
   const current = workspace.jobs[job.id];
-  if (current.applied || current.status === "cancelled") return false;
+  const applied = workspace.resultApplications[job.id] ?? [];
+  if (
+    applied.includes("complete") ||
+    current.applied ||
+    current.status === "cancelled"
+  )
+    return false;
   const targets = candidates.filter(
     (target) =>
       workspace.resultOwners[`node:${target.nodeId}`] ===
         (job.resultOwnerId ?? job.id) &&
-      !current.appliedTargets.includes(target.nodeId),
+      !current.appliedTargets.includes(target.nodeId) &&
+      !applied.includes("target:" + target.nodeId),
   );
   const roots = job.applyRoots.filter(
     (root) =>
@@ -86,6 +96,11 @@ export function applyJobResult(
     const commands = build(valid, roots);
     if (commands.length) {
       applyCommand(workspace, { type: "edit.batch", commands });
+      workspace.resultApplications[job.id] = [
+        ...applied,
+        ...valid.map((t) => "target:" + t.nodeId),
+        ...(complete ? ["complete"] : []),
+      ];
       changed = true;
     }
     // Commands replace workspace records; update the committed job, not a stale reference.

@@ -107,68 +107,6 @@ function triangle(extra: Record<string, unknown> = {}) {
   Buffer.from(positions.buffer).copy(bytes, at + 8);
   return new Blob([bytes], { type: "model/gltf-binary" });
 }
-test.skipIf(!rendererExecutable())(
-  "a queued render reopens with its submitted camera, mesh bytes and transforms",
-  async () => {
-    const { store, runner, commands } = await fixture();
-    await runner.close(); // Persist a genuinely queued job, without racing the renderer.
-    const mesh = await store.importFile(triangle(), "subject.glb");
-    const unrelated = await store.importFile(
-      new Blob(["catalog only"]),
-      "notes.txt",
-    );
-    await commands.execute({
-      type: "nodes.put",
-      nodes: [{ ...node("subject"), kind: "mesh", assetId: mesh.id }],
-    });
-    const id = await runner.submit({
-      kind: "render",
-      camera,
-      passes: ["depth"],
-      nodeIds: ["subject"],
-    });
-    const inputFile = Bun.file(path.join(store.root, "jobs", id, "input.json"));
-    const manifest = await inputFile.text();
-    expect(manifest).not.toContain(unrelated.id);
-    expect(Object.keys(JSON.parse(manifest).contextSnapshot.assets)).toEqual([
-      mesh.id,
-    ]);
-    expect(store.current.jobs[id].input).toEqual({ kind: "render" });
-    await commands.execute({
-      type: "nodes.transform",
-      ids: ["subject"],
-      transform: { position: [100, 0, 0] },
-    });
-    await Bun.write(
-      (await store.assetFile(mesh.id)).file,
-      "replaced after queueing",
-    );
-    await store.close();
-    const reopened = await new WorkspaceStore(store.root).init(),
-      worker = new JobRunner(reopened);
-    try {
-      await worker.init();
-      const result = await done(reopened, id);
-      expect(result.error).toBeUndefined();
-      expect(result.status).toBe("succeeded");
-      const depth = result.outputAssetIds
-        .map((id) => reopened.current.assets[id])
-        .find((a) => a.role === "depth")!;
-      const grid = linearDepth(
-        await Bun.file((await reopened.assetFile(depth.id)).file).arrayBuffer(),
-      );
-      expect(grid.data[(32 * 64 + 32) * grid.stride]).toBeCloseTo(2, 3);
-      expect(reopened.current.nodes.subject.transform.position).toEqual([
-        100, 0, 0,
-      ]);
-      expect(await inputFile.text()).toBe(manifest);
-    } finally {
-      await worker.close();
-      await reopened.close();
-    }
-  },
-  60_000,
-);
 test("mesh import accepts embedded WebP textures while rejecting external images and decoder-only extensions", async () => {
   const { store } = await fixture();
   const image = createCanvas(2, 2).toBuffer("image/webp");
@@ -494,20 +432,21 @@ test("workers share a movable Frame and guarded fits survive moving the Frame du
   ).rejects.toThrow("conflict");
 });
 test.skipIf(!rendererExecutable())(
-  "independent renderer loads a mesh, produces exact mask/IDs and linear depth, and leaves editor state alone",
+  "a restarted renderer reproduces the submitted mesh, pose, mask, IDs and linear depth",
   async () => {
-    const { store, runner, commands } = await fixture();
-    const asset = await store.importFile(triangle(), "triangle.glb");
-    await commands.execute({
+    const initial = await fixture();
+    // Hold the queue until a new store and worker open the project.
+    await initial.runner.close();
+    const unused = await initial.store.importFile(
+      new Blob(["unrelated"]),
+      "notes.txt",
+    );
+    const asset = await initial.store.importFile(triangle(), "triangle.glb");
+    await initial.commands.execute({
       type: "nodes.put",
       nodes: [{ ...node("mesh"), kind: "mesh", assetId: asset.id }],
     });
-    const before = structuredClone({
-      nodes: store.snapshot().nodes,
-      settings: store.snapshot().settings,
-      selection: store.snapshot().selection,
-    });
-    const id = await runner.submit(
+    const id = await initial.runner.submit(
       {
         kind: "render",
         camera,
@@ -518,6 +457,36 @@ test.skipIf(!rendererExecutable())(
       undefined,
       { actorId: "Renderer" },
     );
+    const manifest = Bun.file(
+      path.join(initial.store.root, "jobs", id, "input.json"),
+    );
+    const frozen = await manifest.text();
+    expect(frozen).not.toContain(unused.id);
+    expect(Object.keys(JSON.parse(frozen).contextSnapshot.assets)).toEqual([
+      asset.id,
+    ]);
+    expect(initial.store.current.jobs[id].input).toEqual({ kind: "render" });
+    await initial.commands.execute({
+      type: "nodes.transform",
+      ids: ["mesh"],
+      transform: { position: [100, 0, 0] },
+    });
+    const meshFile = (await initial.store.assetFile(asset.id)).file;
+    await Bun.write(meshFile, "replaced after queueing");
+    await initial.store.close();
+    const store = await new WorkspaceStore(initial.store.root).init();
+    const runner = new JobRunner(store),
+      commands = new CommandService(store, runner);
+    cleanup.push(async () => {
+      await runner.close();
+      await store.close();
+    });
+    const before = structuredClone({
+      nodes: store.snapshot().nodes,
+      settings: store.snapshot().settings,
+      selection: store.snapshot().selection,
+    });
+    await runner.init();
     const job = await done(store, id);
     expect(job.error).toBeUndefined();
     expect(job.status).toBe("succeeded");
@@ -532,6 +501,16 @@ test.skipIf(!rendererExecutable())(
       settings: store.snapshot().settings,
       selection: store.snapshot().selection,
     }).toEqual(before);
+    expect(await manifest.text()).toBe(frozen);
+    expect(store.current.nodes.mesh.transform.position).toEqual([100, 0, 0]);
+    // Subsequent probe and fit jobs use the live scene.
+    await Bun.write(meshFile, triangle());
+    await store.syncAssets();
+    await commands.execute({
+      type: "nodes.transform",
+      ids: ["mesh"],
+      transform: identity(),
+    });
     const assets = job.outputAssetIds.map((id) => store.snapshot().assets[id]);
     const depth = assets.find((a) => a.role === "depth")!;
     const grid = linearDepth(

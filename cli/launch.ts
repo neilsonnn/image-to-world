@@ -162,9 +162,9 @@ export async function openProject(
   await mkdir(workspace, { recursive: true });
   const canonical = await realpath(workspace);
   const url = `http://127.0.0.1:${port}`;
-  const status = async () => {
+  const status = async (timeoutMs = 1500) => {
     const response = await fetch(`${url}/api/status`, {
-      signal: AbortSignal.timeout(1500),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok)
       throw new Error(`Port ${port} is occupied. Choose --port <number>.`);
@@ -246,13 +246,15 @@ export async function openProject(
   process.on("SIGTERM", stop);
   try {
     let ready = false;
-    for (let attempt = 0; attempt < 100; attempt++) {
+    // The first status request opens the project and indexes its job summaries.
+    const deadline = Date.now() + 120_000;
+    while (Date.now() < deadline) {
       if (child.exitCode !== null)
         throw new Error(
           `Server exited (${child.exitCode}). Check the output above.`,
         );
       try {
-        await status();
+        await status(Math.max(1, deadline - Date.now()));
         ready = true;
         break;
       } catch (error) {
@@ -266,7 +268,7 @@ export async function openProject(
       await Bun.sleep(100);
     }
     if (!ready)
-      throw new Error("Server did not become ready within 10 seconds.");
+      throw new Error("Server did not become ready within two minutes.");
     await show();
     process.stderr.write(
       "Keep this terminal open; Ctrl+C stops image-to-world.\n",

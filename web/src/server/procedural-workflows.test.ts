@@ -114,7 +114,7 @@ test.skipIf(!rendererExecutable())(
         i++
       )
         await Bun.sleep(100);
-      const job = store.snapshot().jobs[jobId];
+      const job = await store.loadJob(jobId);
       expect(job.error).toBeUndefined();
       expect(job.status).toBe("succeeded");
       expect(job.pinnedAssets?.[code.id]).toBeDefined();

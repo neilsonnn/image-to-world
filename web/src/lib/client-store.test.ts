@@ -181,3 +181,89 @@ test("a failed refresh retains the project and recovers on the next request", as
     network.mockRestore();
   }
 });
+
+test("camera selection is local before the network responds, and only a gap refetches the scene", async () => {
+  let stream: EventTarget;
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "EventSource");
+  class Events extends EventTarget {
+    constructor() {
+      super();
+      stream = this;
+    }
+    close() {}
+  }
+  Object.defineProperty(globalThis, "EventSource", {
+    value: Events,
+    configurable: true,
+  });
+  const scene = project();
+  scene.nodes.camera.projection = scene.settings.viewportCamera.intrinsics;
+  scene.nodes.camera.transform.position = [6, 2, 1];
+  let reads = 0,
+    reply!: (r: Response) => void;
+  const network = spyOn(globalThis, "fetch").mockImplementation(
+    Object.assign(
+      async (url: RequestInfo | URL) => {
+        if (url === "/api/commands")
+          return new Promise<Response>((resolve) => (reply = resolve));
+        if (url === "/api/workspace") {
+          reads++;
+          return Response.json(scene, {
+            headers: { "X-Workspace-Stream": "test" },
+          });
+        }
+        return Response.json({});
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  );
+  const client = createImageToWorldClient();
+  const disconnect = client.connect();
+  const change = (payload: object) =>
+    stream.dispatchEvent(
+      new MessageEvent("change", {
+        data: JSON.stringify({ stream: "test", ...payload }),
+      }),
+    );
+  try {
+    await Bun.sleep(0);
+    stream!.dispatchEvent(new Event("open"));
+    const start = client.getWorkspace();
+    const command = client.command({ type: "camera.view", nodeId: "camera" });
+    expect(client.getWorkspace().settings.viewingCameraId).toBe("camera");
+    expect(
+      client.getWorkspace().settings.viewportCamera.extrinsics.position,
+    ).toEqual([6, 2, 1]);
+    expect(client.getWorkspace().jobs).toBe(start.jobs);
+    await Bun.sleep(0);
+    change({
+      base: scene.revision,
+      revision: scene.revision + 1,
+      patches: [
+        { field: "settings", key: "viewingCameraId", value: "camera" },
+        {
+          field: "settings",
+          key: "viewportCamera",
+          value: client.getWorkspace().settings.viewportCamera,
+        },
+      ],
+    });
+    scene.revision++;
+    reply(Response.json({ revision: scene.revision }));
+    await command;
+    change({ revision: scene.revision });
+    expect(reads).toBe(1);
+    scene.revision += 2;
+    scene.name = "Recovered";
+    change({ base: scene.revision - 1, revision: scene.revision, patches: [] });
+    await Bun.sleep(0);
+    expect(reads).toBe(2);
+    expect(client.getWorkspace().name).toBe("Recovered");
+  } finally {
+    disconnect();
+    network.mockRestore();
+    if (descriptor)
+      Object.defineProperty(globalThis, "EventSource", descriptor);
+    else Reflect.deleteProperty(globalThis, "EventSource");
+  }
+});

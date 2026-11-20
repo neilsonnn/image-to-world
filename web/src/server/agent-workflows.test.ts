@@ -107,6 +107,68 @@ function triangle(extra: Record<string, unknown> = {}) {
   Buffer.from(positions.buffer).copy(bytes, at + 8);
   return new Blob([bytes], { type: "model/gltf-binary" });
 }
+test.skipIf(!rendererExecutable())(
+  "a queued render reopens with its submitted camera, mesh bytes and transforms",
+  async () => {
+    const { store, runner, commands } = await fixture();
+    await runner.close(); // Persist a genuinely queued job, without racing the renderer.
+    const mesh = await store.importFile(triangle(), "subject.glb");
+    const unrelated = await store.importFile(
+      new Blob(["catalog only"]),
+      "notes.txt",
+    );
+    await commands.execute({
+      type: "nodes.put",
+      nodes: [{ ...node("subject"), kind: "mesh", assetId: mesh.id }],
+    });
+    const id = await runner.submit({
+      kind: "render",
+      camera,
+      passes: ["depth"],
+      nodeIds: ["subject"],
+    });
+    const inputFile = Bun.file(path.join(store.root, "jobs", id, "input.json"));
+    const manifest = await inputFile.text();
+    expect(manifest).not.toContain(unrelated.id);
+    expect(Object.keys(JSON.parse(manifest).contextSnapshot.assets)).toEqual([
+      mesh.id,
+    ]);
+    expect(store.current.jobs[id].input).toEqual({ kind: "render" });
+    await commands.execute({
+      type: "nodes.transform",
+      ids: ["subject"],
+      transform: { position: [100, 0, 0] },
+    });
+    await Bun.write(
+      (await store.assetFile(mesh.id)).file,
+      "replaced after queueing",
+    );
+    await store.close();
+    const reopened = await new WorkspaceStore(store.root).init(),
+      worker = new JobRunner(reopened);
+    try {
+      await worker.init();
+      const result = await done(reopened, id);
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe("succeeded");
+      const depth = result.outputAssetIds
+        .map((id) => reopened.current.assets[id])
+        .find((a) => a.role === "depth")!;
+      const grid = linearDepth(
+        await Bun.file((await reopened.assetFile(depth.id)).file).arrayBuffer(),
+      );
+      expect(grid.data[(32 * 64 + 32) * grid.stride]).toBeCloseTo(2, 3);
+      expect(reopened.current.nodes.subject.transform.position).toEqual([
+        100, 0, 0,
+      ]);
+      expect(await inputFile.text()).toBe(manifest);
+    } finally {
+      await worker.close();
+      await reopened.close();
+    }
+  },
+  60_000,
+);
 test("mesh import accepts embedded WebP textures while rejecting external images and decoder-only extensions", async () => {
   const { store } = await fixture();
   const image = createCanvas(2, 2).toBuffer("image/webp");
@@ -200,7 +262,7 @@ test("queued inputs retain their bytes when the library file changes", async () 
   const asset = await store.importFile(new Blob(["first"]), "source.txt");
   // Viewport jobs remain queued, making the snapshot race deterministic without an external provider.
   const id = await runner.submit({ kind: "capture", camera });
-  const job = store.snapshot().jobs[id];
+  const job = await store.loadJob(id);
   const pins = await store.pinAssets(store.snapshot(), { assetId: asset.id });
   job.pinnedAssets = pins;
   job.contextSnapshot!.assets[asset.id] = asset;

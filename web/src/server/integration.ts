@@ -13,8 +13,9 @@ export async function integrateAssets(
     parentId?: string | null;
     beforeId?: string | null;
   },
+  jobId?: string,
 ) {
-  const snapshot = store.snapshot();
+  const snapshot = store.current;
   const captures: SceneNode[][] = [];
   const existing = imageIndex(snapshot).capturesByAsset;
   const origin = placement
@@ -39,8 +40,9 @@ export async function integrateAssets(
   }
   signal?.throwIfAborted();
   if (!captures.length) return [];
-  return store.update((state) => {
+  return store.updateScene((state) => {
     signal?.throwIfAborted();
+    if (jobId && state.resultApplications[jobId]?.includes("frames")) return [];
     const current = imageIndex(state).capturesByAsset;
     const added = captures.flatMap((capture) =>
       state.nodes[capture[0].id] || current.has(capture[0].assetId!)
@@ -68,6 +70,7 @@ export async function integrateAssets(
         ],
       });
     }
+    if (jobId) (state.resultApplications[jobId] ??= []).push("frames");
     return added.map((node) => node.id);
   });
 }

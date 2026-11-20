@@ -1,3 +1,4 @@
+import { emptyWorkspace } from "../../../core/schema";
 import { chromium, type Browser, type Page } from "playwright-core";
 import path from "node:path";
 import { existsSync } from "node:fs";
@@ -130,7 +131,7 @@ export class RenderWorker {
       throw new Error("Render requires a frozen scene snapshot");
     this.active = job;
     const snapshot = {
-      ...this.store.snapshot(),
+      ...emptyWorkspace(),
       ...job.contextSnapshot,
       revision: job.snapshotRevision,
     } as Workspace;
@@ -142,19 +143,24 @@ export class RenderWorker {
     try {
       const result = await this.page!.evaluate<
         RenderResult,
-        { workspace: unknown; input: typeof input }
+        { workspace: unknown; input: typeof input; guides?: string[] }
       >(
-        async ({ workspace, input }) => {
+        async ({ workspace, input, guides }) => {
           return (
             globalThis as unknown as {
               imageToWorldRender: (
                 w: unknown,
                 i: unknown,
+                guides?: string[],
               ) => Promise<RenderResult>;
             }
-          ).imageToWorldRender(workspace, input);
+          ).imageToWorldRender(workspace, input, guides);
         },
-        { workspace: snapshot, input },
+        {
+          workspace: snapshot,
+          input,
+          guides: job.contextSnapshot.generatedGuideIds,
+        },
       );
       signal.throwIfAborted();
       return result;

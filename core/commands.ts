@@ -427,12 +427,35 @@ function mutate(workspace: Workspace, input: Command) {
   }
 }
 
+export function isNavigation(input: Command) {
+  return (
+    ["selection.set", "camera.view", "camera.release", "frames.view"].includes(
+      input.type,
+    ) ||
+    (input.type === "workspace.update" &&
+      input.name === undefined &&
+      !!input.settings &&
+      Object.keys(input.settings).every((k) =>
+        ["viewportCamera", "viewingCameraId", "freeCamera"].includes(k),
+      ))
+  );
+}
+
+// Navigation changes only session fields. Reuse the scene and job records.
+export function navigate(workspace: Workspace, command: Command): Workspace {
+  if (!isNavigation(command)) throw new Error("Expected navigation command");
+  const next = { ...workspace, settings: { ...workspace.settings } };
+  mutate(next, command);
+  return next;
+}
+
 export function applyCommand(
   workspace: Workspace,
   input: Command,
   options: { preserveSelection?: boolean } = {},
 ) {
-  const next = structuredClone(workspace);
+  const { jobs, receipts, ...editable } = workspace;
+  const next = { ...structuredClone(editable), jobs, receipts };
   mutate(next, input);
   if (
     options.preserveSelection &&

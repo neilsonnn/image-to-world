@@ -1,8 +1,9 @@
 import { setRenderNodes } from "../../../core/reference-comparison";
 import { currentCamera } from "../../../core/generation";
 import { loadImage } from "@napi-rs/canvas";
+import { frozenContext, inputNodes } from "./job-inputs";
 import { captureRoot, sceneCamera } from "../../../core/captures";
-import { cameraFromWorld, cameraMatrix } from "../../../core/cameras";
+
 import { captureEnvironment } from "./probe";
 import { RenderWorker } from "./render-worker";
 import { observeRegion, fitObject, composeMask } from "./observations";
@@ -46,7 +47,12 @@ import type {
   PosedImages2SplatsResponse,
 } from "@worldlabsai/client";
 import { randomUUID } from "node:crypto";
-import { samplePath, spansBaseline } from "../../../core/cameras";
+import {
+  cameraFromWorld,
+  cameraMatrix,
+  samplePath,
+  spansBaseline,
+} from "../../../core/cameras";
 import {
   jobInputSchema,
   type Asset,
@@ -55,6 +61,7 @@ import {
   type SceneNode,
   type Job,
   type JobInput,
+  type JobSummary,
 } from "../../../core/schema";
 import { renderImageDraft, preserveUnchangedPixels } from "./image-edit";
 import {
@@ -78,23 +85,26 @@ export class JobRunner {
     this.renderer = new RenderWorker(store);
   }
   async init() {
-    await this.store.update((state) => {
-      for (const job of Object.values(state.jobs)) {
-        if (job.status !== "running") continue;
-        if (
-          ["fal", "nano", "image"].includes(job.input.kind) &&
-          !job.remoteId &&
-          job.submittedAt
-        ) {
-          job.status = "failed";
-          job.error =
-            "FAL submission was interrupted before its request ID was saved. Check your FAL history before retrying.";
-        } else {
-          job.status = "queued";
-          job.message = "Resuming after restart";
+    if (
+      Object.values(this.store.current.jobs).some((j) => j.status === "running")
+    )
+      await this.store.update((state) => {
+        for (const job of Object.values(state.jobs)) {
+          if (job.status !== "running") continue;
+          if (
+            ["fal", "nano", "image"].includes(job.input.kind) &&
+            !job.remoteId &&
+            job.submittedAt
+          ) {
+            job.status = "failed";
+            job.error =
+              "FAL submission was interrupted before its request ID was saved. Check your FAL history before retrying.";
+          } else {
+            job.status = "queued";
+            job.message = "Resuming after restart";
+          }
         }
-      }
-    });
+      });
     this.pump();
   }
   async submit(
@@ -103,13 +113,16 @@ export class JobRunner {
     parentJob?: Job,
     context: CommandContext = {},
   ) {
-    if (this.store.snapshot().jobs[id]) return id;
+    if (this.store.current.jobs[id]) return id;
     const parsed = jobInputSchema.parse(input);
     if (parsed.kind === "image") {
       falClient();
       worldLabs();
     }
-    let snapshot = this.store.snapshot();
+    let snapshot = {
+      ...this.store.current,
+      settings: structuredClone(this.store.current.settings),
+    };
     if (parsed.kind === "render" && parsed.setOnly) {
       if (!parsed.lightingViewId)
         throw new Error("Set rendering requires a reference Frame or camera");
@@ -135,7 +148,8 @@ export class JobRunner {
       sourceFrameAssetIds: string[] | undefined;
     const source =
       parsed.kind === "video" && parsed.sourceJobId
-        ? snapshot.jobs[parsed.sourceJobId]
+        ? snapshot.jobs[parsed.sourceJobId] &&
+          (await this.store.loadJob(parsed.sourceJobId))
         : undefined;
     if (parsed.kind === "video" && parsed.sourceJobId && !source)
       throw new Error("Keyframe generation does not exist");
@@ -178,7 +192,7 @@ export class JobRunner {
             parsed.kind === "video" ? parsed.pathId : parsed.contextPathId,
           );
       if (source) {
-        const current = this.store.snapshot();
+        const current = this.store.current;
         const versions = imageIndex(current);
         sourceFrameAssetIds = (source.frameAssetIds ?? []).map(
           (id) => current.imageVersions[versions.roots.get(id)!] ?? id,
@@ -326,19 +340,6 @@ export class JobRunner {
       !parsed.videoAssetId
     )
       throw new Error("Choose images or video to reconstruct");
-    const pinnedAssets = await this.store.pinAssets(
-      snapshot,
-      parsed,
-      [
-        "atlas",
-        "splats",
-        "video",
-        "render",
-        "probe",
-        "observe",
-        "fit",
-      ].includes(parsed.kind),
-    );
     const index = imageIndex(snapshot);
     const sourceIds =
       parsed.kind === "nano" && parsed.applyToScene
@@ -357,8 +358,28 @@ export class JobRunner {
               ),
             ),
           ];
-    await this.store.update((state) => {
+    const nodes = inputNodes(snapshot, parsed, targetIds);
+    const environment = ["render", "probe", "fit"].includes(parsed.kind)
+      ? snapshot.settings.lighting?.environmentAssetId
+      : undefined;
+    const pin = () =>
+      this.store.pinAssets(snapshot, [
+        parsed,
+        sheetItems,
+        sourceFrameAssetIds,
+        environment,
+        ...Object.values(nodes).map((n) => [
+          n.assetId,
+          n.geometryAssetId,
+          n.procedural,
+        ]),
+      ]);
+    const pinnedAssets = source
+      ? await this.store.withJobAssets(source, pin)
+      : await pin();
+    await this.store.updateSceneAndJob(id, (state) => {
       checkPreconditions(state, context);
+      if (state.jobs[id]) return;
       if (parentJob && state.jobs[parentJob.id]?.status === "cancelled")
         throw new Error("Parent generation was cancelled");
       if (parsed.kind === "pose" || parsed.kind === "image") {
@@ -393,7 +414,7 @@ export class JobRunner {
         ["atlas", "video", "reconstruct"].includes(parsed.kind)
       )
         state.settings.atlasPanel.jobId = id;
-      state.jobs[id] = {
+      const job: Job = {
         interactive: parentJob?.interactive ?? context.interactive ?? false,
         snapshotRevision: snapshot.revision,
         pinnedAssets,
@@ -422,11 +443,16 @@ export class JobRunner {
         appliedTargets: [],
         resultOwnerId: parentJob?.resultOwnerId ?? parentJob?.id ?? id,
         sourceFrameAssetIds,
-        contextSnapshot: {
-          nodes: snapshot.nodes,
-          assets: snapshot.assets,
-          settings: snapshot.settings,
-        },
+        contextSnapshot: frozenContext(snapshot, nodes, pinnedAssets),
+        activityCamera:
+          parsed.kind === "render"
+            ? cameraFromWorld(
+                parsed.camera.intrinsics,
+                cameraMatrix(parsed.camera),
+              ).extrinsics
+            : parsed.kind === "observe" || parsed.kind === "probe"
+              ? sceneCamera(snapshot, parsed.nodeId)?.extrinsics
+              : undefined,
         status: "queued",
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -435,9 +461,10 @@ export class JobRunner {
           : "Queued",
         outputAssetIds: [],
       };
-      if (!parentJob) claimResultTargets(state, state.jobs[id]);
+      state.jobs[id] = job;
+      if (!parentJob) claimResultTargets(state, job);
     });
-    this.reportJob(this.store.snapshot().jobs[id], "summary");
+    this.reportJob(this.store.current.jobs[id], "summary");
     this.pump();
     return id;
   }
@@ -448,7 +475,7 @@ export class JobRunner {
     mode: PlacementMode = "individual",
     context: CommandContext = {},
   ) {
-    const snapshot = this.store.snapshot();
+    const snapshot = this.store.current;
     if (destination?.parentId && !snapshot.nodes[destination.parentId])
       throw new Error("Placement parent does not exist");
     const placed: string[] = [];
@@ -513,7 +540,7 @@ export class JobRunner {
           context,
         );
         jobIds.push(jobId);
-        const input = this.store.snapshot().jobs[jobId].input;
+        const input = this.store.current.jobs[jobId].input;
         if (input.kind === "pose") {
           placed.push(...input.nodeIds!);
           needsMove.push(...input.nodeIds!);
@@ -554,7 +581,7 @@ export class JobRunner {
       });
     }
     const editId = edits.length
-      ? await this.store.update((state) => {
+      ? await this.store.updateScene((state) => {
           checkPreconditions(state, context);
           const previousEdit = state.undo.at(-1)?.id;
           applyCommand(
@@ -572,10 +599,11 @@ export class JobRunner {
   }
   private pump() {
     if (this.stopped) return;
-    const jobs = this.store.snapshot().jobs;
+    const jobs = this.store.current.jobs;
     const renders = (kind: JobInput["kind"]) =>
       ["render", "fit", "probe"].includes(kind);
     for (const job of Object.values(jobs)) {
+      if (job.status !== "queued") continue;
       const rendering = renders(job.input.kind);
       const activeInSlot = [...this.active.keys()].filter(
         (id) => renders(jobs[id].input.kind) === rendering,
@@ -590,9 +618,18 @@ export class JobRunner {
       const controller = new AbortController();
       this.active.set(job.id, controller);
       const task = this.store
-        .withJobAssets(job, () => this.run(job.id, controller.signal))
+        .loadJob(job.id)
+        .then((full) =>
+          this.store.withJobAssets(full, () =>
+            this.run(full, controller.signal),
+          ),
+        )
         .catch((error) =>
-          console.error("image-to-world job could not save its status:", error),
+          this.patch(job.id, {
+            status: "failed",
+            error: String(error),
+            message: "Could not load job",
+          }).catch((e) => console.error("Could not save job status", e)),
         )
         .finally(() => {
           this.active.delete(job.id);
@@ -607,18 +644,17 @@ export class JobRunner {
     patch: Partial<Job>,
     addedNodes: string[] = [],
   ) {
-    const previous = this.store.snapshot().jobs[id];
-    await this.store.update((state) => {
-      const job = state.jobs[id];
+    const previous = this.store.current.jobs[id];
+    await this.store.updateJob(id, (job) => {
       if (job.status === "cancelled") return;
       Object.assign(job, patch, { updatedAt: Date.now() });
     });
-    const job = this.store.snapshot().jobs[id];
+    const job = this.store.current.jobs[id];
     if (patch.status || (patch.message && patch.message !== previous?.message))
       this.reportJob(job, patch.status ? "summary" : "trace", addedNodes);
   }
   private reportJob(
-    job: Job,
+    job: JobSummary,
     detail: "summary" | "trace",
     addedNodes: string[] = [],
   ) {
@@ -632,7 +668,7 @@ export class JobRunner {
         job.status === "succeeded"
           ? sceneChange(
               [...job.appliedTargets, ...addedNodes],
-              this.store.snapshot().nodes,
+              this.store.current.nodes,
             )
           : undefined,
       phase: job.status,
@@ -644,12 +680,7 @@ export class JobRunner {
             : "info",
       detail,
       message: job.error ?? job.message,
-      assetIds: [
-        ...new Set([
-          ...Object.keys(job.pinnedAssets ?? {}),
-          ...job.outputAssetIds,
-        ]),
-      ],
+      assetIds: [...new Set([...job.outputAssetIds])],
       nodeIds: [
         ...new Set([
           ...addedNodes,
@@ -658,18 +689,7 @@ export class JobRunner {
           ...("nodeId" in job.input ? [job.input.nodeId] : []),
         ]),
       ],
-      camera:
-        job.input.kind === "render"
-          ? cameraFromWorld(
-              job.input.camera.intrinsics,
-              cameraMatrix(job.input.camera),
-            ).extrinsics
-          : job.input.kind === "observe" || job.input.kind === "probe"
-            ? sceneCamera(
-                { nodes: job.contextSnapshot!.nodes },
-                job.input.nodeId,
-              )?.extrinsics
-            : undefined,
+      camera: job.activityCamera,
       model:
         "model" in job.input
           ? job.input.model
@@ -678,10 +698,11 @@ export class JobRunner {
             : undefined,
     });
   }
-  private async run(id: string, signal: AbortSignal) {
+  private async run(job: Job, signal: AbortSignal) {
+    const id = job.id;
     try {
       await this.patch(id, { status: "running", message: "Preparing inputs" });
-      let job = this.store.snapshot().jobs[id];
+
       signal.throwIfAborted();
       const assets: Asset[] = [];
       const addedNodes: string[] = [];
@@ -704,6 +725,16 @@ export class JobRunner {
       if (
         job.input.kind === "reconstruct" &&
         job.input.videoAssetId &&
+        job.contextSnapshot
+      ) {
+        job.input.assetIds = job.extractedFrameIds ?? job.input.assetIds;
+        const assets = this.store.current.assets;
+        for (const id of job.input.assetIds)
+          job.contextSnapshot.assets[id] = assets[id];
+      }
+      if (
+        job.input.kind === "reconstruct" &&
+        job.input.videoAssetId &&
         !job.input.assetIds.length
       ) {
         const frames = await extractVideoFrames(
@@ -719,8 +750,7 @@ export class JobRunner {
           for (const asset of frames)
             job.contextSnapshot.assets[asset.id] = asset;
         await this.patch(id, {
-          input: job.input,
-          contextSnapshot: job.contextSnapshot,
+          extractedFrameIds: job.input.assetIds,
         });
       }
       if (
@@ -791,7 +821,7 @@ export class JobRunner {
             abortSignal: signal,
           });
           await this.patch(id, { remoteId: request.request_id });
-          job = this.store.snapshot().jobs[id];
+          job.remoteId = request.request_id;
         }
         if (
           job.input.kind !== "fal" &&
@@ -834,7 +864,7 @@ export class JobRunner {
           signal.throwIfAborted();
           const { url, paths } = outputs[i];
           const name = new URL(url).pathname.split("/").pop() || `output-${i}`;
-          const existing = Object.values(this.store.snapshot().assets).find(
+          const existing = Object.values(this.store.current.assets).find(
             (a) => a.jobId === id && a.path.endsWith(`${id}-${i}-${name}`),
           );
           let downloaded: Blob | undefined;
@@ -876,7 +906,7 @@ export class JobRunner {
                       parentAssetId: job.input.sourceAssetId,
                       referenceAssetIds: job.input.referenceAssetIds,
                       ...nanoGeometry(
-                        { ...this.store.snapshot(), ...job.contextSnapshot },
+                        { ...this.store.current, ...job.contextSnapshot },
                         job,
                       ),
                     }
@@ -888,7 +918,7 @@ export class JobRunner {
           const asset = assets.find((asset) => asset.kind === "image");
           if (!asset) throw new Error("Image generation returned no image");
           signal.throwIfAborted();
-          await this.store.update((state) => {
+          await this.store.updateSceneAndJob(id, (state) => {
             signal.throwIfAborted();
             applyJobResult(state, job, (targets) => {
               const nodes = targets.flatMap((target) =>
@@ -900,7 +930,7 @@ export class JobRunner {
               return nodes.length ? [{ type: "nodes.put", nodes }] : [];
             });
           });
-          const current = this.store.snapshot().jobs[id];
+          const current = this.store.current.jobs[id];
           if (current.appliedTargets.length) {
             const childJobId = await this.submit(
               {
@@ -966,10 +996,11 @@ export class JobRunner {
               this.store,
               job,
               job.contextSnapshot
-                ? { ...this.store.snapshot(), ...job.contextSnapshot }
-                : this.store.snapshot(),
+                ? { ...this.store.current, ...job.contextSnapshot }
+                : this.store.current,
               signal,
             ));
+          job.request = request;
           await this.patch(id, {
             request,
             message: "Submitting to World Labs",
@@ -1009,12 +1040,11 @@ export class JobRunner {
           throw new Error("World Labs returned no result");
         if (job.input.kind === "atlas" || job.input.kind === "video") {
           const response = completed.response as AtlasGenerateResponse;
-          const request = this.store.snapshot().jobs[id].request as
-            AtlasGenerateRequest | undefined;
+          const request = job.request as AtlasGenerateRequest | undefined;
           const prompt = job.input.prompt;
           if (request?.enhancePrompt && response.promptUsed?.trim()) {
             const text = response.promptUsed;
-            await this.store.update((state) => {
+            await this.store.updateScene((state) => {
               if (state.jobs[id].status === "cancelled") return;
               if (
                 state.settings.prompt !== prompt ||
@@ -1044,8 +1074,7 @@ export class JobRunner {
           const expected =
             job.input.kind === "pose" || job.input.kind === "reconstruct"
               ? job.input.assetIds.length
-              : (this.store.snapshot().jobs[id].request as AtlasGenerateRequest)
-                  .targetCameras.length;
+              : (job.request as AtlasGenerateRequest).targetCameras.length;
           if (frames.length !== expected)
             throw new Error(
               `World Labs returned ${frames.length} of ${expected} frames`,
@@ -1079,6 +1108,8 @@ export class JobRunner {
                 this.store,
                 assets.map((asset) => asset.id),
                 signal,
+                undefined,
+                job.id,
               )),
             );
           if (job.input.kind === "video") {
@@ -1125,18 +1156,15 @@ export class JobRunner {
           frameAssetIds: assets
             .filter((a) => a.kind === "image")
             .map((a) => a.id),
-          message: this.store.snapshot().jobs[id].applicationError
-            ? `Saved ${assets.length} outputs; scene application failed: ${this.store.snapshot().jobs[id].applicationError}`
+          message: this.store.current.jobs[id].applicationError
+            ? `Saved ${assets.length} outputs; scene application failed: ${this.store.current.jobs[id].applicationError}`
             : `Saved ${assets.length} outputs`,
           error: undefined,
         },
         addedNodes,
       );
     } catch (error) {
-      if (
-        !this.stopped &&
-        this.store.snapshot().jobs[id]?.status !== "cancelled"
-      )
+      if (!this.stopped && this.store.current.jobs[id]?.status !== "cancelled")
         await this.patch(id, {
           status: "failed",
           error: error instanceof Error ? error.message : String(error),
@@ -1151,26 +1179,32 @@ export class JobRunner {
     signal: AbortSignal,
   ) {
     const name = `${job.id}-splats.spz`;
-    const existing = Object.values(this.store.snapshot().assets).find(
+    const existing = Object.values(this.store.current.assets).find(
       (asset) => asset.jobId === job.id && asset.path.endsWith(name),
     );
-    if (existing) return { asset: existing, nodeIds: [] as string[] };
+    if (
+      existing &&
+      this.store.current.resultApplications[job.id]?.includes("splat")
+    )
+      return { asset: existing, nodeIds: [] as string[] };
     const levels = Object.entries(response.refinedSplats ?? {}).sort(
       (a, b) => Number(b[0]) - Number(a[0]),
     );
     const splat = levels[0]?.[1] ?? response.draftSplat;
     if (!splat) throw new Error("World Labs returned no splats");
     await this.patch(job.id, { message: "Downloading splats" });
-    const asset = await this.store.importFile(
-      await downloadTaskAsset(splat, signal),
-      name,
-      {
-        jobId: job.id,
-        name: `${job.input.kind === "splats" && job.input.refine ? "Refined" : "Draft"} splats`,
-      },
-    );
+    const asset =
+      existing ??
+      (await this.store.importFile(
+        await downloadTaskAsset(splat, signal),
+        name,
+        {
+          jobId: job.id,
+          name: `${job.input.kind === "splats" && job.input.refine ? "Refined" : "Draft"} splats`,
+        },
+      ));
     const nodeId = `node_${randomUUID()}`;
-    await this.store.update((state) => {
+    await this.store.updateScene((state) => {
       applyCommand(state, {
         type: "nodes.put",
         nodes: [
@@ -1186,29 +1220,30 @@ export class JobRunner {
           },
         ],
       });
+      (state.resultApplications[job.id] ??= []).push("splat");
       if (job.interactive)
         applyCommand(state, { type: "selection.set", ids: [nodeId] });
     });
     return { asset, nodeIds: [nodeId] };
   }
   async cancel(id: string) {
-    const job = this.store.snapshot().jobs[id];
+    const job = this.store.current.jobs[id];
     if (!job || !["queued", "running"].includes(job.status))
       throw new Error("Job is not active");
-    await this.store.update((state) => {
-      Object.assign(state.jobs[id], {
+    await this.store.updateJob(id, (current) => {
+      Object.assign(current, {
         status: "cancelled",
         updatedAt: Date.now(),
         message:
           "Stopped locally; the provider may still finish and bill this request",
       });
     });
-    this.reportJob(this.store.snapshot().jobs[id], "summary");
+    this.reportJob(this.store.current.jobs[id], "summary");
     this.active.get(id)?.abort(new Error("Cancelled"));
     const childId =
       job.childJobId ??
       `${id}-${job.input.kind === "image" ? "pose" : "reconstruct"}`;
-    const child = this.store.snapshot().jobs[childId];
+    const child = this.store.current.jobs[childId];
     if (child && ["queued", "running"].includes(child.status))
       await this.cancel(childId);
     if (
@@ -1223,7 +1258,7 @@ export class JobRunner {
       );
   }
   async retry(id: string) {
-    const job = this.store.snapshot().jobs[id];
+    const job = this.store.current.jobs[id];
     if (!job || !["failed", "cancelled"].includes(job.status))
       throw new Error("Only failed or cancelled jobs can be retried");
     if (
@@ -1237,15 +1272,15 @@ export class JobRunner {
         "FAL may have accepted the earlier submission. Check FAL history, then explicitly submit a new job if needed.",
       );
     // Retain the request and operation ID; recovery must not submit a second paid job.
-    await this.store.update((state) => {
-      Object.assign(state.jobs[id], {
+    await this.store.updateJob(id, (current) => {
+      Object.assign(current, {
         status: "queued",
         error: undefined,
         updatedAt: Date.now(),
         message: "Resuming request",
       });
     });
-    this.reportJob(this.store.snapshot().jobs[id], "summary");
+    this.reportJob(this.store.current.jobs[id], "summary");
     this.pump();
     return id;
   }

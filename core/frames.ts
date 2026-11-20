@@ -1,9 +1,9 @@
 import { imageIndex } from "./images";
-import type { Job, Workspace } from "./schema";
+import type { JobSummary, Workspace } from "./schema";
 
 export function frameAssets(
   workspace: Pick<Workspace, "assets" | "nodes" | "imageVersions">,
-  job: Job,
+  job: JobSummary,
 ) {
   const index = imageIndex(workspace);
   return (job.frameAssetIds ?? job.outputAssetIds).flatMap((id) => {
@@ -23,7 +23,7 @@ export function keyframeIndices(count: number, requested: number) {
 
 export function frameAt(
   workspace: Pick<Workspace, "assets" | "nodes" | "imageVersions">,
-  job: Job,
+  job: JobSummary,
   index: number,
 ) {
   return frameAssets(workspace, job).find(

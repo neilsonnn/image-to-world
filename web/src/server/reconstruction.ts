@@ -24,9 +24,9 @@ export async function reconstructFrames(
 ) {
   if (job.input.kind !== "reconstruct")
     throw new Error("Expected a reconstruction job");
-  const snapshot = job.contextSnapshot ?? store.snapshot();
+  const snapshot = job.contextSnapshot ?? store.current;
   const sources = job.input.assetIds.map(
-    (id) => snapshot.assets[id] ?? store.snapshot().assets[id],
+    (id) => snapshot.assets[id] ?? store.current.assets[id],
   );
   const placement = job.input.placement;
   const targets = sources.map((asset) =>
@@ -171,7 +171,7 @@ export async function reconstructFrames(
     );
   }
   signal.throwIfAborted();
-  const sourceIndex = imageIndex({ ...store.snapshot(), ...snapshot });
+  const sourceIndex = imageIndex({ ...store.current, ...snapshot });
   const expectedByRoot = new Map<string, NonNullable<Job["applyTargets"]>>();
   for (const target of job.applyTargets ?? []) {
     if (!target.assetId) continue;
@@ -183,7 +183,7 @@ export async function reconstructFrames(
       (_, i) => !expectedByRoot.has(sourceIndex.roots.get(sources[i].id)!),
     )
     .map((asset) => asset.id);
-  await store.update((state) => {
+  await store.updateSceneAndJob(job.id, (state) => {
     signal.throwIfAborted();
     applyJobResult(state, job, (ownedTargets, roots) => {
       const commands: Extract<Command, { type: "edit.batch" }>["commands"] = [];
@@ -220,6 +220,7 @@ export async function reconstructFrames(
               beforeId: job.input.beforeId,
             }
           : undefined,
+        job.id,
       )
     : [];
   return { assets, nodeIds };

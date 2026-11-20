@@ -1,3 +1,5 @@
+import { isNavigation, navigate } from "../../../core/commands";
+import { applyDelta, type WorkspaceDelta } from "../../../core/workspace-delta";
 import {
   activitySchema,
   isAgentActivity,
@@ -64,17 +66,6 @@ function reconcile<T>(previous: T, next: T): T {
   ) as T;
 }
 
-function changeRevision(event: Event) {
-  try {
-    const { revision } = JSON.parse(String((event as MessageEvent).data)) as {
-      revision?: unknown;
-    };
-    return typeof revision === "number" ? revision : Infinity;
-  } catch {
-    return Infinity;
-  }
-}
-
 async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.text();
@@ -105,10 +96,36 @@ export function createImageToWorldClient() {
       store.setState({ hoveredNodeId });
   };
   const setError = (error: string | null) => store.setState({ error });
+  let live: Workspace | null = null;
+  let stream: string | null = null;
+  type Notification = {
+    stream: string;
+    revision: number;
+    base?: number;
+    patches?: WorkspaceDelta["patches"];
+  };
+  let buffered: Notification[] = [];
+  const pending = new Map<string, { command: Command; revision?: number }>();
+  function display() {
+    if (!live) return;
+    let view = live;
+    for (const [id, p] of pending) {
+      if (p.revision !== undefined && p.revision <= live.revision) {
+        pending.delete(id);
+        continue;
+      }
+      try {
+        view = navigate(view, p.command);
+      } catch {
+        pending.delete(id);
+      }
+    }
+    store.setState({ workspace: view, loading: false });
+  }
   const acceptWorkspace = (next: Workspace) => {
-    const previous = store.getState().workspace;
-    if (previous && next.revision < previous.revision) return;
-    store.setState({ workspace: reconcile(previous, next), loading: false });
+    if (live && next.revision < live.revision) return;
+    live = reconcile(live, next);
+    display();
   };
   const getWorkspace = () => {
     const workspace = store.getState().workspace;
@@ -127,11 +144,35 @@ export function createImageToWorldClient() {
           while (requested && epoch === connection) {
             requested = false;
             try {
-              const next = await readJson<Workspace>(
-                await fetch("/api/workspace"),
-              );
+              const response = await fetch("/api/workspace");
+              const next = await readJson<Workspace>(response);
               if (epoch !== connection) return;
+              const source = response.headers.get("X-Workspace-Stream");
+              if (stream !== source) {
+                live = null;
+                pending.clear();
+                stream = source;
+              }
               acceptWorkspace(next);
+              for (const delta of buffered) {
+                if (delta.stream === stream && delta.revision <= live!.revision)
+                  continue;
+                if (
+                  delta.stream !== stream ||
+                  !delta.patches ||
+                  delta.base !== live!.revision
+                ) {
+                  requested = true;
+                  break;
+                }
+                live = applyDelta(live!, {
+                  base: delta.base,
+                  revision: delta.revision,
+                  patches: delta.patches,
+                });
+              }
+              buffered = [];
+              display();
               if (store.getState().error === "Live updates disconnected")
                 setError(null);
             } catch (cause) {
@@ -155,25 +196,59 @@ export function createImageToWorldClient() {
     const status = await readJson<Status>(await fetch("/api/status"));
     if (epoch === connection) store.setState({ status });
   };
+  function waitForRevision(revision: number) {
+    if (!live || live.revision >= revision || !store.getState().connected)
+      return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const off = store.subscribe((state) => {
+        if (!state.connected || (live && live.revision >= revision)) {
+          off();
+          resolve();
+        }
+      });
+    });
+  }
+  let commandTail: Promise<unknown> = Promise.resolve();
   const command = async (value: Command) => {
     setError(null);
-    const result = await readJson<CommandResult>(
-      await fetch("/api/commands", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "X-Image-To-World-Client": "web",
-          "X-Image-To-World-Context": JSON.stringify({
-            actorId: "You",
-            requestId: crypto.randomUUID(),
-          }),
-        },
-        body: JSON.stringify(value),
-      }),
-    );
-    if (value.type === "environment.configure") await refreshStatus();
-    else await refresh();
-    return result;
+    const id = crypto.randomUUID();
+    const optimistic = live && isNavigation(value);
+    if (optimistic) {
+      pending.set(id, { command: value });
+      display();
+    }
+    const send = async () =>
+      readJson<CommandResult>(
+        await fetch("/api/commands", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "X-Image-To-World-Client": "web",
+            "X-Image-To-World-Context": JSON.stringify({
+              actorId: "You",
+              requestId: id,
+            }),
+          },
+          body: JSON.stringify(value),
+        }),
+      );
+    try {
+      const response = commandTail.then(send);
+      commandTail = response.catch(() => {});
+      const result = await response;
+      if (pending.has(id)) {
+        pending.get(id)!.revision = result.revision;
+        display();
+      }
+      if (value.type === "environment.configure") await refreshStatus();
+      else if (!live) await refresh();
+      else if (!optimistic) await waitForRevision(result.revision);
+      return result;
+    } catch (error) {
+      pending.delete(id);
+      display();
+      throw error;
+    }
   };
   const safeCommand = async (value: Command) => {
     try {
@@ -185,14 +260,13 @@ export function createImageToWorldClient() {
   const upload = async (files: File[]) => {
     const data = new FormData();
     for (const file of files) data.append("files", file);
-    const assets = await readJson<Asset[]>(
-      await fetch("/api/assets", {
-        method: "POST",
-        headers: { "X-Image-To-World-Client": "web" },
-        body: data,
-      }),
-    );
-    await refresh();
+    const response = await fetch("/api/assets", {
+      method: "POST",
+      headers: { "X-Image-To-World-Client": "web" },
+      body: data,
+    });
+    const assets = await readJson<Asset[]>(response);
+    await waitForRevision(Number(response.headers.get("X-Workspace-Revision")));
     return assets;
   };
   const connect = () => {
@@ -211,7 +285,6 @@ export function createImageToWorldClient() {
       store.setState({ connected: true });
       if (store.getState().error === "Live updates disconnected")
         setError(null);
-      void refresh();
     });
     events.addEventListener("activity-history", (event) => {
       if (epoch !== connection) return;
@@ -253,10 +326,28 @@ export function createImageToWorldClient() {
       } catch {}
     });
     events.addEventListener("change", (event) => {
-      // Commands already fetch their own result; skip revisions the client has.
-      const current = store.getState().workspace?.revision;
-      if (current !== undefined && changeRevision(event) <= current) return;
-      void refresh();
+      if (epoch !== connection) return;
+      try {
+        const delta = JSON.parse((event as MessageEvent).data);
+        if (!live || refreshing) {
+          buffered.push(delta);
+          if (!refreshing) void refresh();
+          return;
+        }
+        if (stream === delta.stream && delta.revision <= live.revision) return;
+        if (
+          stream !== delta.stream ||
+          !delta.patches ||
+          delta.base !== live.revision
+        ) {
+          void refresh();
+          return;
+        }
+        live = applyDelta(live, delta);
+        display();
+      } catch {
+        void refresh();
+      }
     });
     events.addEventListener("error", (event) => {
       if (epoch !== connection) return;
@@ -268,6 +359,8 @@ export function createImageToWorldClient() {
       );
     });
     return () => {
+      buffered = [];
+      pending.clear();
       events.close();
       store.setState({ connected: false });
       connection++;

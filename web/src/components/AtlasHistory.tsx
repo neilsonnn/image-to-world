@@ -14,12 +14,15 @@ import {
 } from "@phosphor-icons/react";
 import { Button } from "@radix-ui/themes";
 import { useEffect, useState } from "react";
-import { assetUrl, type Job } from "../../../core/schema";
+import { assetUrl, type JobSummary } from "../../../core/schema";
 import { openImage } from "./panelShared";
 import { Hint } from "./ui";
 
-type GenerationJob = Job & {
-  input: Extract<Job["input"], { kind: "atlas" | "video" | "reconstruct" }>;
+type GenerationJob = JobSummary & {
+  input: Extract<
+    JobSummary["input"],
+    { kind: "atlas" | "video" | "reconstruct" }
+  >;
 };
 
 export function AtlasHistory() {

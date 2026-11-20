@@ -33,10 +33,24 @@ export function frameSlugs(nodes: Record<string, SceneNode>) {
   }
   return result;
 }
+// The client replaces the jobs dictionary on a job delta. Navigation reuses it.
+const activeByJobs = new WeakMap<
+  Workspace["jobs"],
+  Workspace["jobs"][string][]
+>();
+export function activeJobs(jobs: Workspace["jobs"]) {
+  let active = activeByJobs.get(jobs);
+  if (!active) {
+    active = Object.values(jobs).filter(
+      (j) => j.status === "queued" || j.status === "running",
+    );
+    activeByJobs.set(jobs, active);
+  }
+  return active;
+}
 export function frameTasks(frame: SceneNode, jobs: Workspace["jobs"]) {
   const tasks = (frame.frameWorkers ?? []).map((w) => w.description);
-  for (const job of Object.values(jobs)) {
-    if (job.status !== "queued" && job.status !== "running") continue;
+  for (const job of activeJobs(jobs)) {
     if (
       job.id === frame.jobId ||
       job.applyTargets?.some((t) => t.nodeId === frame.id)

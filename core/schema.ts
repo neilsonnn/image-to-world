@@ -442,103 +442,118 @@ export const modelInputSchema = z.object({
   model: z.string().min(1),
   input: z.record(z.unknown()),
 });
+const inspectInputSchema = z.object({
+  kind: z.literal("inspect"),
+  nodeIds: z.array(z.string()).min(1).optional(),
+});
+const contactSheetInputSchema = z.object({
+  kind: z.literal("contactSheet"),
+  nodeIds: z.array(z.string()).min(1).optional(),
+  jobIds: z.array(z.string()).min(1).optional(),
+  assetIds: z.array(z.string()).min(1).optional(),
+  columns: number.int().min(1).max(8).default(3),
+  width: number.int().min(160).max(1024).default(384),
+});
+const imageInputSchema = z.object({
+  kind: z.literal("image"),
+  prompt: z.string().trim().min(1),
+  model: z.enum(modelIds("create")).default(defaultImageModels.create),
+  placement: cameraSchema,
+  seed: number.int().optional(),
+  nodeIds: z.array(z.string()).optional(),
+});
+const poseInputSchema = z.object({
+  kind: z.literal("pose"),
+  assetIds: z.array(z.string()).min(1),
+  canonicalize: z.boolean().default(false),
+  placement: cameraSchema.optional(),
+  nodeIds: z.array(z.string()).optional(),
+});
+const atlasInputSchema = z.object({
+  kind: z.literal("atlas"),
+  contextPathId: z.string().optional(),
+  nodeIds: z.array(z.string()).min(1),
+  cameras: z.array(cameraSchema).min(1),
+  prompt: z.string().default(""),
+  enhancePrompt: z.boolean().default(true),
+  returnDepth: z.boolean().default(true),
+  seed: number.int().default(42),
+});
+const splatsInputSchema = z.object({
+  kind: z.literal("splats"),
+  nodeIds: z.array(z.string()).min(1),
+  prompt: z.string().default(""),
+  enhancePrompt: z.boolean().default(true),
+  refine: z.boolean().default(false),
+});
+const videoInputSchema = z.object({
+  kind: z.literal("video"),
+  returnDepth: z.boolean().default(true),
+  mode: z.enum(["dense", "keyframes"]).default("dense"),
+  keyframeCount: number.int().min(2).max(60).default(4),
+  sourceJobId: z.string().optional(),
+  nodeIds: z.array(z.string()).min(1),
+  pathId: z.string(),
+  fps: number.int().min(1).max(60),
+  targetFrameCount: number.int().min(2).max(600),
+  prompt: z.string().default(""),
+  seed: number.int().default(42),
+});
+const falInputSchema = z.object({
+  kind: z.literal("fal"),
+  buildKey,
+  model: z.string().min(1),
+  input: z.record(z.unknown()),
+});
+const nanoInputSchema = z.object({
+  kind: z.literal("nano"),
+  applyToScene: z.boolean().default(true),
+  reconstruct: z.boolean().default(true),
+  targetNodeIds: z.array(z.string()).min(1).optional(),
+  unchangedMaskAssetId: z.string().optional(),
+  sourceAssetId: z.string(),
+  referenceAssetIds: z.array(z.string()).default([]),
+  prompt: z.string().trim().min(1),
+  settings: nanoSettingsSchema.default({}),
+  draft: imageDraftSchema.optional(),
+});
+const reconstructInputSchema = z.object({
+  kind: z.literal("reconstruct"),
+  unchangedMaskAssetId: z.string().optional(),
+  assetIds: z.array(z.string()).default([]),
+  placement: cameraSchema.optional(),
+  parentId: z.string().nullable().optional(),
+  beforeId: z.string().nullable().optional(),
+  videoAssetId: z.string().optional(),
+  fps: number.positive().max(30).default(1),
+  maxFrames: number.int().min(2).max(120).default(60),
+  integrate: z.boolean().default(true),
+});
+const captureInputSchema = z.object({
+  kind: z.literal("capture"),
+  camera: cameraSchema.optional(),
+});
 export const jobInputSchema = z.discriminatedUnion("kind", [
   renderInputSchema,
   probeInputSchema,
   observeInputSchema,
   fitInputSchema,
   maskInputSchema,
-  z.object({
-    kind: z.literal("inspect"),
-    nodeIds: z.array(z.string()).min(1).optional(),
-  }),
-  z.object({
-    kind: z.literal("contactSheet"),
-    nodeIds: z.array(z.string()).min(1).optional(),
-    jobIds: z.array(z.string()).min(1).optional(),
-    assetIds: z.array(z.string()).min(1).optional(),
-    columns: number.int().min(1).max(8).default(3),
-    width: number.int().min(160).max(1024).default(384),
-  }),
-  z.object({
-    kind: z.literal("image"),
-    prompt: z.string().trim().min(1),
-    model: z.enum(modelIds("create")).default(defaultImageModels.create),
-    placement: cameraSchema,
-    seed: number.int().optional(),
-    nodeIds: z.array(z.string()).optional(),
-  }),
-  z.object({
-    kind: z.literal("pose"),
-    assetIds: z.array(z.string()).min(1),
-    canonicalize: z.boolean().default(false),
-    placement: cameraSchema.optional(),
-    nodeIds: z.array(z.string()).optional(),
-  }),
-  z.object({
-    kind: z.literal("atlas"),
-    contextPathId: z.string().optional(),
-    nodeIds: z.array(z.string()).min(1),
-    cameras: z.array(cameraSchema).min(1),
-    prompt: z.string().default(""),
-    enhancePrompt: z.boolean().default(true),
-    returnDepth: z.boolean().default(true),
-    seed: number.int().default(42),
-  }),
-  z.object({
-    kind: z.literal("splats"),
-    nodeIds: z.array(z.string()).min(1),
-    prompt: z.string().default(""),
-    enhancePrompt: z.boolean().default(true),
-    refine: z.boolean().default(false),
-  }),
-  z.object({
-    kind: z.literal("video"),
-    returnDepth: z.boolean().default(true),
-    mode: z.enum(["dense", "keyframes"]).default("dense"),
-    keyframeCount: number.int().min(2).max(60).default(4),
-    sourceJobId: z.string().optional(),
-    nodeIds: z.array(z.string()).min(1),
-    pathId: z.string(),
-    fps: number.int().min(1).max(60),
-    targetFrameCount: number.int().min(2).max(600),
-    prompt: z.string().default(""),
-    seed: number.int().default(42),
-  }),
-  z.object({
-    kind: z.literal("fal"),
-    buildKey,
-    model: z.string().min(1),
-    input: z.record(z.unknown()),
-  }),
-  z.object({
-    kind: z.literal("nano"),
-    applyToScene: z.boolean().default(true),
-    reconstruct: z.boolean().default(true),
-    targetNodeIds: z.array(z.string()).min(1).optional(),
-    unchangedMaskAssetId: z.string().optional(),
-    sourceAssetId: z.string(),
-    referenceAssetIds: z.array(z.string()).default([]),
-    prompt: z.string().trim().min(1),
-    settings: nanoSettingsSchema.default({}),
-    draft: imageDraftSchema.optional(),
-  }),
-  z.object({
-    kind: z.literal("reconstruct"),
-    unchangedMaskAssetId: z.string().optional(),
-    assetIds: z.array(z.string()).default([]),
-    placement: cameraSchema.optional(),
-    parentId: z.string().nullable().optional(),
-    beforeId: z.string().nullable().optional(),
-    videoAssetId: z.string().optional(),
-    fps: number.positive().max(30).default(1),
-    maxFrames: number.int().min(2).max(120).default(60),
-    integrate: z.boolean().default(true),
-  }),
-  z.object({ kind: z.literal("capture"), camera: cameraSchema.optional() }),
+  inspectInputSchema,
+  contactSheetInputSchema,
+  imageInputSchema,
+  poseInputSchema,
+  atlasInputSchema,
+  splatsInputSchema,
+  videoInputSchema,
+  falInputSchema,
+  nanoInputSchema,
+  reconstructInputSchema,
+  captureInputSchema,
 ]);
 export type JobInput = z.infer<typeof jobInputSchema>;
 export const jobSchema = z.object({
+  activityCamera: cameraSchema.shape.extrinsics.optional(),
   interactive: z.boolean().optional(),
   snapshotRevision: number.int().optional(),
   actorId: z.string().optional(),
@@ -594,6 +609,7 @@ export const jobSchema = z.object({
   applied: z.boolean().optional(),
   childJobId: z.string().optional(),
   frameAssetIds: z.array(z.string()).optional(),
+  extractedFrameIds: z.array(z.string()).optional(),
   sourceFrameAssetIds: z.array(z.string()).optional(),
   frameIndices: z.array(number.int().nonnegative()).optional(),
   cameras: z.array(cameraSchema).optional(),
@@ -601,12 +617,43 @@ export const jobSchema = z.object({
   contextSnapshot: z
     .object({
       nodes: z.record(nodeSchema),
+      generatedGuideIds: z.array(z.string()).optional(),
       assets: z.record(assetSchema),
       settings: settingsSchema,
     })
     .optional(),
 });
 export type Job = z.infer<typeof jobSchema>;
+// Only history, navigation and UI fields travel with the live scene.
+export const jobSummarySchema = jobSchema
+  .omit({
+    contextSnapshot: true,
+    pinnedAssets: true,
+    request: true,
+    previewItems: true,
+    cameras: true,
+  })
+  .extend({
+    input: z.discriminatedUnion("kind", [
+      renderInputSchema.pick({ kind: true }),
+      probeInputSchema.pick({ kind: true, nodeId: true }),
+      observeInputSchema.pick({ kind: true, nodeId: true }),
+      fitInputSchema.pick({ kind: true, nodeId: true }),
+      maskInputSchema.pick({ kind: true }),
+      inspectInputSchema,
+      contactSheetInputSchema.pick({ kind: true }),
+      imageInputSchema.pick({ kind: true, model: true, nodeIds: true }),
+      poseInputSchema.pick({ kind: true, nodeIds: true }),
+      atlasInputSchema.pick({ kind: true, nodeIds: true }),
+      splatsInputSchema.pick({ kind: true, nodeIds: true, refine: true }),
+      videoInputSchema,
+      falInputSchema.pick({ kind: true, model: true, buildKey: true }),
+      nanoInputSchema.omit({ draft: true }),
+      reconstructInputSchema.pick({ kind: true }),
+      captureInputSchema,
+    ]),
+  });
+export type JobSummary = z.infer<typeof jobSummarySchema>;
 const changeSchema = z.object({
   path: z.array(z.string()).min(1),
   before: z.unknown().optional(),
@@ -634,7 +681,7 @@ export const workspaceSchema = z.object({
   selectionAnchor: z.string().nullable().default(null),
   undo: z.array(editSchema).max(100).default([]),
   redo: z.array(editSchema).max(100).default([]),
-  version: z.literal(7),
+  version: z.literal(8),
   revision: number.int().nonnegative(),
   name: z.string().min(1),
   imageDrafts: z.record(imageDraftSchema).default({}),
@@ -655,10 +702,11 @@ export const workspaceSchema = z.object({
       }),
     )
     .default({}),
+  resultApplications: z.record(z.array(z.string())).default({}),
   resultOwners: z.record(z.string()).default({}),
   assets: z.record(assetSchema),
   nodes: z.record(nodeSchema),
-  jobs: z.record(jobSchema),
+  jobs: z.record(jobSummarySchema),
   selection: z.array(z.string()),
   settings: settingsSchema,
 });
@@ -669,11 +717,12 @@ export function emptyWorkspace(): Workspace {
     selectionAnchor: null,
     undo: [],
     redo: [],
-    version: 7,
+    version: 8,
     revision: 0,
     name: "Untitled workspace",
     imageDrafts: {},
     imageVersions: {},
+    resultApplications: {},
     resultOwners: {},
     receipts: {},
     assets: {},

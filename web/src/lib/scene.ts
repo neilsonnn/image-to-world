@@ -357,6 +357,7 @@ export class SceneGraph {
     private readonly activeColor: string,
     private readonly moduleRenderer?: ModuleRenderer,
     private readonly locateAsset: (asset: Asset) => string = assetUrl,
+    private readonly frozenGeneratedGuides?: ReadonlySet<string>,
   ) {
     scene.add(this.selectionOutline);
     this.key.shadow.mapSize.set(1024, 1024);
@@ -920,7 +921,12 @@ export class SceneGraph {
         (!frame || display.showFrameGuides) &&
         !this.reviewSources.includes(entry.node.id);
       entry.pointCloud.opacity =
-        frame && workspace && isGeneratedGuide(workspace, frame) ? 0.5 : 1;
+        frame &&
+        workspace &&
+        (this.frozenGeneratedGuides?.has(frame.id) ??
+          isGeneratedGuide(workspace, frame))
+          ? 0.5
+          : 1;
     }
     if (entry.frustum) {
       this.applyCameraHighlight(entry);

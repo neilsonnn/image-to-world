@@ -110,7 +110,25 @@ export class RenderWorker {
   // The page and asset bridge are shared. Serialize GPU work while callers
   // are free to post-process the returned pixels independently.
   capture(job: Job, signal: AbortSignal): Promise<RenderResult> {
-    const task = this.tail.then(() => this.captureFrame(job, signal));
+    const task = this.tail.then(async () => {
+      try {
+        return await this.captureFrame(job, signal);
+      } catch (error) {
+        signal.throwIfAborted();
+        const lostPage =
+          this.page?.isClosed() ||
+          this.browser?.isConnected() === false ||
+          (error instanceof Error &&
+            /Target (?:page, context or browser has been closed|crashed)/i.test(
+              error.message,
+            ));
+        if (!lostPage) throw error;
+        // No output assets have been committed yet. Replay the frozen inputs once
+        // in a fresh renderer if Chromium lost the page during GPU work.
+        this.page = undefined;
+        return this.captureFrame(job, signal);
+      }
+    });
     this.tail = task.catch(() => {});
     return task;
   }

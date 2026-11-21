@@ -66,5 +66,6 @@ export function lockedFormat(
 export function sessionFormat(
   workspace: Parameters<typeof lockedFormat>[0],
 ): Resolution {
-  return lockedFormat(workspace) ?? ATLAS_FORMATS[0];
+  const { width, height } = lockedFormat(workspace) ?? ATLAS_FORMATS[0];
+  return { width, height };
 }

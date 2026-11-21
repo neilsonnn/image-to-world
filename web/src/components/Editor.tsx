@@ -1,3 +1,4 @@
+import { HeaderSceneTools } from "./HeaderSceneTools";
 import { SceneActions } from "./SceneActions";
 import { AgentGuide } from "./AgentGuide";
 import "../agent-guide.css";
@@ -247,6 +248,7 @@ function EditorWorkspace() {
           requestPlacement={requestPlacement}
         />
         <div className="topbar-actions">
+          {!playing && <HeaderSceneTools />}
           <Hint
             label={
               connected

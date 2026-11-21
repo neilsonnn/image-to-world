@@ -1,5 +1,4 @@
 import { projectApi } from "../../../core/project-url";
-import { ViewportAppActions } from "./ViewportAppActions";
 import {
   frameSourceIds,
   referenceComparison,
@@ -12,7 +11,11 @@ import {
   changeBounds,
   followCamera,
 } from "../lib/agent-presence";
-import { ViewportCameraTools } from "./ViewportCameraTools";
+import {
+  ViewportCameraTools,
+  ViewportLensSettings,
+  useSetViewportFov,
+} from "./ViewportCameraTools";
 import { sessionFormat } from "../../../core/formats";
 import {
   applyCamera,
@@ -1467,6 +1470,10 @@ export function Viewport({
       workspace.settings.viewportCamera,
     format,
   );
+  const overrideName =
+    viewingNode?.name ?? (previewCamera ? "Path preview" : undefined);
+  const setFov = useSetViewportFov(viewCamera, format, overrideName);
+  const lens = { camera: viewCamera, overrideName, setFov };
   const frame = viewfinderRect(viewportSize, format);
   const referenceScale =
     compared &&
@@ -1518,6 +1525,20 @@ export function Viewport({
           role="toolbar"
           aria-label="View"
         >
+          <ViewportCameraTools
+            {...lens}
+            autoFov={spatialContextFieldOfView(
+              workspace,
+              selectedPath(workspace)?.id,
+            )}
+            onRelease={() => {
+              runtimeRef.current?.fly.stop();
+              onPreviewCamera(null);
+              void commandRef
+                .current({ type: "camera.release" })
+                .catch((error) => errorRef.current(message(error)));
+            }}
+          />
           <Tooltip delayDuration={0} content="Focus selection (F)">
             <IconButton
               size="1"
@@ -1783,11 +1804,14 @@ export function Viewport({
                     />
                   </Tooltip>
                 </Flex>
+                <ViewportLensSettings
+                  {...lens}
+                  options={workspace.settings.viewportOptions}
+                />
               </Flex>
             </Popover.Content>
           </Popover.Root>
         </div>
-        <ViewportAppActions />
       </div>
       {!playing && showFeed && (
         <ViewportFeed go={(event) => goToActivity.current(event)} />
@@ -1946,27 +1970,6 @@ export function Viewport({
           <div className="viewport-drop">Drop to import</div>
         )}
       </div>
-      {!playing && (
-        <ViewportCameraTools
-          camera={viewCamera}
-          autoFov={spatialContextFieldOfView(
-            workspace,
-            selectedPath(workspace)?.id,
-          )}
-          format={format}
-          options={workspace.settings.viewportOptions}
-          overrideName={
-            viewingNode?.name ?? (previewCamera ? "Path preview" : undefined)
-          }
-          onRelease={() => {
-            runtimeRef.current?.fly.stop();
-            onPreviewCamera(null);
-            void commandRef
-              .current({ type: "camera.release" })
-              .catch((error) => errorRef.current(message(error)));
-          }}
-        />
-      )}
     </div>
   );
 }

@@ -121,6 +121,7 @@ test("editor instances do not share their workspace or errors", () => {
     lastOperation: null,
     activity: [],
     showPresence: true,
+    showViewportFeed: true,
     error: null,
   });
 });

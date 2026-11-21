@@ -1,3 +1,4 @@
+import { projectApi } from "../../../core/project-url";
 import {
   ArrowSquareOut,
   Play,
@@ -66,7 +67,11 @@ export function SceneActions({
         {playing ? "Stop" : "Play"}
       </Button>
       <Button asChild size="1" variant="surface" color="gray">
-        <a href="/api/player/index.html" target="_blank" rel="noopener">
+        <a
+          href={projectApi("player/index.html")}
+          target="_blank"
+          rel="noopener"
+        >
           <ArrowSquareOut />
           Open in web
         </a>

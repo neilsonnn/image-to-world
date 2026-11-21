@@ -1,3 +1,4 @@
+import { projectApi } from "../../../core/project-url";
 import { useActiveAgents } from "./AgentCursors";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -64,6 +65,25 @@ export function ActivityFeed({ fallback }: { fallback: string }) {
     if (following.current && list.current)
       list.current.scrollTop = list.current.scrollHeight;
   }, [visible, open]);
+  const inspect = useClientState((s) => s.inspectActivity);
+  useEffect(() => {
+    if (!inspect) return;
+    following.current = false;
+    setOpen(true);
+    setDetail("trace");
+    setActor("");
+    setSeverity("");
+    setSearch("");
+  }, [inspect]);
+  useEffect(() => {
+    if (!inspect || !open || detail !== "trace") return;
+    const row = document.getElementById("activity-" + inspect);
+    if (!(row instanceof HTMLDetailsElement)) return;
+    row.open = true;
+    row.scrollIntoView({ block: "nearest" });
+    row.querySelector("summary")?.focus({ preventScroll: true });
+    client.store.setState({ inspectActivity: undefined });
+  }, [inspect, visible, open, detail, client]);
   const last = events.at(-1);
   return (
     <div className="activity-container">
@@ -193,7 +213,11 @@ export function ActivityFeed({ fallback }: { fallback: string }) {
           >
             {!visible.length && <p>No matching activity.</p>}
             {visible.map((e) => (
-              <details className={`activity-entry ${e.severity}`} key={e.id}>
+              <details
+                id={"activity-" + e.id}
+                className={`activity-entry ${e.severity}`}
+                key={e.id}
+              >
                 <summary>
                   <time>{new Date(e.at).toLocaleTimeString()}</time>
                   <span style={{ color: actorColor(e.actorId) }}>
@@ -230,7 +254,7 @@ export function ActivityFeed({ fallback }: { fallback: string }) {
                       {e.assetIds.map((id) => (
                         <a
                           key={id}
-                          href={`/api/assets/${encodeURIComponent(id)}`}
+                          href={projectApi(`assets/${encodeURIComponent(id)}`)}
                           target="_blank"
                           rel="noreferrer"
                         >

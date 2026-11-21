@@ -7,7 +7,13 @@ import {
   worldMatrix,
 } from "./cameras";
 import { applyCommand } from "./commands";
-import { emptyWorkspace, nodeSchema, workspaceSchema } from "./schema";
+import { sessionFormat } from "./formats";
+import {
+  cameraSchema,
+  emptyWorkspace,
+  nodeSchema,
+  workspaceSchema,
+} from "./schema";
 import { selectedRoots } from "./scene";
 import { sceneCamera } from "./captures";
 import { generationInput } from "./generation";
@@ -47,6 +53,17 @@ function scene() {
   });
   return workspace;
 }
+
+test("the default session format fits the persisted camera intrinsics", () => {
+  const workspace = emptyWorkspace();
+  const camera = workspace.settings.viewportCamera;
+  expect(
+    cameraSchema.safeParse({
+      ...camera,
+      intrinsics: { ...camera.intrinsics, ...sessionFormat(workspace) },
+    }).success,
+  ).toBe(true);
+});
 
 test("camera jumps interpolate pose and calibrated projection and land within 160ms", () => {
   const camera = new PerspectiveCamera(50, 16 / 9);

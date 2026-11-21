@@ -1,3 +1,4 @@
+import { projectApi } from "./project-url";
 import { lightRigSchema, projectLightSchema } from "./lighting";
 import { proceduralSchema } from "./procedural";
 import { nodePhysicsSchema } from "./physics";
@@ -1018,4 +1019,4 @@ export type CommandResult = {
   jobIds?: string[];
 };
 export const assetUrl = (asset: Asset) =>
-  `/api/assets/${encodeURIComponent(asset.id)}?v=${asset.modifiedAt}`;
+  projectApi(`assets/${encodeURIComponent(asset.id)}?v=${asset.modifiedAt}`);

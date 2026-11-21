@@ -125,7 +125,7 @@ export function useImageImport() {
         .join(" and ");
       setLayouts((queue) => [
         ...queue,
-        `In my image-to-world project at ${window.location.origin}, arrange ${targets}. Wait for posed depth, inspect the point clouds from above and from the side, ground the Frames, and space disconnected views so their observed volumes do not overlap. Preserve the relative poses of any jointly reconstructed photos. Verify the layout before generating connecting views.`,
+        `In my image-to-world project at ${window.location.href}, arrange ${targets}. Wait for posed depth, inspect the point clouds from above and from the side, ground the Frames, and space disconnected views so their observed volumes do not overlap. Preserve the relative poses of any jointly reconstructed photos. Verify the layout before generating connecting views.`,
       ]);
     },
     [],

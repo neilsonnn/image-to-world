@@ -1,3 +1,4 @@
+import { HeaderSceneTools } from "./HeaderSceneTools";
 import { SceneActions } from "./SceneActions";
 import { AgentGuide } from "./AgentGuide";
 import "../agent-guide.css";
@@ -66,6 +67,10 @@ function EditorLoading() {
       <GlobeHemisphereWest className="brand-mark spin-slow" />
       <span>{loading ? "Opening workspace" : "Workspace unavailable"}</span>
       {error && <p>{error}</p>}
+      {!loading &&
+        new URLSearchParams(window.location.search).has("project") && (
+          <a href="/">Return to the launch project</a>
+        )}
     </main>
   );
 }
@@ -243,6 +248,7 @@ function EditorWorkspace() {
           requestPlacement={requestPlacement}
         />
         <div className="topbar-actions">
+          {!playing && <HeaderSceneTools />}
           <Hint
             label={
               connected

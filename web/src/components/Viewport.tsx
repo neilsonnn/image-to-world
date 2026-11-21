@@ -1,8 +1,9 @@
-import { ViewportAppActions } from "./ViewportAppActions";
+import { projectApi } from "../../../core/project-url";
 import {
   frameSourceIds,
   referenceComparison,
 } from "../../../core/reference-comparison";
+import { ViewportFeed } from "./ViewportFeed";
 import { AgentCursors } from "./AgentCursors";
 import type { Activity } from "../../../core/activity";
 import {
@@ -10,7 +11,11 @@ import {
   changeBounds,
   followCamera,
 } from "../lib/agent-presence";
-import { ViewportCameraTools } from "./ViewportCameraTools";
+import {
+  ViewportCameraTools,
+  ViewportLensSettings,
+  useSetViewportFov,
+} from "./ViewportCameraTools";
 import { sessionFormat } from "../../../core/formats";
 import {
   applyCamera,
@@ -45,6 +50,7 @@ import {
   Crosshair,
   Gear,
   VideoCamera,
+  ListBullets,
   ImageSquare,
   SlidersHorizontal,
 } from "@phosphor-icons/react";
@@ -244,6 +250,7 @@ export function Viewport({
 }: ViewportProps) {
   const {
     store: clientStore,
+    setViewportFeed,
     command,
     upload,
     setError: onError,
@@ -299,6 +306,8 @@ export function Viewport({
   );
   const cursorLayer = useRef<HTMLDivElement>(null);
   const cursorAnchors = useRef(new Map<string, Activity>());
+  const showFeed = useClientState((s) => s.showViewportFeed !== false);
+  const goToActivity = useRef<(activity: Activity) => boolean>(() => false);
   const following = useClientState((s) => !!s.followAgentEdits);
   const labelsRef = useRef<HTMLDivElement>(null);
   const slugs = useMemo(() => frameSlugs(workspace.nodes), [workspace.nodes]);
@@ -741,22 +750,9 @@ export function Viewport({
     };
     renderer.domElement.addEventListener("dblclick", onDoubleClick);
 
-    const focus = () => {
-      const ids = workspaceRef.current.selection.length
-        ? workspaceRef.current.selection
-        : Object.keys(workspaceRef.current.nodes);
-      const bounds = graph.bounds(ids);
-      if (!bounds) return;
-      const sphere = bounds.getBoundingSphere(new Sphere());
+    const visit = (target: PerspectiveCamera) => {
       releaseForNavigation();
-      const direction = camera.getWorldDirection(new Vector3());
-      const distance = Math.max(
-        0.5,
-        (sphere.radius / Math.sin((camera.fov * Math.PI) / 360)) * 1.2,
-      );
       runtime.fly.stop();
-      const target = camera.clone();
-      target.position.copy(sphere.center).addScaledVector(direction, -distance);
       const intrinsics =
         workspaceRef.current.settings.viewportCamera.intrinsics;
       onPreviewCamera(null);
@@ -776,6 +772,37 @@ export function Viewport({
           }),
         )
         .catch((error) => errorRef.current(message(error)));
+    };
+    const focus = () => {
+      const ids = workspaceRef.current.selection.length
+        ? workspaceRef.current.selection
+        : Object.keys(workspaceRef.current.nodes);
+      const bounds = graph.bounds(ids);
+      if (!bounds) return;
+      const sphere = bounds.getBoundingSphere(new Sphere());
+      const direction = camera.getWorldDirection(new Vector3());
+      const distance = Math.max(
+        0.5,
+        (sphere.radius / Math.sin((camera.fov * Math.PI) / 360)) * 1.2,
+      );
+      const target = camera.clone();
+      target.position.copy(sphere.center).addScaledVector(direction, -distance);
+      visit(target);
+    };
+    goToActivity.current = (activity) => {
+      if (runtime.play || runtime.capturing || runtime.dragging) return false;
+      const bounds = activity.sceneChange
+        ? changeBounds(graph, activity.sceneChange)
+        : graph.bounds(activity.nodeIds);
+      if (bounds) visit(followCamera(camera, bounds));
+      else if (activity.camera) {
+        const target = camera.clone();
+        target.position.fromArray(activity.camera.position);
+        target.quaternion.fromArray(activity.camera.quaternion);
+        if (activity.camera.fov) target.fov = activity.camera.fov;
+        visit(target);
+      } else return false;
+      return true;
     };
     focusRef.current = focus;
 
@@ -942,6 +969,7 @@ export function Viewport({
         controller.abort();
       captureControllers.current.clear();
       observer.disconnect();
+      goToActivity.current = () => false;
       focusRef.current = () => undefined;
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerleave", clearHover);
@@ -1119,7 +1147,7 @@ export function Viewport({
         let claimed = false;
         try {
           const claimResponse = await fetch(
-            `/api/viewport-jobs/${encodeURIComponent(job.id)}/claim`,
+            projectApi(`viewport-jobs/${encodeURIComponent(job.id)}/claim`),
             {
               method: "POST",
               headers: { "X-Image-To-World-Client": "web" },
@@ -1149,7 +1177,7 @@ export function Viewport({
               }),
             );
             const response = await fetch(
-              `/api/viewport-jobs/${encodeURIComponent(job.id)}`,
+              projectApi(`viewport-jobs/${encodeURIComponent(job.id)}`),
               {
                 method: "POST",
                 headers: { "X-Image-To-World-Client": "web" },
@@ -1251,7 +1279,7 @@ export function Viewport({
           );
           form.append("camera", JSON.stringify(capturedCamera));
           const uploadResponse = await fetch(
-            `/api/viewport-jobs/${encodeURIComponent(job.id)}`,
+            projectApi(`viewport-jobs/${encodeURIComponent(job.id)}`),
             {
               method: "POST",
               headers: { "X-Image-To-World-Client": "web" },
@@ -1267,7 +1295,7 @@ export function Viewport({
           errorRef.current(detail);
           if (claimed) {
             await fetch(
-              `/api/viewport-jobs/${encodeURIComponent(job.id)}/fail`,
+              projectApi(`viewport-jobs/${encodeURIComponent(job.id)}/fail`),
               {
                 method: "POST",
                 headers: {
@@ -1442,6 +1470,10 @@ export function Viewport({
       workspace.settings.viewportCamera,
     format,
   );
+  const overrideName =
+    viewingNode?.name ?? (previewCamera ? "Path preview" : undefined);
+  const setFov = useSetViewportFov(viewCamera, format, overrideName);
+  const lens = { camera: viewCamera, overrideName, setFov };
   const frame = viewfinderRect(viewportSize, format);
   const referenceScale =
     compared &&
@@ -1493,6 +1525,20 @@ export function Viewport({
           role="toolbar"
           aria-label="View"
         >
+          <ViewportCameraTools
+            {...lens}
+            autoFov={spatialContextFieldOfView(
+              workspace,
+              selectedPath(workspace)?.id,
+            )}
+            onRelease={() => {
+              runtimeRef.current?.fly.stop();
+              onPreviewCamera(null);
+              void commandRef
+                .current({ type: "camera.release" })
+                .catch((error) => errorRef.current(message(error)));
+            }}
+          />
           <Tooltip delayDuration={0} content="Focus selection (F)">
             <IconButton
               size="1"
@@ -1520,6 +1566,18 @@ export function Viewport({
             >
               <VideoCamera /> Auto
             </Button>
+          </Tooltip>
+          <Tooltip delayDuration={0} content="Viewport activity feed">
+            <IconButton
+              size="1"
+              color="gray"
+              variant={showFeed ? "solid" : "surface"}
+              aria-label="Viewport activity feed"
+              aria-pressed={showFeed}
+              onClick={() => setViewportFeed(!showFeed)}
+            >
+              <ListBullets />
+            </IconButton>
           </Tooltip>
         </div>
         <div
@@ -1746,12 +1804,18 @@ export function Viewport({
                     />
                   </Tooltip>
                 </Flex>
+                <ViewportLensSettings
+                  {...lens}
+                  options={workspace.settings.viewportOptions}
+                />
               </Flex>
             </Popover.Content>
           </Popover.Root>
         </div>
-        <ViewportAppActions />
       </div>
+      {!playing && showFeed && (
+        <ViewportFeed go={(event) => goToActivity.current(event)} />
+      )}
       <div ref={hostRef} className="viewport-canvas">
         {!playing && (
           <AgentCursors layer={cursorLayer} anchors={cursorAnchors} />
@@ -1906,27 +1970,6 @@ export function Viewport({
           <div className="viewport-drop">Drop to import</div>
         )}
       </div>
-      {!playing && (
-        <ViewportCameraTools
-          camera={viewCamera}
-          autoFov={spatialContextFieldOfView(
-            workspace,
-            selectedPath(workspace)?.id,
-          )}
-          format={format}
-          options={workspace.settings.viewportOptions}
-          overrideName={
-            viewingNode?.name ?? (previewCamera ? "Path preview" : undefined)
-          }
-          onRelease={() => {
-            runtimeRef.current?.fly.stop();
-            onPreviewCamera(null);
-            void commandRef
-              .current({ type: "camera.release" })
-              .catch((error) => errorRef.current(message(error)));
-          }}
-        />
-      )}
     </div>
   );
 }

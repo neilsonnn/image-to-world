@@ -1,3 +1,4 @@
+import { ProjectSwitcher } from "./ProjectSwitcher";
 import { ActivityFeed } from "./ActivityFeed";
 import {
   SidebarSimple,
@@ -7,7 +8,7 @@ import {
   ChatCircleText,
 } from "@phosphor-icons/react";
 import { jobNames } from "../../../core/activity";
-import { useClientState, useWorkspaceData, useWorkspace } from "../lib/client";
+import { useClientState, useWorkspaceData } from "../lib/client";
 import { Hint, ToolbarIconButton } from "./ui";
 
 const icons = {
@@ -17,17 +18,6 @@ const icons = {
   Properties: SlidersHorizontal,
   "Agent guide": ChatCircleText,
 };
-function WorkspaceTitle() {
-  const name = useWorkspace((state) => state.name);
-  const revision = useWorkspace((state) => state.revision);
-  return (
-    <div className="project-title">
-      <span title={name}>{name}</span>
-      <small>rev {revision}</small>
-    </div>
-  );
-}
-
 export function EditorFooter({
   panels,
 }: {
@@ -77,7 +67,7 @@ export function EditorFooter({
           );
         })}
       </div>
-      <WorkspaceTitle />
+      <ProjectSwitcher />
       <Hint label={names || "No selection"}>
         <div className="footer-selection">
           <span className="footer-selection-name">{names}</span>

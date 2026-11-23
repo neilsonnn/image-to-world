@@ -50,6 +50,16 @@ without either key.
    `--port 4311`; pass `--url http://127.0.0.1:4311` to subsequent CLI commands.
    Use `--no-browser` for agent or terminal-only sessions.
 
+   In the editor, click the project name in the footer. Choose a recent project,
+   browse local folders with **Open folder**, or create a sibling folder with
+   **New project**. Recent projects are remembered on this computer across
+   restarts. Each tab keeps its own project. Pass the entire editor URL in
+   quotes to CLI commands with `--url` to target that tab's project.
+
+   The viewport shows up to three recent actions in the lower right. Hover or
+   keyboard-focus a toast and choose **Go** to frame its scene change or inspect
+   its activity record. The feed button beside **Auto** remembers your preference.
+
 4. Check setup and CLI access:
 
    ```sh
@@ -108,7 +118,7 @@ Turn on **Auto** beside Focus in the viewport to follow new agent scene edits. T
 
 The editor opens with Spatial context visible along the bottom. Use the footer buttons to toggle the strip or open the outline, where image Frames start expanded. The centered header row offers Import, the Frame count, Play and Open in web. Select a projected slug to select its Frame, or click its spatial-context thumbnail to view it and describe an image edit. The spinner shows active work on hover. Open the image editor from the footer for layers and history. Spatial context and Atlas generation
 controls share the resizable horizontal dock above the footer. Outline, project assets, and
-properties open in their respective side panels; generation history opens from the viewport and agent
+properties open in their respective side panels. Generation history opens from the header beside Jobs, Capture, and Export. Agent
 activity opens from the bottom right. Image versions and edit history open
 from the image editor's floating controls. Its centered edit prompt bar is capped
 at 480px and shrinks with the panel. Drag dividers to resize panes, or focus a
@@ -524,9 +534,9 @@ the cache; clear it when changing the scene's content while keeping the descript
 
 ### Viewport camera and compact controls
 
-The floating bottom-left viewport controls own the free camera's field of view,
-lens and clipping settings, plus a toggleable passepartout matching the project
-aspect ratio. Viewing through a Frame or camera temporarily overrides the lens
+The FOV field beside Focus controls the free camera’s vertical field of view.
+The aperture button matches the average FOV of spatial context cameras. Open
+**Scene display** to adjust lens, clipping distances, and passepartout. Viewing through a Frame or camera temporarily overrides the lens
 and names the source node. WASD, right-drag, scrolling, or pinching exits viewing
 mode and continues from the visible camera pose and lens. Escape (or the restore
 button) restores the saved free camera while viewing mode is still active.

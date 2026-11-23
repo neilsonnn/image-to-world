@@ -127,8 +127,13 @@ export function FrameEdit({
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger>
-        <Button size="1" color="gray" variant="surface">
-          Describe edit
+        <Button
+          size="1"
+          color="gray"
+          variant="surface"
+          aria-label="Describe edit"
+        >
+          <span className="toolbar-label">Describe edit</span>
         </Button>
       </Popover.Trigger>
       <Popover.Content width="280px" side="top" size="1">
@@ -171,7 +176,7 @@ export function FrameLabel({
     <>
       <div className="frame-badge">
         <FrameState tasks={tasks} />
-        <button aria-pressed={selected} onClick={onSelect}>
+        <button title={slug} aria-pressed={selected} onClick={onSelect}>
           {slug}
         </button>
       </div>

@@ -67,10 +67,19 @@ button {
 }
 .wordmark {
   display: flex;
+  min-width: 0;
+  overflow: hidden;
   align-items: center;
   gap: 9px;
   font-size: 11px;
   letter-spacing: 0.17em;
+}
+.toolbar-label,
+.wordmark strong {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .wordmark svg {
   flex-shrink: 0;
@@ -101,7 +110,14 @@ button {
   text-transform: uppercase;
   letter-spacing: 0.12em;
 }
+.header-scene-tools {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+}
 .topbar-actions {
+  flex-wrap: nowrap;
   justify-self: end;
   display: flex;
   align-items: center;
@@ -339,6 +355,7 @@ button {
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+  white-space: nowrap;
   pointer-events: none;
 }
 .viewport-overlay-spacer {
@@ -348,7 +365,7 @@ button {
   display: none;
 }
 .viewport-tools {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   pointer-events: auto;
 }
 .viewport-canvas {
@@ -1320,9 +1337,6 @@ button {
   }
 }
 @media (max-width: 760px) {
-  .topbar {
-    column-gap: 8px;
-  }
   .viewport-onboarding {
     left: 12px;
     right: 12px;
@@ -1513,6 +1527,7 @@ button {
 
 .editor-footer {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -1564,9 +1579,6 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.footer-selection > span:last-child {
-  flex: 0 0 auto;
-}
 
 .editor > .editor-workspace {
   grid-column: 1;
@@ -1585,54 +1597,6 @@ button {
   display: none;
 }
 
-.viewport-camera-bar {
-  position: absolute;
-  z-index: 5;
-  bottom: var(--floating-toolbar-edge);
-  left: var(--floating-toolbar-edge);
-  max-width: calc(100% - 2 * var(--floating-toolbar-edge));
-  flex-wrap: nowrap;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-  font-size: 10px;
-}
-.viewport-camera-bar > * {
-  flex-shrink: 0;
-}
-.viewport-camera-bar > .hint-trigger:has(.viewport-camera-source) {
-  flex: 0 1 auto;
-  min-width: 28px;
-}
-.viewport-camera-source {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  color: var(--muted);
-}
-.viewport-camera-source span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.viewport-camera-source svg {
-  width: 13px;
-  height: 13px;
-  flex-shrink: 0;
-}
-.viewport-camera-source.overridden {
-  color: var(--text);
-}
-.viewport-fov {
-  width: 90px;
-}
-.viewport-camera-format {
-  margin-left: auto;
-  color: var(--muted);
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
 .viewport-camera-field {
   display: flex;
   align-items: center;
@@ -1658,6 +1622,8 @@ button {
 /* Shared floating controls for the 3D viewport and image canvas. */
 .floating-toolbar {
   display: flex;
+  flex-wrap: nowrap;
+  white-space: nowrap;
   align-items: center;
   gap: var(--floating-toolbar-gap);
   padding: var(--floating-toolbar-padding);
@@ -1817,6 +1783,8 @@ button {
 .scene-actions,
 .footer-panels {
   display: flex;
+  min-width: 0;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
 }
@@ -1839,6 +1807,7 @@ button {
 .editor-footer .activity-container {
   margin-left: auto;
   flex: 0 1 auto;
+  min-width: 36px;
   max-width: 40%;
 }
 .editor-footer .activity-container > .hint-trigger {
@@ -1850,17 +1819,64 @@ button {
   white-space: nowrap;
   justify-content: flex-end;
 }
-.footer-operation .activity-count {
+.topbar .rt-Button,
+.viewport-tools .rt-Button,
+.view-frame-actions .rt-Button {
+  min-width: 24px;
+  flex-shrink: 1;
+}
+.header-scene-tools .rt-IconButton,
+.topbar-actions > .rt-IconButton,
+.topbar .rt-Button svg,
+.viewport-tools .rt-Button svg,
+.view-frame-actions .rt-Button svg,
+.view-frame-actions .frame-state {
   flex-shrink: 0;
 }
+.footer-selection > span:last-child,
+.footer-operation .activity-count {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .scene-actions svg {
+  flex-shrink: 0;
   width: 14px;
   height: 14px;
 }
-@media (max-width: 720px) {
-  .wordmark strong,
-  .wordmark svg:nth-child(2) {
-    display: none;
+/* Keep the central actions centered when both outer tracks have room. */
+@media (max-width: 800px) {
+  .topbar {
+    grid-template-columns: minmax(16px, 1fr) minmax(0, max-content) auto;
+  }
+}
+@media (max-width: 620px) {
+  .topbar {
+    column-gap: 4px;
+    padding-inline: 4px;
+  }
+  .topbar .scene-actions,
+  .topbar-actions,
+  .header-scene-tools {
+    gap: 2px;
+  }
+  .topbar-actions .connection {
+    margin-right: 0;
+  }
+  .topbar .frame-count {
+    padding-inline: 3px;
+    gap: 2px;
+  }
+  .topbar .rt-Button {
+    padding-inline: 4px;
+    gap: 3px;
+  }
+}
+
+@media (max-width: 420px) {
+  .header-scene-tools > a {
+    max-width: 38px;
   }
 }
 
@@ -1872,23 +1888,20 @@ button {
   white-space: nowrap;
 }
 .frame-count {
+  min-width: 0;
   font-size: 11px;
   border: 1px solid var(--line);
   padding: 2px 6px;
   border-radius: 3px;
 }
 .frame-count b {
+  flex-shrink: 0;
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
-.viewport-camera-bar {
-  left: 50%;
-  transform: translateX(-50%);
-  top: var(--floating-toolbar-edge);
-  bottom: auto;
-}
 .viewport-fov {
   width: 80px;
+  min-width: 58px;
 }
 .viewport-fov .numeric-scrub-label {
   width: auto;
@@ -1958,12 +1971,19 @@ button {
   transform: translateX(-50%);
   display: flex;
   width: max-content;
+  max-width: calc(100% - 2 * var(--floating-toolbar-edge));
   gap: 4px;
   align-items: center;
 }
 .view-frame-actions .frame-badge {
+  min-width: 0;
   border: 0;
   background: transparent;
+}
+.view-frame-actions .frame-badge button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .view-frame-actions .frame-badge button[aria-pressed="true"] {
   background: transparent;
@@ -2012,42 +2032,25 @@ button {
 .viewport-fov .rt-TextFieldSlot {
   flex-shrink: 0;
 }
-@container (max-width: 520px) {
-  .view-frame-actions {
-    max-width: 98%;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-}
 .viewport-panel {
   container-type: inline-size;
+}
+@container (max-width: 450px) {
+  .viewport-overlay {
+    gap: 2px;
+  }
+  .viewport-tools .rt-Button {
+    max-width: 30px;
+    padding-inline: 3px;
+    gap: 2px;
+  }
+  .viewport-fov {
+    width: 58px;
+  }
 }
 .generate-panel .viewport-prompt {
   width: 100%;
   flex: auto;
-}
-
-@container (max-width: 810px) {
-  .viewport-camera-bar {
-    top: calc(var(--floating-toolbar-edge) + 34px);
-  }
-}
-@container (max-width: 530px) {
-  .viewport-overlay {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-  .viewport-app-actions {
-    order: -1;
-    margin-left: auto;
-  }
-  .viewport-overlay [aria-label="Transform tools"] {
-    order: -2;
-  }
-  .viewport-camera-bar {
-    left: var(--floating-toolbar-edge);
-    transform: none;
-  }
 }
 
 .agent-cursor-layer {
@@ -2109,5 +2112,205 @@ button {
     to {
       filter: drop-shadow(0 0 5px currentColor);
     }
+  }
+}
+
+.project-trigger {
+  align-items: center;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  padding: 3px 5px;
+  border-radius: var(--radius-1);
+  cursor: pointer;
+}
+.project-trigger:hover,
+.project-recents button:hover {
+  background: var(--gray-a3);
+}
+.project-trigger svg,
+.project-recents svg {
+  flex: none;
+}
+.project-picker {
+  display: grid;
+  gap: 9px;
+}
+.project-picker h3 {
+  font-size: 12px;
+  margin: 0;
+}
+.project-picker form,
+.project-modes {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.project-picker form .rt-TextFieldRoot {
+  flex: 1;
+}
+.project-recents {
+  max-height: min(34vh, 240px);
+  overflow-y: auto;
+}
+.project-recents button {
+  font: inherit;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  width: 100%;
+  padding: 6px;
+  border-radius: var(--radius-1);
+  cursor: pointer;
+}
+.project-recents button:disabled {
+  cursor: default;
+}
+.project-recents button > span {
+  flex: 1;
+  min-width: 0;
+}
+.project-recents strong,
+.project-recents small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-recents strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.project-recents small {
+  font-size: 10px;
+  color: var(--dim);
+}
+.project-picker [role="alert"] {
+  overflow-wrap: anywhere;
+  color: var(--red-11);
+}
+
+.viewport-feed {
+  position: absolute;
+  z-index: 6;
+  bottom: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: calc(100% - 24px);
+  pointer-events: none;
+}
+.viewport-toast {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 7px;
+  border-radius: var(--radius-2);
+  background: var(--gray-2);
+  color: var(--text);
+  font-size: 11px;
+  pointer-events: auto;
+  animation: viewport-toast 9s both;
+}
+.viewport-toast:hover,
+.viewport-toast:focus-within {
+  animation-play-state: paused;
+}
+.toast-action,
+.toast-actor {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toast-actor {
+  max-width: 95px;
+}
+.viewport-toast small {
+  color: var(--dim);
+}
+.viewport-toast button {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  background: transparent;
+  color: inherit;
+  border: 0;
+  cursor: pointer;
+  padding: 1px 2px;
+  font: inherit;
+  opacity: 0;
+}
+.viewport-toast:hover button,
+.viewport-toast:focus-within button {
+  opacity: 1;
+}
+@media (hover: none) {
+  .viewport-toast button {
+    opacity: 1;
+  }
+}
+@keyframes viewport-toast {
+  0% {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  3%,
+  90% {
+    opacity: 0.95;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .viewport-toast {
+    animation-name: viewport-toast-still;
+  }
+}
+@keyframes viewport-toast-still {
+  from,
+  to {
+    opacity: 1;
+  }
+}
+.folder-browser {
+  border-block: 1px solid var(--gray-a4);
+}
+.folder-browser > button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 5px;
+  cursor: pointer;
+}
+.folder-browser > button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder-browser .project-recents {
+  max-height: min(24vh, 160px);
+}
+.folder-browser .project-recents button {
+  font-size: 11px;
+}
+.viewport-toast {
+  max-width: min(360px, 100%);
+}
+@container (max-width: 850px) {
+  .viewport-feed:has(~ .viewport-canvas .view-frame-actions) {
+    bottom: 54px;
   }
 }

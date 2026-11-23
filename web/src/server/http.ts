@@ -1,3 +1,4 @@
+import { createProjectHost } from "./projects";
 import { playerResponse } from "./player-export";
 import { modelSuggestions } from "../../../core/models";
 import { rendererExecutable } from "./render-worker";
@@ -14,39 +15,50 @@ import {
   CommandConflict,
 } from "../../../core/command-context";
 
+function localRequestError(request: Request) {
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host")?.split(":")[0];
+  if (host && !["127.0.0.1", "localhost"].includes(host))
+    return Response.json(
+      { error: "image-to-world serves loopback requests only" },
+      { status: 403 },
+    );
+  if (origin && origin !== new URL(request.url).origin)
+    return Response.json(
+      { error: "Cross-origin requests are not allowed" },
+      { status: 403 },
+    );
+  if (
+    request.method !== "GET" &&
+    !request.headers.get("x-image-to-world-client")
+  )
+    return Response.json(
+      { error: "X-Image-To-World-Client header is required" },
+      { status: 403 },
+    );
+}
+
 export async function createService(root: string) {
   const store = await new WorkspaceStore(root).init();
   const jobs = new JobRunner(store);
-  await jobs.init();
+  try {
+    await jobs.init();
+  } catch (error) {
+    await jobs.close();
+    await store.close();
+    throw error;
+  }
   const commands = new CommandService(store, jobs);
   const claims = new Map<string, number>();
   return {
     store,
     jobs,
-    async handle(request: Request): Promise<Response> {
+    async handle(request: Request, scopedRoute?: string): Promise<Response> {
       const url = new URL(request.url);
-      const origin = request.headers.get("origin");
-      const host = request.headers.get("host")?.split(":")[0];
-      if (host && !["127.0.0.1", "localhost"].includes(host))
-        return Response.json(
-          { error: "image-to-world serves loopback requests only" },
-          { status: 403 },
-        );
-      if (origin && origin !== url.origin)
-        return Response.json(
-          { error: "Cross-origin requests are not allowed" },
-          { status: 403 },
-        );
-      if (
-        request.method !== "GET" &&
-        !request.headers.get("x-image-to-world-client")
-      )
-        return Response.json(
-          { error: "X-Image-To-World-Client header is required" },
-          { status: 403 },
-        );
+      const rejection = localRequestError(request);
+      if (rejection) return rejection;
       try {
-        const route = url.pathname.replace(/^\/api\/?/, "");
+        const route = scopedRoute ?? url.pathname.replace(/^\/api\/?/, "");
         const playerAsset =
           /^player\/assets\/([A-Za-z0-9_-]+)\/[A-Za-z0-9_.-]+$/.exec(route);
         if (
@@ -339,21 +351,31 @@ export async function createService(root: string) {
   };
 }
 const singleton = globalThis as typeof globalThis & {
-  imageToWorldService?: ReturnType<typeof createService>;
+  imageToWorldService?: ReturnType<typeof createProjectHost>;
   imageToWorldClosing?: Promise<void>;
 };
 export function service() {
   singleton.imageToWorldService ??= (async () => {
     await singleton.imageToWorldClosing;
-    return createService(
+    return createProjectHost(
       process.env.IMAGE_TO_WORLD_WORKSPACE ||
         path.resolve(process.cwd(), "../.image-to-world"),
+      createService,
     );
   })();
   return singleton.imageToWorldService;
 }
 export async function handleRequest(request: Request) {
-  return (await service()).handle(request);
+  const denied = localRequestError(request);
+  if (denied) return denied;
+  try {
+    return await (await service()).handle(request);
+  } catch (error) {
+    return Response.json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 400 },
+    );
+  }
 }
 
 if (import.meta.hot)

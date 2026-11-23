@@ -1,3 +1,4 @@
+import { projectApi } from "../../../core/project-url";
 import {
   Camera,
   DownloadSimple,
@@ -15,7 +16,7 @@ import { liveViewportCamera } from "../lib/viewport-camera";
 import { AtlasHistory } from "./AtlasHistory";
 import { GeneratePanel, JobsPanel } from "./Panels";
 import { PanelHeader, ToolbarIconButton, ToolbarPopover } from "./ui";
-export function ViewportAppActions() {
+export function HeaderSceneTools() {
   const client = useImageToWorldClient();
   const status = useClientState((s) => s.status);
   const activeJobs = useWorkspace(
@@ -25,11 +26,7 @@ export function ViewportAppActions() {
       ).length,
   );
   return (
-    <div
-      className="viewport-tools floating-toolbar viewport-app-actions"
-      role="toolbar"
-      aria-label="Scene tools"
-    >
+    <div className="header-scene-tools" role="toolbar" aria-label="Scene tools">
       <ToolbarPopover label="Generation tools" icon={<Wrench />} width={330}>
         <PanelHeader title="Generate" />
         <GeneratePanel status={status} />
@@ -75,9 +72,14 @@ export function ViewportAppActions() {
       </ToolbarIconButton>
 
       <Button asChild size="1" color="gray" variant="surface">
-        <a href="/api/player/export.zip" download>
+        <a
+          href={projectApi("player/export.zip")}
+          aria-label="Export"
+          title="Export"
+          download
+        >
           <DownloadSimple />
-          Export
+          <span className="toolbar-label">Export</span>
         </a>
       </Button>
     </div>

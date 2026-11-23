@@ -1564,7 +1564,7 @@ export function Viewport({
                 })
               }
             >
-              <VideoCamera /> Auto
+              <VideoCamera /> <span className="toolbar-label">Auto</span>
             </Button>
           </Tooltip>
           <Tooltip delayDuration={0} content="Viewport activity feed">
@@ -1875,10 +1875,12 @@ export function Viewport({
               size="1"
               color="gray"
               variant="surface"
+              aria-label="Input"
               aria-pressed={showInput}
               onClick={() => setShowInput(!showInput)}
             >
-              <ImageSquare aria-hidden="true" /> Input
+              <ImageSquare aria-hidden="true" />
+              <span className="toolbar-label">Input</span>
             </Button>
             <FrameEdit
               key={compared.imageId + compared.asset.id}

@@ -72,9 +72,14 @@ export function HeaderSceneTools() {
       </ToolbarIconButton>
 
       <Button asChild size="1" color="gray" variant="surface">
-        <a href={projectApi("player/export.zip")} download>
+        <a
+          href={projectApi("player/export.zip")}
+          aria-label="Export"
+          title="Export"
+          download
+        >
           <DownloadSimple />
-          Export
+          <span className="toolbar-label">Export</span>
         </a>
       </Button>
     </div>

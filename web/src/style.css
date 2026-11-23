@@ -34,17 +34,19 @@ button {
   border: 0;
 }
 .editor {
-  --header-height: var(--panel-header-height);
   grid-template-columns: minmax(0, 1fr);
   height: 100vh;
   display: grid;
   grid-template-rows:
-    var(--header-height) minmax(0, 1fr) 2px min(var(--context-height), 38dvh)
+    var(--panel-header-height) minmax(0, 1fr) 2px min(
+      var(--context-height),
+      38dvh
+    )
     var(--panel-header-height);
   background: var(--bg);
 }
 .editor.context-closed {
-  grid-template-rows: var(--header-height) minmax(0, 1fr) 0 0 var(
+  grid-template-rows: var(--panel-header-height) minmax(0, 1fr) 0 0 var(
       --panel-header-height
     );
 }
@@ -54,21 +56,30 @@ button {
   grid-column: 1 / -1;
   grid-row: 1;
   display: grid;
-  grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   column-gap: 16px;
   white-space: nowrap;
   align-items: center;
-  height: var(--header-height);
+  height: var(--panel-header-height);
   padding: 0 8px;
   border-bottom: 1px solid var(--line);
   background: var(--surface-2);
 }
 .wordmark {
   display: flex;
+  min-width: 0;
+  overflow: hidden;
   align-items: center;
   gap: 9px;
   font-size: 11px;
   letter-spacing: 0.17em;
+}
+.toolbar-label,
+.wordmark strong {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .wordmark svg {
   flex-shrink: 0;
@@ -101,10 +112,12 @@ button {
 }
 .header-scene-tools {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
 }
 .topbar-actions {
+  flex-wrap: nowrap;
   justify-self: end;
   display: flex;
   align-items: center;
@@ -342,6 +355,7 @@ button {
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+  white-space: nowrap;
   pointer-events: none;
 }
 .viewport-overlay-spacer {
@@ -351,7 +365,7 @@ button {
   display: none;
 }
 .viewport-tools {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   pointer-events: auto;
 }
 .viewport-canvas {
@@ -1323,9 +1337,6 @@ button {
   }
 }
 @media (max-width: 760px) {
-  .topbar {
-    column-gap: 8px;
-  }
   .viewport-onboarding {
     left: 12px;
     right: 12px;
@@ -1516,6 +1527,7 @@ button {
 
 .editor-footer {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -1567,9 +1579,6 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.footer-selection > span:last-child {
-  flex: 0 0 auto;
-}
 
 .editor > .editor-workspace {
   grid-column: 1;
@@ -1613,6 +1622,8 @@ button {
 /* Shared floating controls for the 3D viewport and image canvas. */
 .floating-toolbar {
   display: flex;
+  flex-wrap: nowrap;
+  white-space: nowrap;
   align-items: center;
   gap: var(--floating-toolbar-gap);
   padding: var(--floating-toolbar-padding);
@@ -1772,6 +1783,8 @@ button {
 .scene-actions,
 .footer-panels {
   display: flex;
+  min-width: 0;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
 }
@@ -1794,6 +1807,7 @@ button {
 .editor-footer .activity-container {
   margin-left: auto;
   flex: 0 1 auto;
+  min-width: 36px;
   max-width: 40%;
 }
 .editor-footer .activity-container > .hint-trigger {
@@ -1805,36 +1819,64 @@ button {
   white-space: nowrap;
   justify-content: flex-end;
 }
-.footer-operation .activity-count {
+.topbar .rt-Button,
+.viewport-tools .rt-Button,
+.view-frame-actions .rt-Button {
+  min-width: 24px;
+  flex-shrink: 1;
+}
+.header-scene-tools .rt-IconButton,
+.topbar-actions > .rt-IconButton,
+.topbar .rt-Button svg,
+.viewport-tools .rt-Button svg,
+.view-frame-actions .rt-Button svg,
+.view-frame-actions .frame-state {
   flex-shrink: 0;
 }
+.footer-selection > span:last-child,
+.footer-operation .activity-count {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .scene-actions svg {
+  flex-shrink: 0;
   width: 14px;
   height: 14px;
 }
-@media (max-width: 720px) {
-  .wordmark strong,
-  .wordmark svg:nth-child(2) {
-    display: none;
+/* Keep the central actions centered when both outer tracks have room. */
+@media (max-width: 800px) {
+  .topbar {
+    grid-template-columns: minmax(16px, 1fr) minmax(0, max-content) auto;
+  }
+}
+@media (max-width: 620px) {
+  .topbar {
+    column-gap: 4px;
+    padding-inline: 4px;
+  }
+  .topbar .scene-actions,
+  .topbar-actions,
+  .header-scene-tools {
+    gap: 2px;
+  }
+  .topbar-actions .connection {
+    margin-right: 0;
+  }
+  .topbar .frame-count {
+    padding-inline: 3px;
+    gap: 2px;
+  }
+  .topbar .rt-Button {
+    padding-inline: 4px;
+    gap: 3px;
   }
 }
 
-@media (max-width: 620px) {
-  .editor {
-    --header-height: calc(2 * var(--panel-header-height));
-  }
-  .topbar {
-    grid-template-columns: 1fr auto;
-    grid-template-rows: 1fr 1fr;
-  }
-  .topbar-actions {
-    grid-column: 2;
-    grid-row: 1;
-  }
-  .topbar .scene-actions {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    justify-self: center;
+@media (max-width: 420px) {
+  .header-scene-tools > a {
+    max-width: 38px;
   }
 }
 
@@ -1846,17 +1888,20 @@ button {
   white-space: nowrap;
 }
 .frame-count {
+  min-width: 0;
   font-size: 11px;
   border: 1px solid var(--line);
   padding: 2px 6px;
   border-radius: 3px;
 }
 .frame-count b {
+  flex-shrink: 0;
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 .viewport-fov {
   width: 80px;
+  min-width: 58px;
 }
 .viewport-fov .numeric-scrub-label {
   width: auto;
@@ -1926,12 +1971,19 @@ button {
   transform: translateX(-50%);
   display: flex;
   width: max-content;
+  max-width: calc(100% - 2 * var(--floating-toolbar-edge));
   gap: 4px;
   align-items: center;
 }
 .view-frame-actions .frame-badge {
+  min-width: 0;
   border: 0;
   background: transparent;
+}
+.view-frame-actions .frame-badge button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .view-frame-actions .frame-badge button[aria-pressed="true"] {
   background: transparent;
@@ -1980,26 +2032,25 @@ button {
 .viewport-fov .rt-TextFieldSlot {
   flex-shrink: 0;
 }
-@container (max-width: 520px) {
-  .view-frame-actions {
-    max-width: 98%;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-}
 .viewport-panel {
   container-type: inline-size;
+}
+@container (max-width: 450px) {
+  .viewport-overlay {
+    gap: 2px;
+  }
+  .viewport-tools .rt-Button {
+    max-width: 30px;
+    padding-inline: 3px;
+    gap: 2px;
+  }
+  .viewport-fov {
+    width: 58px;
+  }
 }
 .generate-panel .viewport-prompt {
   width: 100%;
   flex: auto;
-}
-
-@container (max-width: 530px) {
-  .viewport-overlay {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
 }
 
 .agent-cursor-layer {

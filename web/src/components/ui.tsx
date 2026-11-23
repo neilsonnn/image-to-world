@@ -247,7 +247,7 @@ export function ToolbarSelect<T extends string>({
             onPointerLeave={scheduleClose}
           >
             {current.icon}
-            {current.label}
+            <span className="toolbar-label">{current.label}</span>
           </Button>
         </DropdownMenu.Trigger>
       </Tooltip>

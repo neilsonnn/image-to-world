@@ -755,6 +755,7 @@ async function generatedSceneFixture(
   hooks: {
     beforeFal?: () => Promise<void>;
     beforeAtlas?: () => Promise<void>;
+    atlasCaption?: (seed: number) => string;
     beforePose?: () => Promise<void>;
   } = {},
 ) {
@@ -819,7 +820,9 @@ async function generatedSceneFixture(
             id: `atlas-${requests.length}`,
             done: true,
             response: {
-              promptUsed: "Enhanced scene description",
+              promptUsed:
+                hooks.atlasCaption?.(body.modelParameters.seed) ??
+                "Enhanced scene description",
               frames: body.targetCameras.map((camera: any) => ({
                 camera,
                 imageAsset: { url: "https://fixture.example/frame.png" },
@@ -1447,7 +1450,10 @@ for (const action of ["delete", "undo", "replace"] as const) {
 test("Atlas queues two variants of one frozen shot and keeps only the editor's choice", async () => {
   const gate = Promise.withResolvers<void>();
   const { store, runner, commands, camera, requests } =
-    await generatedSceneFixture(true, { beforeAtlas: () => gate.promise });
+    await generatedSceneFixture(true, {
+      beforeAtlas: () => gate.promise,
+      atlasCaption: (seed) => `Enhanced description for ${seed}`,
+    });
   cleanups.push(async () => gate.resolve());
   const { atlasReview } = await import("../../../core/atlas-review");
   const { atlasContext } = await import("../../../core/captures");
@@ -1486,7 +1492,8 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
     270, 271,
   ]);
   expect(requests.map((r) => r.prompt)).toEqual([caption, caption]);
-  expect(requests.map((r) => r.enhancePrompt)).toEqual([false, false]);
+  expect(requests.map((r) => r.enhancePrompt)).toEqual([true, true]);
+  expect(store.current.settings.enhancedCaption).toBeUndefined();
   expect(requests[0].targetCameras).toEqual(requests[1].targetCameras);
   expect(requests[0].targetCameras[0].extrinsics.position).toEqual([2, 1.5, 0]);
   expect(jobs[0].contextSnapshot).toEqual(jobs[1].contextSnapshot);
@@ -1508,6 +1515,11 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
   } as const;
   await expect(commands.execute(choice)).rejects.toThrow("in the editor");
   const kept = await commands.execute(choice, { interactive: true });
+  expect(store.current.settings.enhancedCaption).toEqual({
+    prompt: caption,
+    text: "Enhanced description for 271",
+  });
+
   const winner = kept.nodeIds![0];
   expect(store.current.nodes[winner].assetId).toBe(jobs[1].frameAssetIds![0]);
   expect(
@@ -1535,10 +1547,21 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
     request: {
       kind: "view.pair",
       camera: nextCamera,
-      prompt: "Turn toward the service stairs",
     },
   });
   const nextJobs = await Promise.all(next.jobIds!.map((id) => done(store, id)));
+  expect(requests.slice(2).map((r) => r.prompt)).toEqual([
+    "Enhanced description for 271",
+    "Enhanced description for 271",
+  ]);
+  expect(requests.slice(2).map((r) => r.enhancePrompt)).toEqual([false, false]);
+  expect(
+    requests.slice(2).map((r) => r.targetCameras[0].extrinsics.position),
+  ).toEqual([
+    [4, 1.5, 0],
+    [4, 1.5, 0],
+  ]);
+
   expect(
     nextJobs.every(
       (job) => job.input.kind === "atlas" && job.input.nodeIds.includes(winner),
@@ -1556,16 +1579,26 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
   ]);
 });
 
-test("Atlas exposes a missing-depth failure and discard keeps the scene intact", async () => {
-  const { store, commands, camera } = await generatedSceneFixture(false);
+test("camera-only Atlas requests use the current description before enhancement and discard on missing depth", async () => {
+  const { store, commands, camera, requests } =
+    await generatedSceneFixture(false);
+  await commands.execute({
+    type: "workspace.update",
+    settings: { prompt: "Service tunnel" },
+  });
   const before = Object.keys(store.current.nodes);
   camera.extrinsics.position[0] = 2;
   const { jobId, jobIds } = await commands.execute({
     type: "generation.submit",
-    request: { kind: "view.pair", camera, prompt: "Service tunnel" },
+    request: { kind: "view.pair", camera },
   });
   for (const id of jobIds!)
     expect((await done(store, id)).error).toContain("without posed depth");
+  expect(requests.map((r) => r.prompt)).toEqual([
+    "Service tunnel",
+    "Service tunnel",
+  ]);
+  expect(requests.map((r) => r.enhancePrompt)).toEqual([false, false]);
   const { atlasReview } = await import("../../../core/atlas-review");
   expect(atlasReview(store.current)?.phase).toBe("failed");
   await commands.execute(

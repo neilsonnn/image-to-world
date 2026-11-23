@@ -13,7 +13,7 @@ import {
 import { operationName, activityTargets } from "../../../core/activity";
 import { moveAssetsToTrash, revealAsset } from "./asset-files";
 import { applyCommand, isNavigation } from "../../../core/commands";
-import { generationInput } from "../../../core/generation";
+import { atlasPairCaption, generationInput } from "../../../core/generation";
 import { frameAssets, frameAt } from "../../../core/frames";
 import {
   commandSchema,
@@ -324,6 +324,20 @@ export class CommandService {
         if (!frameId) throw new Error("The chosen Atlas view cannot be placed");
         captureFrame(state, frameId);
         state.atlasRound!.decision = { kind: "keep", jobId, frameId };
+        const settings = state.settings;
+        if (round.updateCaption) {
+          if (settings.prompt !== round.caption) {
+            settings.prompt = round.caption;
+            settings.enhancedCaption = null;
+            settings.captionEpoch = (settings.captionEpoch ?? 0) + 1;
+          }
+          const enhanced = state.jobs[jobId].enhancedViewCaption;
+          if (enhanced)
+            settings.enhancedCaption = {
+              prompt: round.caption,
+              text: enhanced,
+            };
+        }
         const edit = state.undo.at(-1)!;
         Object.assign(edit, {
           actorId: context.actorId,
@@ -366,15 +380,20 @@ export class CommandService {
         const id = await this.submissionId(command, context.requestId!);
         if (request.kind === "view.pair") {
           const alternative = `atlas_choice_${id}`;
+          const workspace = this.store.current;
           await this.jobs.submit(
-            generationInput(this.store.current, {
+            generationInput(workspace, {
               ...request,
               seed: request.seed ?? randomInt(2147483647),
             }),
             id,
             undefined,
             context,
-            alternative,
+            {
+              jobId: alternative,
+              caption: atlasPairCaption(workspace, request.prompt),
+              updateCaption: request.prompt !== undefined,
+            },
           );
           return {
             revision: this.store.revision,

@@ -609,6 +609,7 @@ export const jobSchema = z.object({
   extractedFrameIds: z.array(z.string()).optional(),
   sourceFrameAssetIds: z.array(z.string()).optional(),
   choiceRoundId: z.string().optional(),
+  enhancedViewCaption: z.string().optional(),
   frameIndices: z.array(number.int().nonnegative()).optional(),
   cameras: z.array(cameraSchema).optional(),
   reconstructionScale: number.positive().optional(),
@@ -677,6 +678,7 @@ export type Edit = z.infer<typeof editSchema>;
 export const atlasRoundSchema = z.object({
   id: z.string(),
   caption: z.string(),
+  updateCaption: z.boolean().optional(),
   jobIds: z.tuple([z.string(), z.string()]),
   decision: z
     .discriminatedUnion("kind", [
@@ -883,7 +885,7 @@ export const generationSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("view.pair"),
     camera: cameraSchema,
-    prompt: z.string().trim().min(1),
+    prompt: z.string().trim().min(1).optional(),
     nodeIds: z.array(z.string()).min(1).optional(),
     seed: number.int().min(0).max(2147483646).optional(),
   }),

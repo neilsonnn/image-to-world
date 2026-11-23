@@ -114,9 +114,9 @@ Declare module resources through `assetUrl(id)` so they travel in the ZIP. Any e
 
 ## Build a scene with Atlas
 
-Give the agent your reference images and the full URL of the editor tab. The agent checks `status` for `worldLabsConfigured` and poses the images with Atlas. After the reference Frames are arranged, it asks what you want to see next in the agent chat.
+Give the agent your reference images and the full URL of the editor tab. The agent checks `status` for `worldLabsConfigured` and poses the images with Atlas. As soon as posing succeeds, it asks where you want to go next in the agent chat. It can verify the placement while you answer.
 
-The agent solves a camera for your answer and runs `atlas pair --camera shot.json --prompt '…'`. The editor opens both candidates side by side. **Keep View A** or **Keep View B** adds that view to your scene and Atlas context. **Discard both** leaves the scene as it was. The agent reads your decision with `atlas round` and asks what to see next. Finish choosing views before beginning the 3D build.
+The agent solves a camera for your answer and runs `atlas pair --camera shot.json`. For a camera-only move it reuses the enhanced caption. It includes `--prompt` when you ask to change the description. The editor opens both candidates side by side. **Keep View A** or **Keep View B** adds that view to your scene and Atlas context. **Discard both** leaves the scene as it was. The agent reads your decision with `atlas round` and asks what to see next. The loop stays open until you ask to stop or move into the 3D build.
 
 ## Editor layout and shortcuts
 

@@ -111,7 +111,7 @@ export class JobRunner {
     id = `job_${randomUUID()}`,
     parentJob?: Job,
     context: CommandContext = {},
-    alternativeId?: string,
+    comparison?: { jobId: string; caption: string; updateCaption: boolean },
   ) {
     if (this.store.current.jobs[id]) return id;
     const parsed = jobInputSchema.parse(input);
@@ -122,7 +122,7 @@ export class JobRunner {
       )
     )
       worldLabs();
-    if (alternativeId && parsed.kind !== "atlas")
+    if (comparison && parsed.kind !== "atlas")
       throw new Error("View pairs require Atlas");
     let snapshot = {
       ...this.store.current,
@@ -382,8 +382,8 @@ export class JobRunner {
     const pinnedAssets = source
       ? await this.store.withJobAssets(source, pin)
       : await pin();
-    const jobIds: [string, string] | [string] = alternativeId
-      ? [id, alternativeId]
+    const jobIds: [string, string] | [string] = comparison
+      ? [id, comparison.jobId]
       : [id];
     await this.store.updateSceneAndJobs(jobIds, (state) => {
       checkPreconditions(state, context);
@@ -423,7 +423,7 @@ export class JobRunner {
       }
       if (
         context.interactive &&
-        !alternativeId &&
+        !comparison &&
         ["atlas", "video", "reconstruct"].includes(parsed.kind)
       )
         state.settings.atlasPanel.jobId = id;
@@ -475,7 +475,7 @@ export class JobRunner {
         outputAssetIds: [],
       };
       state.jobs[id] = job;
-      if (jobIds.length === 2 && parsed.kind === "atlas") {
+      if (comparison && jobIds.length === 2 && parsed.kind === "atlas") {
         const second = jobIds[1];
         job.choiceRoundId = id;
         const alternate: Job = {
@@ -485,7 +485,12 @@ export class JobRunner {
           input: { ...parsed, seed: parsed.seed + 1 },
         };
         state.jobs[second] = alternate;
-        state.atlasRound = { id, caption: parsed.prompt, jobIds };
+        state.atlasRound = {
+          id,
+          caption: comparison.caption,
+          updateCaption: comparison.updateCaption,
+          jobIds,
+        };
       }
       if (!parentJob) claimResultTargets(state, job);
     });
@@ -730,6 +735,7 @@ export class JobRunner {
       signal.throwIfAborted();
       const assets: Asset[] = [];
       const addedNodes: string[] = [];
+      let enhancedViewCaption: string | undefined;
       if (job.input.kind === "render")
         assets.push(...(await this.renderer.render(job, signal)));
       if (job.input.kind === "probe")
@@ -1066,8 +1072,11 @@ export class JobRunner {
           const response = completed.response as AtlasGenerateResponse;
           const request = job.request as AtlasGenerateRequest | undefined;
           const prompt = job.input.prompt;
-          if (request?.enhancePrompt && response.promptUsed?.trim()) {
-            const text = response.promptUsed;
+          const enhanced = request?.enhancePrompt
+            ? response.promptUsed?.trim()
+            : undefined;
+          if (job.choiceRoundId) enhancedViewCaption = enhanced;
+          else if (enhanced) {
             await this.store.updateScene((state) => {
               if (state.jobs[id].status === "cancelled") return;
               if (
@@ -1077,7 +1086,7 @@ export class JobRunner {
               )
                 return;
               // Keep the first caption for this description until it is explicitly cleared.
-              state.settings.enhancedCaption ??= { prompt, text };
+              state.settings.enhancedCaption ??= { prompt, text: enhanced };
             });
           }
         }
@@ -1181,6 +1190,7 @@ export class JobRunner {
         id,
         {
           status: "succeeded",
+          ...(enhancedViewCaption && { enhancedViewCaption }),
           outputAssetIds: assets.map((a) => a.id),
           frameAssetIds: assets
             .filter((a) => a.kind === "image")

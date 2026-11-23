@@ -9,7 +9,7 @@ function agentMessage(editorUrl: string) {
     "Before scene work, confirm status reports worldLabsConfigured. If a key is missing, pause and ask me to open Workspace settings → Environment variables, create a key at https://atlas.worldlabs.ai/api-keys and save it as WLT_API_KEY.",
     "Use OpenAI’s SVG & 3D Design skill for construction and visual review. Use image-to-world as the authoring tool. Read skills/image-to-world/SKILL.md in your editor checkout.",
     "Give each Frame a distinct two- or three-word frameSlug. Use frame work <frame-id> with a short task description and --actor as you build. Report done with the same actor when you finish.",
-    "Pose and ground the inputs, then ask me in chat what I want to see next. Translate that into a target camera and caption. Submit atlas pair --camera shot.json --prompt … and let me choose in the editor. Use atlas round to read my choice, then ask again until I’m satisfied.",
+    "Ask where to go next in chat as soon as Atlas posing succeeds. Run grounding and visual checks while I answer. Always offer a camera-only option. Use atlas pair --camera shot.json to keep the current description, and add --prompt only if I ask to change it. Let me choose in the editor and use atlas round --wait to read my choice. Ask again immediately and keep going until I explicitly ask to stop or start the 3D build.",
   ].join("\n\n");
 }
 

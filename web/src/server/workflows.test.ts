@@ -1460,9 +1460,16 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
   const before = Object.keys(store.current.nodes);
   camera.extrinsics.position = [2, 1.5, 0];
   const caption = "Look into the flooded pump room";
+  const requestText = "Let’s see the pump room.";
   const request = {
     type: "generation.submit",
-    request: { kind: "view.pair", camera, prompt: caption, seed: 270 },
+    request: {
+      kind: "view.pair",
+      camera,
+      prompt: caption,
+      requestText,
+      seed: 270,
+    },
   } as const;
   const first = await commands.execute(request, { requestId: "pair" });
   const ids = first.jobIds!;
@@ -1471,6 +1478,7 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
     (await commands.execute(request, { requestId: "pair" })).jobIds,
   ).toEqual(ids);
   expect(atlasReview(store.current)?.phase).toBe("generating");
+  expect(atlasReview(store.current)?.requestText).toBe(requestText);
   await expect(commands.execute(request)).rejects.toThrow(
     "open Atlas comparison",
   );
@@ -1547,6 +1555,7 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
     request: {
       kind: "view.pair",
       camera: nextCamera,
+      requestText: "Step right toward the stairs.",
     },
   });
   const nextJobs = await Promise.all(next.jobIds!.map((id) => done(store, id)));
@@ -1573,6 +1582,9 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
   cleanups.push(() => reopened.close());
   expect(atlasReview(reopened.current)?.phase).toBe("review");
   expect(atlasReview(reopened.current)?.id).toBe(next.jobId);
+  expect(atlasReview(reopened.current)?.requestText).toBe(
+    "Step right toward the stairs.",
+  );
   expect(atlasContext(reopened.current).map(({ node }) => node.id)).toEqual([
     "source-capture",
     winner,

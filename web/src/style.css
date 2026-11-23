@@ -2339,6 +2339,14 @@ button {
   gap: 4px;
   padding: 2px 5px 5px;
 }
+.atlas-choice-request {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--secondary-text);
+}
 .atlas-choice-error {
   display: inline-flex;
   align-items: center;

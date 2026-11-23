@@ -105,7 +105,7 @@ const HELP = `image-to-world controls the same filesystem workspace as the brows
   bun run image-to-world context [list|include|exclude|solo|show|hide|freeze|unfreeze] <capture-id>...
   bun run image-to-world path create <camera-id>... [--target-frames 36]
   bun run image-to-world pose <asset-id>... [--camera camera.json]
-  bun run image-to-world atlas pair --camera camera.json [--prompt '...'] [<frame-id>...] [--seed n] [--wait]
+  bun run image-to-world atlas pair --camera camera.json [--request-text '...'] [--prompt '...'] [<frame-id>...] [--seed n] [--wait]
   bun run image-to-world atlas round [--wait] [--timeout seconds]  Read the current comparison or wait for the editor's choice
   bun run image-to-world atlas [--depth] [--camera camera.json] [--path path-id] [--prompt '...']
   bun run image-to-world splats [capture-id...] [--path path-id] [--prompt '...'] [--refine]
@@ -171,6 +171,7 @@ export async function run(argv: string[]) {
       "asset-only": { type: "boolean" },
       after: { type: "string" },
       "request-id": { type: "string" },
+      "request-text": { type: "string" },
       "build-key": { type: "string" },
       expect: { type: "string" },
       out: { type: "string" },
@@ -1132,6 +1133,7 @@ export async function run(argv: string[]) {
         await jsonFile(need(values.camera, "--camera camera.json")),
       ),
       prompt: values.prompt,
+      requestText: values["request-text"],
       nodeIds: rest.length ? rest : undefined,
       seed: values.seed === undefined ? undefined : finite(values.seed, 42),
     });

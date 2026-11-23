@@ -678,6 +678,7 @@ export type Edit = z.infer<typeof editSchema>;
 export const atlasRoundSchema = z.object({
   id: z.string(),
   caption: z.string(),
+  requestText: z.string().trim().min(1).optional(),
   updateCaption: z.boolean().optional(),
   jobIds: z.tuple([z.string(), z.string()]),
   decision: z
@@ -885,6 +886,7 @@ export const generationSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("view.pair"),
     camera: cameraSchema,
+    requestText: z.string().trim().min(1).optional(),
     prompt: z.string().trim().min(1).optional(),
     nodeIds: z.array(z.string()).min(1).optional(),
     seed: number.int().min(0).max(2147483646).optional(),

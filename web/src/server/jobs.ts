@@ -111,7 +111,12 @@ export class JobRunner {
     id = `job_${randomUUID()}`,
     parentJob?: Job,
     context: CommandContext = {},
-    comparison?: { jobId: string; caption: string; updateCaption: boolean },
+    comparison?: {
+      jobId: string;
+      caption: string;
+      requestText?: string;
+      updateCaption: boolean;
+    },
   ) {
     if (this.store.current.jobs[id]) return id;
     const parsed = jobInputSchema.parse(input);
@@ -488,6 +493,7 @@ export class JobRunner {
         state.atlasRound = {
           id,
           caption: comparison.caption,
+          requestText: comparison.requestText,
           updateCaption: comparison.updateCaption,
           jobIds,
         };

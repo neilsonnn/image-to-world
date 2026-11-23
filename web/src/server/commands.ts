@@ -392,6 +392,7 @@ export class CommandService {
             {
               jobId: alternative,
               caption: atlasPairCaption(workspace, request.prompt),
+              requestText: request.requestText,
               updateCaption: request.prompt !== undefined,
             },
           );

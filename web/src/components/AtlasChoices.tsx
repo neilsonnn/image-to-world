@@ -30,6 +30,9 @@ export function AtlasChoices() {
   }, [id, phase]);
 
   if (!round || round.decision) return null;
+  const request =
+    round.requestText ??
+    (round.updateCaption !== false ? round.caption : undefined);
 
   const run = async (input: Parameters<typeof command>[0]) => {
     setBusy(true);
@@ -64,10 +67,17 @@ export function AtlasChoices() {
           <Dialog.Title className="atlas-choice-accessible">
             Choose the next view
           </Dialog.Title>
-          <Dialog.Description className="atlas-choice-accessible">
-            {round.caption || "Compare the Atlas views and choose one to keep."}
-          </Dialog.Description>
           <div className="atlas-choice-tools">
+            <Dialog.Description
+              m="0"
+              size="1"
+              className={
+                request ? "atlas-choice-request" : "atlas-choice-accessible"
+              }
+              title={request}
+            >
+              {request || "Compare the Atlas views and choose one to keep."}
+            </Dialog.Description>
             {error && (
               <span className="atlas-choice-error" title={error}>
                 <WarningCircle aria-hidden="true" />

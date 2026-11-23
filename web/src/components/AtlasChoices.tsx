@@ -56,7 +56,7 @@ export function AtlasChoices() {
       <Dialog.Root open={open} onOpenChange={setOpen}>
         <Dialog.Content
           ref={dialog}
-          maxWidth="960px"
+          maxWidth="min(960px, calc(100vw - 24px))"
           className="atlas-choices"
           tabIndex={-1}
           onOpenAutoFocus={(event) => {

@@ -755,6 +755,7 @@ async function generatedSceneFixture(
   hooks: {
     beforeFal?: () => Promise<void>;
     beforeAtlas?: () => Promise<void>;
+    atlasCaption?: (seed: number) => string;
     beforePose?: () => Promise<void>;
   } = {},
 ) {
@@ -819,7 +820,9 @@ async function generatedSceneFixture(
             id: `atlas-${requests.length}`,
             done: true,
             response: {
-              promptUsed: "Enhanced scene description",
+              promptUsed:
+                hooks.atlasCaption?.(body.modelParameters.seed) ??
+                "Enhanced scene description",
               frames: body.targetCameras.map((camera: any) => ({
                 camera,
                 imageAsset: { url: "https://fixture.example/frame.png" },
@@ -1055,94 +1058,30 @@ test("keyframe-to-dense video retains keyframes and frozen cameras, integrates s
   expect(rebuilt.reconstructionScale).toBeCloseTo(1);
 });
 
-test("local reference placement keeps the chosen camera, makes no jobs, and leaves RGBD context alone", async () => {
-  const { atlasContext, captureFrame, captureNodes, sceneCamera } =
-    await import("../../../core/captures");
-  const { Euler, Quaternion } = await import("three");
+test("placing an unposed image requires a World Labs key before reserving a Frame", async () => {
+  const oldKey = process.env.WLT_API_KEY;
+  const oldConfig = process.env.XDG_CONFIG_HOME;
+  process.env.WLT_API_KEY = "";
+  process.env.XDG_CONFIG_HOME = await directory();
+  cleanups.push(async () => {
+    if (oldKey === undefined) delete process.env.WLT_API_KEY;
+    else process.env.WLT_API_KEY = oldKey;
+    if (oldConfig === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = oldConfig;
+  });
   const service = await createService(await directory());
   cleanups.push(() => service.close());
-  const store = service.store;
-  const asset = await store.importFile(png(), "Illustration.png");
-  const camera = structuredClone(store.snapshot().settings.viewportCamera);
-  camera.extrinsics.position = [3.2, 2.4, -7];
-  camera.extrinsics.quaternion = new Quaternion()
-    .setFromEuler(new Euler(-0.28, 0.64, 0.15, "YXZ"))
-    .toArray();
-  camera.intrinsics = { width: 40, height: 20, fx: 24, fy: 26, cx: 22, cy: 9 };
-  await service.handle(
-    commandRequest({
-      type: "workspace.update",
-      settings: { viewportCamera: camera },
-    }),
-  );
-  await service.handle(
-    commandRequest({
-      type: "nodes.put",
-      nodes: [
-        {
-          id: "parent",
-          name: "Rig",
-          kind: "group",
-          parentId: null,
-          visible: true,
-          transform: {
-            position: [2, 4, -1],
-            quaternion: [0, Math.SQRT1_2, 0, Math.SQRT1_2],
-            scale: [2, 2, 2],
-          },
-        },
-      ],
-    }),
-  );
+  const asset = await service.store.importFile(png(), "Illustration.png");
   const response = await service.handle(
-    commandRequest({
-      type: "assets.place",
-      mode: "reference",
-      assetIds: [asset.id],
-      parentId: "parent",
-    }),
+    commandRequest({ type: "assets.place", assetIds: [asset.id] }),
   );
-  expect(response.status).toBe(200);
-  const result = await response.json();
-  expect(result.jobIds).toEqual([]);
-  expect(result.nodeIds).toHaveLength(1);
-  const frameId = result.nodeIds[0];
-  const state = store.snapshot();
-  expect(Object.keys(state.jobs)).toHaveLength(0);
-  const frame = captureNodes(state, frameId);
-  expect(frame.root.parentId).toBe("parent");
-  expect(frame.points.visible).toBe(false);
-  expect(frame.points.assetId).toBeUndefined();
-  expect(frame.image.visible).toBe(false);
-  expect(frame.image.assetId).toBe(asset.id);
-  const shot = sceneCamera(state, frameId)!;
-  shot.extrinsics.position.forEach((v, i) =>
-    expect(v).toBeCloseTo(camera.extrinsics.position[i], 8),
+  expect(response.status).toBe(400);
+  expect((await response.json()).error).toContain(
+    "https://atlas.worldlabs.ai/api-keys",
   );
-  expect(
-    Math.abs(
-      new Quaternion(...shot.extrinsics.quaternion).dot(
-        new Quaternion(...camera.extrinsics.quaternion),
-      ),
-    ),
-  ).toBeCloseTo(1, 8);
-  expect(shot.intrinsics).toEqual({
-    width: 20,
-    height: 20,
-    fx: 24,
-    fy: 26,
-    cx: 12,
-    cy: 9,
-  });
-  expect(frame.image.projection).toEqual(shot.intrinsics);
-  expect(atlasContext(state)).toEqual([]);
-  expect(() => captureFrame(state, frameId)).toThrow("posed depth");
-  expect(() => atlasContext(state, [frameId])).toThrow("posed depth");
-  expect(state.assets[asset.id].camera).toBeUndefined();
-  expect(state.assets[asset.id].depthAssetId).toBeUndefined();
-  await service.handle(commandRequest({ type: "history.undo" }));
-  expect(store.snapshot().nodes[frameId]).toBeUndefined();
-  expect(store.snapshot().assets[asset.id]).toBeDefined();
+  expect(service.store.current.nodes).toEqual({});
+  expect(service.store.current.jobs).toEqual({});
+  expect(service.store.current.assets[asset.id]).toBeDefined();
 });
 
 for (const mode of ["individual", "reconstruct"] as const) {
@@ -1507,6 +1446,180 @@ for (const action of ["delete", "undo", "replace"] as const) {
     expect(store.snapshot().nodes[`${id}_camera`]).toBeUndefined();
   });
 }
+
+test("Atlas queues two variants of one frozen shot and keeps only the editor's choice", async () => {
+  const gate = Promise.withResolvers<void>();
+  const { store, runner, commands, camera, requests } =
+    await generatedSceneFixture(true, {
+      beforeAtlas: () => gate.promise,
+      atlasCaption: (seed) => `Enhanced description for ${seed}`,
+    });
+  cleanups.push(async () => gate.resolve());
+  const { atlasReview } = await import("../../../core/atlas-review");
+  const { atlasContext } = await import("../../../core/captures");
+  const before = Object.keys(store.current.nodes);
+  camera.extrinsics.position = [2, 1.5, 0];
+  const caption = "Look into the flooded pump room";
+  const requestText = "Let’s see the pump room.";
+  const request = {
+    type: "generation.submit",
+    request: {
+      kind: "view.pair",
+      camera,
+      prompt: caption,
+      requestText,
+      seed: 270,
+    },
+  } as const;
+  const first = await commands.execute(request, { requestId: "pair" });
+  const ids = first.jobIds!;
+  expect(ids).toHaveLength(2);
+  expect(
+    (await commands.execute(request, { requestId: "pair" })).jobIds,
+  ).toEqual(ids);
+  expect(atlasReview(store.current)?.phase).toBe("generating");
+  expect(atlasReview(store.current)?.requestText).toBe(requestText);
+  await expect(commands.execute(request)).rejects.toThrow(
+    "open Atlas comparison",
+  );
+  await expect(
+    commands.execute(
+      {
+        type: "atlas.review",
+        id: ids[0],
+        decision: { kind: "keep", jobId: ids[1] },
+      },
+      { interactive: true },
+    ),
+  ).rejects.toThrow("Wait for two");
+  gate.resolve();
+  const jobs = await Promise.all(ids.map((id) => done(store, id)));
+  expect(jobs.map((job) => job.status)).toEqual(["succeeded", "succeeded"]);
+  expect(requests).toHaveLength(2);
+  expect(requests.map((r) => r.modelParameters.seed).sort()).toEqual([
+    270, 271,
+  ]);
+  expect(requests.map((r) => r.prompt)).toEqual([caption, caption]);
+  expect(requests.map((r) => r.enhancePrompt)).toEqual([true, true]);
+  expect(store.current.settings.enhancedCaption).toBeUndefined();
+  expect(requests[0].targetCameras).toEqual(requests[1].targetCameras);
+  expect(requests[0].targetCameras[0].extrinsics.position).toEqual([2, 1.5, 0]);
+  expect(jobs[0].contextSnapshot).toEqual(jobs[1].contextSnapshot);
+  expect(Object.keys(store.current.nodes)).toEqual(before);
+  expect(atlasReview(store.current)?.phase).toBe("review");
+  await expect(
+    commands.execute({ type: "frames.integrate", jobId: ids[0] }),
+  ).rejects.toThrow("comparison");
+  await expect(
+    commands.execute({
+      type: "assets.place",
+      assetIds: [jobs[0].frameAssetIds![0]],
+    }),
+  ).rejects.toThrow("comparison");
+  const choice = {
+    type: "atlas.review",
+    id: ids[0],
+    decision: { kind: "keep", jobId: ids[1] },
+  } as const;
+  await expect(commands.execute(choice)).rejects.toThrow("in the editor");
+  const kept = await commands.execute(choice, { interactive: true });
+  expect(store.current.settings.enhancedCaption).toEqual({
+    prompt: caption,
+    text: "Enhanced description for 271",
+  });
+
+  const winner = kept.nodeIds![0];
+  expect(store.current.nodes[winner].assetId).toBe(jobs[1].frameAssetIds![0]);
+  expect(
+    Object.values(store.current.nodes).some(
+      (n) => n.assetId === jobs[0].frameAssetIds![0],
+    ),
+  ).toBe(false);
+  expect(atlasContext(store.current).map(({ node }) => node.id)).toContain(
+    winner,
+  );
+  await expect(commands.execute(choice, { interactive: true })).rejects.toThrow(
+    "no longer open",
+  );
+
+  await commands.execute({ type: "history.undo" });
+  expect(store.current.nodes[winner]).toBeUndefined();
+  expect(atlasReview(store.current)?.phase).toBe("keep");
+  await commands.execute({ type: "history.redo" });
+  expect(store.current.nodes[winner]).toBeDefined();
+
+  const nextCamera = structuredClone(camera);
+  nextCamera.extrinsics.position = [4, 1.5, 0];
+  const next = await commands.execute({
+    type: "generation.submit",
+    request: {
+      kind: "view.pair",
+      camera: nextCamera,
+      requestText: "Step right toward the stairs.",
+    },
+  });
+  const nextJobs = await Promise.all(next.jobIds!.map((id) => done(store, id)));
+  expect(requests.slice(2).map((r) => r.prompt)).toEqual([
+    "Enhanced description for 271",
+    "Enhanced description for 271",
+  ]);
+  expect(requests.slice(2).map((r) => r.enhancePrompt)).toEqual([false, false]);
+  expect(
+    requests.slice(2).map((r) => r.targetCameras[0].extrinsics.position),
+  ).toEqual([
+    [4, 1.5, 0],
+    [4, 1.5, 0],
+  ]);
+
+  expect(
+    nextJobs.every(
+      (job) => job.input.kind === "atlas" && job.input.nodeIds.includes(winner),
+    ),
+  ).toBe(true);
+  await runner.close();
+  await store.close();
+  const reopened = await new WorkspaceStore(store.root).init();
+  cleanups.push(() => reopened.close());
+  expect(atlasReview(reopened.current)?.phase).toBe("review");
+  expect(atlasReview(reopened.current)?.id).toBe(next.jobId);
+  expect(atlasReview(reopened.current)?.requestText).toBe(
+    "Step right toward the stairs.",
+  );
+  expect(atlasContext(reopened.current).map(({ node }) => node.id)).toEqual([
+    "source-capture",
+    winner,
+  ]);
+});
+
+test("camera-only Atlas requests use the current description before enhancement and discard on missing depth", async () => {
+  const { store, commands, camera, requests } =
+    await generatedSceneFixture(false);
+  await commands.execute({
+    type: "workspace.update",
+    settings: { prompt: "Service tunnel" },
+  });
+  const before = Object.keys(store.current.nodes);
+  camera.extrinsics.position[0] = 2;
+  const { jobId, jobIds } = await commands.execute({
+    type: "generation.submit",
+    request: { kind: "view.pair", camera },
+  });
+  for (const id of jobIds!)
+    expect((await done(store, id)).error).toContain("without posed depth");
+  expect(requests.map((r) => r.prompt)).toEqual([
+    "Service tunnel",
+    "Service tunnel",
+  ]);
+  expect(requests.map((r) => r.enhancePrompt)).toEqual([false, false]);
+  const { atlasReview } = await import("../../../core/atlas-review");
+  expect(atlasReview(store.current)?.phase).toBe("failed");
+  await commands.execute(
+    { type: "atlas.review", id: jobId!, decision: { kind: "discard" } },
+    { interactive: true },
+  );
+  expect(atlasReview(store.current)?.phase).toBe("discard");
+  expect(Object.keys(store.current.nodes)).toEqual(before);
+});
 
 test("enhanced captions are cached, reused, cleared, and invalidated by prompt edits", async () => {
   const { store, commands, camera, requests } = await generatedSceneFixture();

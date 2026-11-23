@@ -35,22 +35,24 @@ type GenerationWorkspace = Pick<
   | "jobs"
   | "imageDrafts"
   | "imageVersions"
-> & {
-  settings: Pick<
-    Workspace["settings"],
-    | "viewingCameraId"
-    | "viewportCamera"
-    | "editor2d"
-    | "atlas"
-    | "atlasPanel"
-    | "prompt"
-    | "atlasReturnDepth"
-    | "fps"
-    | "targetFrameCount"
-    | "seed"
-    | "enhancePrompt"
-  >;
-};
+> &
+  Partial<Pick<Workspace, "atlasRound">> & {
+    settings: Pick<
+      Workspace["settings"],
+      | "viewingCameraId"
+      | "viewportCamera"
+      | "editor2d"
+      | "atlas"
+      | "atlasPanel"
+      | "prompt"
+      | "atlasReturnDepth"
+      | "fps"
+      | "targetFrameCount"
+      | "seed"
+      | "enhancePrompt"
+    > &
+      Partial<Pick<Workspace["settings"], "enhancedCaption">>;
+  };
 
 /** Capture IDs for Atlas context; `preferSelection` uses selected captures when any qualify. */
 function contextCaptureIds(
@@ -73,6 +75,18 @@ function contextCaptureIds(
   return spatialContextFrames(workspace)
     .filter((node) => participating.has(node.id))
     .map((node) => captureFrame(workspace, node.id).node.id);
+}
+
+export function atlasPairCaption(
+  workspace: Pick<GenerationWorkspace, "atlasRound" | "settings">,
+  prompt?: string,
+) {
+  if (prompt !== undefined) return prompt;
+  const { atlasRound, settings } = workspace;
+  return (
+    settings.prompt ||
+    (atlasRound?.decision?.kind === "keep" ? atlasRound.caption : "")
+  );
 }
 
 export function generationInput(
@@ -153,6 +167,24 @@ export function generationInput(
         fps: r.fps,
         maxFrames: r.maxFrames,
         integrate: r.integrate,
+      };
+    }
+    case "view.pair": {
+      const caption = atlasPairCaption(workspace, r.prompt);
+      const cached = s.enhancedCaption;
+      return {
+        kind: "atlas",
+        nodeIds: atlasContext(workspace, r.nodeIds, null).map(
+          ({ node }) => node.id,
+        ),
+        cameras: [r.camera],
+        prompt:
+          r.prompt === undefined && cached?.prompt === caption
+            ? cached.text
+            : caption,
+        enhancePrompt: r.prompt !== undefined,
+        returnDepth: true,
+        seed: r.seed ?? s.seed,
       };
     }
     case "view": {

@@ -3,7 +3,7 @@ import { Window } from "happy-dom";
 import { Euler, PerspectiveCamera } from "three";
 import { FlyControls } from "./fly";
 
-test("right-drag looks with the pointer while two-finger scroll keeps its direction and pinch only zooms", () => {
+test("viewport wheel gestures continue across canvas labels and pinch only zooms", () => {
   const window = new Window();
   const previous = Object.fromEntries(
     ["window", "document"].map((key) => [
@@ -19,7 +19,10 @@ test("right-drag looks with the pointer while two-finger scroll keeps its direct
     configurable: true,
     value: window.document,
   });
+  const surface = window.document.createElement("div");
   const canvas = window.document.createElement("canvas");
+  const label = window.document.createElement("button");
+  surface.append(canvas, label);
   Object.assign(canvas, {
     setPointerCapture() {},
     hasPointerCapture() {
@@ -27,15 +30,19 @@ test("right-drag looks with the pointer while two-finger scroll keeps its direct
     },
   });
   const camera = new PerspectiveCamera(50);
-  let releases = 0;
+  let releases = 0,
+    commits = 0;
   const controls = new FlyControls(
     camera,
     canvas as unknown as HTMLCanvasElement,
     () => true,
-    () => {},
+    () => {
+      commits++;
+    },
     () => {
       releases++;
     },
+    surface as unknown as HTMLElement,
   );
   try {
     canvas.dispatchEvent(
@@ -61,15 +68,32 @@ test("right-drag looks with the pointer while two-finger scroll keeps its direct
     );
     camera.quaternion.identity();
     canvas.dispatchEvent(
-      new window.WheelEvent("wheel", { deltaX: 20, deltaY: 10 }),
+      new window.WheelEvent("wheel", { bubbles: true, deltaX: 20, deltaY: 10 }),
     );
     const scroll = new Euler().setFromQuaternion(camera.quaternion, "YXZ");
     expect(scroll.y).toBeCloseTo(0.06);
     expect(scroll.x).toBeCloseTo(0.03);
+    const beforeLabel = commits;
+    canvas.dispatchEvent(new window.PointerEvent("pointerleave"));
+    label.dispatchEvent(
+      new window.WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaX: 20,
+        deltaY: 10,
+      }),
+    );
+    expect(commits).toBe(beforeLabel);
+    const afterLabel = new Euler().setFromQuaternion(camera.quaternion, "YXZ");
+    expect(afterLabel.y).toBeCloseTo(0.12);
+    expect(afterLabel.x).toBeCloseTo(0.06);
     const rotation = camera.quaternion.clone();
-    const pinch = new window.WheelEvent("wheel", { deltaY: -20 });
+    const pinch = new window.WheelEvent("wheel", {
+      bubbles: true,
+      deltaY: -20,
+    });
     Object.defineProperty(pinch, "ctrlKey", { value: true });
-    canvas.dispatchEvent(pinch);
+    label.dispatchEvent(pinch);
     expect(camera.fov).toBeLessThan(50);
     expect(camera.quaternion.equals(rotation)).toBe(true);
     controls.stop();
@@ -81,7 +105,7 @@ test("right-drag looks with the pointer while two-finger scroll keeps its direct
     expect(camera.position.toArray()).toEqual([99, 99, 99]);
     expect(camera.fov).toBeCloseTo(90 * Math.exp(-0.2));
     controls.stop();
-    Object.assign(canvas, { matches: () => true });
+    Object.assign(surface, { matches: () => true });
     camera.position.set(4, 5, 6);
     const before = releases;
     controls.keyDown(

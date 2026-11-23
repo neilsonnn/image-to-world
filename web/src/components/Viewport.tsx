@@ -326,8 +326,8 @@ export function Viewport({
   const [captureTick, setCaptureTick] = useState(0);
   const [playReady, setPlayReady] = useState(false);
   const [syncTick, setSyncTick] = useState(0);
-  const [showInput, setShowInput] = useState(false);
-  const [inputOpacity, setInputOpacity] = useState(100);
+  const [showInput, setShowInput] = useState(true);
+  const [inputOpacity, setInputOpacity] = useState(75);
   const viewingId = workspace.settings.viewingCameraId;
   const compared = useMemo(
     () =>
@@ -335,7 +335,7 @@ export function Viewport({
     [workspace.assets, workspace.nodes, viewingId, previewCamera],
   );
   useEffect(() => {
-    setShowInput(false);
+    setShowInput(true);
   }, [viewingId]);
   const [pivotPlacement, setPivotPlacement] =
     useState<PivotPlacement>("center");
@@ -543,6 +543,7 @@ export function Viewport({
       () => {
         if (!runtime.play) releaseForNavigation();
       },
+      host,
     );
     const runtime: Runtime = {
       scene,
@@ -1816,6 +1817,67 @@ export function Viewport({
       {!playing && showFeed && (
         <ViewportFeed go={(event) => goToActivity.current(event)} />
       )}
+      {!playing && compared && (
+        <div className="view-frame-actions floating-toolbar">
+          <FrameLabel
+            slug={slugs.get(compared.frameId)!}
+            tasks={frameTasks(
+              workspace.nodes[compared.frameId],
+              workspace.jobs,
+            )}
+            selected={workspace.selection.includes(compared.frameId)}
+            onSelect={() =>
+              void commandRef
+                .current({ type: "selection.set", ids: [compared.frameId] })
+                .catch((e) => errorRef.current(message(e)))
+            }
+          />
+          <Button
+            size="1"
+            color="gray"
+            variant="surface"
+            aria-label="Input"
+            aria-pressed={showInput}
+            onClick={() => setShowInput(!showInput)}
+          >
+            <ImageSquare aria-hidden="true" />
+            <span className="toolbar-label">Input</span>
+          </Button>
+          <FrameEdit
+            key={compared.imageId + compared.asset.id}
+            frameId={compared.frameId}
+            asset={compared.asset}
+          />
+          <ToolbarPopover
+            label="Reference image settings"
+            icon={<Gear />}
+            width={200}
+            side="top"
+          >
+            <label className="settings-popover">
+              <Flex as="span" justify="between" align="center">
+                <Text size="1">Input opacity</Text>
+                <Text size="1" color="gray">
+                  {inputOpacity}%
+                </Text>
+              </Flex>
+              <input
+                className="frame-input-opacity"
+                type="range"
+                aria-label="Input opacity"
+                aria-valuetext={`${inputOpacity}%`}
+                min={0}
+                max={100}
+                step={1}
+                value={inputOpacity}
+                onChange={(event) =>
+                  setInputOpacity(event.currentTarget.valueAsNumber)
+                }
+              />
+            </label>
+          </ToolbarPopover>
+        </div>
+      )}
       <div ref={hostRef} className="viewport-canvas">
         {!playing && (
           <AgentCursors layer={cursorLayer} anchors={cursorAnchors} />
@@ -1854,67 +1916,6 @@ export function Viewport({
                 </div>
               );
             })}
-          </div>
-        )}
-        {!playing && compared && (
-          <div className="view-frame-actions floating-toolbar">
-            <FrameLabel
-              slug={slugs.get(compared.frameId)!}
-              tasks={frameTasks(
-                workspace.nodes[compared.frameId],
-                workspace.jobs,
-              )}
-              selected={workspace.selection.includes(compared.frameId)}
-              onSelect={() =>
-                void commandRef
-                  .current({ type: "selection.set", ids: [compared.frameId] })
-                  .catch((e) => errorRef.current(message(e)))
-              }
-            />
-            <Button
-              size="1"
-              color="gray"
-              variant="surface"
-              aria-label="Input"
-              aria-pressed={showInput}
-              onClick={() => setShowInput(!showInput)}
-            >
-              <ImageSquare aria-hidden="true" />
-              <span className="toolbar-label">Input</span>
-            </Button>
-            <FrameEdit
-              key={compared.imageId + compared.asset.id}
-              frameId={compared.frameId}
-              asset={compared.asset}
-            />
-            <ToolbarPopover
-              label="Reference image settings"
-              icon={<Gear />}
-              width={200}
-              side="top"
-            >
-              <label className="settings-popover">
-                <Flex as="span" justify="between" align="center">
-                  <Text size="1">Input opacity</Text>
-                  <Text size="1" color="gray">
-                    {inputOpacity}%
-                  </Text>
-                </Flex>
-                <input
-                  className="frame-input-opacity"
-                  type="range"
-                  aria-label="Input opacity"
-                  aria-valuetext={`${inputOpacity}%`}
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={inputOpacity}
-                  onChange={(event) =>
-                    setInputOpacity(event.currentTarget.valueAsNumber)
-                  }
-                />
-              </label>
-            </ToolbarPopover>
           </div>
         )}
         {playing && (

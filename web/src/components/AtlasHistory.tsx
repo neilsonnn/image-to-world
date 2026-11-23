@@ -34,9 +34,10 @@ export function AtlasHistory() {
   const jobs = Object.values(workspace.jobs)
     .filter(
       (job): job is GenerationJob =>
-        job.input.kind === "atlas" ||
-        job.input.kind === "video" ||
-        job.input.kind === "reconstruct",
+        !job.choiceRoundId &&
+        (job.input.kind === "atlas" ||
+          job.input.kind === "video" ||
+          job.input.kind === "reconstruct"),
     )
     .sort((a, b) => b.createdAt - a.createdAt);
   const selectedJob =

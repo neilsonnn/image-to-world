@@ -54,14 +54,15 @@ await cli(
 const [image] = await cli("import", path.resolve(positionals[0]));
 const {
   nodeIds: [frame],
+  jobIds,
 } = await cli(
   "scene",
   "place",
   image.id,
-  "--reference-only",
   "--camera",
   await file("hero", heroCamera),
 );
+for (const id of jobIds) await cli("jobs", "wait", id, "--ready");
 const placed = Object.values((await cli("state")).nodes);
 const camera = placed.find((n) => n.parentId === frame && n.kind === "camera");
 const points = placed.find((n) => n.parentId === frame && n.kind === "points");

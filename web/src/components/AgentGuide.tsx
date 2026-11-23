@@ -6,9 +6,10 @@ import { PanelHeader, ToolbarIconButton } from "./ui";
 function agentMessage(editorUrl: string) {
   return [
     `Work in my open image-to-world project at ${editorUrl}. Pass --url '${editorUrl}' to its CLI and run status to confirm the workspace.`,
-    "Use OpenAI’s SVG & 3D Design skill for construction and visual review. Use image-to-world as the authoring tool. Read the editor skill at https://github.com/neilsonnn/image-to-world/blob/main/skills/image-to-world/SKILL.md.",
+    "Before scene work, confirm status reports worldLabsConfigured. If a key is missing, pause and ask me to open Workspace settings → Environment variables, create a key at https://atlas.worldlabs.ai/api-keys and save it as WLT_API_KEY.",
+    "Use OpenAI’s SVG & 3D Design skill for construction and visual review. Use image-to-world as the authoring tool. Read skills/image-to-world/SKILL.md in your editor checkout.",
     "Give each Frame a distinct two- or three-word frameSlug. Use frame work <frame-id> with a short task description and --actor as you build. Report done with the same actor when you finish.",
-    "Pose and ground the inputs first. For multiple views, ask who will arrange them. Keep disconnected input volumes apart, then use sparse Atlas views to connect the gaps. Turn Frame guides off before building the parametric environment and props. Check the result through several cameras.",
+    "Ask where to go next in chat as soon as Atlas posing succeeds. Run grounding and visual checks while I answer. Always offer a camera-only option. Use atlas pair --camera shot.json to keep the current description, and add --prompt only if I ask to change it. Pass my wording with --request-text so I can see it above the options. Let me choose in the editor and use atlas round --wait to read my choice. Ask again immediately and keep going until I explicitly ask to stop or start the 3D build.",
   ].join("\n\n");
 }
 

@@ -33,7 +33,6 @@ import { applyCommand } from "../../../core/commands";
 import {
   atlasContext,
   createCapture,
-  createReferenceCapture,
   spatialContextFrames,
 } from "../../../core/captures";
 import { identity, type Camera } from "../../../core/schema";
@@ -112,13 +111,24 @@ export class JobRunner {
     id = `job_${randomUUID()}`,
     parentJob?: Job,
     context: CommandContext = {},
+    comparison?: {
+      jobId: string;
+      caption: string;
+      requestText?: string;
+      updateCaption: boolean;
+    },
   ) {
     if (this.store.current.jobs[id]) return id;
     const parsed = jobInputSchema.parse(input);
-    if (parsed.kind === "image") {
-      falClient();
+    if (parsed.kind === "image") falClient();
+    if (
+      ["pose", "reconstruct", "atlas", "splats", "video", "image"].includes(
+        parsed.kind,
+      )
+    )
       worldLabs();
-    }
+    if (comparison && parsed.kind !== "atlas")
+      throw new Error("View pairs require Atlas");
     let snapshot = {
       ...this.store.current,
       settings: structuredClone(this.store.current.settings),
@@ -377,9 +387,16 @@ export class JobRunner {
     const pinnedAssets = source
       ? await this.store.withJobAssets(source, pin)
       : await pin();
-    await this.store.updateSceneAndJob(id, (state) => {
+    const jobIds: [string, string] | [string] = comparison
+      ? [id, comparison.jobId]
+      : [id];
+    await this.store.updateSceneAndJobs(jobIds, (state) => {
       checkPreconditions(state, context);
       if (state.jobs[id]) return;
+      if (jobIds.length === 2 && state.atlasRound && !state.atlasRound.decision)
+        throw new Error(
+          "Choose or discard the open Atlas comparison before generating another pair",
+        );
       if (parentJob && state.jobs[parentJob.id]?.status === "cancelled")
         throw new Error("Parent generation was cancelled");
       if (parsed.kind === "pose" || parsed.kind === "image") {
@@ -411,6 +428,7 @@ export class JobRunner {
       }
       if (
         context.interactive &&
+        !comparison &&
         ["atlas", "video", "reconstruct"].includes(parsed.kind)
       )
         state.settings.atlasPanel.jobId = id;
@@ -462,9 +480,28 @@ export class JobRunner {
         outputAssetIds: [],
       };
       state.jobs[id] = job;
+      if (comparison && jobIds.length === 2 && parsed.kind === "atlas") {
+        const second = jobIds[1];
+        job.choiceRoundId = id;
+        const alternate: Job = {
+          ...job,
+          id: second,
+          resultOwnerId: second,
+          input: { ...parsed, seed: parsed.seed + 1 },
+        };
+        state.jobs[second] = alternate;
+        state.atlasRound = {
+          id,
+          caption: comparison.caption,
+          requestText: comparison.requestText,
+          updateCaption: comparison.updateCaption,
+          jobIds,
+        };
+      }
       if (!parentJob) claimResultTargets(state, job);
     });
-    this.reportJob(this.store.current.jobs[id], "summary");
+    for (const jobId of jobIds)
+      this.reportJob(this.store.current.jobs[jobId], "summary");
     this.pump();
     return id;
   }
@@ -489,12 +526,20 @@ export class JobRunner {
       )
     )
       throw new Error("Choose available images, meshes, splats, or videos");
+    for (const asset of assets) {
+      if (
+        asset.jobId &&
+        snapshot.jobs[asset.jobId]?.choiceRoundId &&
+        !snapshot.resultApplications[asset.jobId]?.includes("frames")
+      )
+        throw new Error(
+          "Keep this Atlas view from its comparison in the editor",
+        );
+    }
     const placement = camera ?? currentCamera(snapshot);
     const jobIds: string[] = [];
     const reconstruct = mode === "reconstruct";
     const images = assets.filter((asset) => asset.kind === "image");
-    if (mode === "reference" && images.length !== assets.length)
-      throw new Error("Reference placement accepts image assets only");
     if (reconstruct) {
       if (images.length < 2)
         throw new Error("Choose at least two images to reconstruct together");
@@ -517,16 +562,6 @@ export class JobRunner {
     const needsMove: string[] = [];
     for (const asset of assets) {
       if (reconstruct && asset.kind === "image") continue;
-      if (mode === "reference") {
-        const id = `node_${randomUUID()}`;
-        const image = await loadImage(
-          (await this.store.assetFile(asset.id)).file,
-        );
-        ready.push(...createReferenceCapture(asset, id, placement, image));
-        placed.push(id);
-        needsMove.push(id);
-        continue;
-      }
       if (asset.kind === "image" && !(asset.camera && asset.depthAssetId)) {
         const jobId = await this.submit(
           {
@@ -706,6 +741,7 @@ export class JobRunner {
       signal.throwIfAborted();
       const assets: Asset[] = [];
       const addedNodes: string[] = [];
+      let enhancedViewCaption: string | undefined;
       if (job.input.kind === "render")
         assets.push(...(await this.renderer.render(job, signal)));
       if (job.input.kind === "probe")
@@ -1042,8 +1078,11 @@ export class JobRunner {
           const response = completed.response as AtlasGenerateResponse;
           const request = job.request as AtlasGenerateRequest | undefined;
           const prompt = job.input.prompt;
-          if (request?.enhancePrompt && response.promptUsed?.trim()) {
-            const text = response.promptUsed;
+          const enhanced = request?.enhancePrompt
+            ? response.promptUsed?.trim()
+            : undefined;
+          if (job.choiceRoundId) enhancedViewCaption = enhanced;
+          else if (enhanced) {
             await this.store.updateScene((state) => {
               if (state.jobs[id].status === "cancelled") return;
               if (
@@ -1053,7 +1092,7 @@ export class JobRunner {
               )
                 return;
               // Keep the first caption for this description until it is explicitly cleared.
-              state.settings.enhancedCaption ??= { prompt, text };
+              state.settings.enhancedCaption ??= { prompt, text: enhanced };
             });
           }
         }
@@ -1079,6 +1118,11 @@ export class JobRunner {
             throw new Error(
               `World Labs returned ${frames.length} of ${expected} frames`,
             );
+          if (
+            (job.input.kind === "pose" || job.choiceRoundId) &&
+            frames.some((frame) => !frame.depth)
+          )
+            throw new Error("World Labs returned an image without posed depth");
           if (job.input.kind === "pose" && frames.length > 1) {
             job.poseOrigin = frames[0].camera.extrinsics.position;
             await this.patch(id, { poseOrigin: job.poseOrigin });
@@ -1102,7 +1146,7 @@ export class JobRunner {
                 await saveFrame(this.store, job, frames[i], i, signal),
               );
             }
-          if (job.input.kind === "atlas")
+          if (job.input.kind === "atlas" && !job.choiceRoundId)
             addedNodes.push(
               ...(await integrateAssets(
                 this.store,
@@ -1152,6 +1196,7 @@ export class JobRunner {
         id,
         {
           status: "succeeded",
+          ...(enhancedViewCaption && { enhancedViewCaption }),
           outputAssetIds: assets.map((a) => a.id),
           frameAssetIds: assets
             .filter((a) => a.kind === "image")

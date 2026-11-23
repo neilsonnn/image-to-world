@@ -1,7 +1,10 @@
 import { Button, Dialog, Flex, Grid, Text, TextField } from "@radix-ui/themes";
 import { Plus, X } from "@phosphor-icons/react";
 import { useState } from "react";
-import type { EnvironmentStatus } from "../../../core/environment";
+import {
+  worldLabsKeyUrl,
+  type EnvironmentStatus,
+} from "../../../core/environment";
 import { useClientState, useImageToWorldClient } from "../lib/client";
 import { PanelHeader, ToolbarIconButton } from "./ui";
 
@@ -52,7 +55,12 @@ export function EnvironmentEditor({ onClose }: { onClose: () => void }) {
           }
         />
         <Dialog.Description size="2" mb="3">
-          Shared local .env configuration. Add or update any variable by name.
+          Add or update shared local environment variables. Atlas posing and
+          view generation require WLT_API_KEY.{" "}
+          <a href={worldLabsKeyUrl} target="_blank" rel="noopener noreferrer">
+            Create a World Labs API key
+          </a>
+          .
         </Dialog.Description>
         <form
           onSubmit={async (event) => {

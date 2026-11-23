@@ -100,10 +100,6 @@ export function captureFrame(
   const fail = (reason: string): never => {
     throw new Error(`${capture.name}: ${reason}`);
   };
-  if (image.assetId && !points.assetId && !points.geometryAssetId)
-    return fail(
-      "reference only. Estimate posed depth to use this Frame in Atlas.",
-    );
   const asset = nodeImageAsset(workspace, points);
   if (!asset?.depthAssetId || !asset.camera || asset.missing)
     return fail("points need available posed depth");
@@ -229,8 +225,8 @@ export function atlasContextNodes(
   const selected =
     ids && new Set(ids.flatMap((id) => captureRoot(workspace, id)?.id ?? []));
   const settings = contextSettings(workspace, pathId);
-  // A complete local reference Frame has an intentionally unbound points slot.
-  // Explicit RGBD requests still validate that slot and explain the missing depth.
+  // An image-only guide cannot contribute depth to Atlas. Explicit RGBD
+  // requests still validate that slot and explain the missing depth.
   const referenceCandidates = new Set(
     Object.values(workspace.nodes)
       .filter((n) => n.kind === "points" && !n.assetId && !n.geometryAssetId)
@@ -372,41 +368,6 @@ export function createCapture(
       assetId: asset.id,
     },
   ];
-}
-
-/** An image-only Frame has a ground-level pivot and the exact requested camera.
- * Cover the source-image grid uniformly, retaining off-center principal points. */
-export function createReferenceCapture(
-  asset: Pick<Asset, "id" | "name">,
-  id: string,
-  placement: Camera,
-  size: { width: number; height: number },
-) {
-  const lens = placement.intrinsics;
-  const scale = Math.max(size.width / lens.width, size.height / lens.height);
-  const projection = {
-    width: size.width,
-    height: size.height,
-    fx: lens.fx * scale,
-    fy: lens.fy * scale,
-    cx: size.width / 2 + (lens.cx - lens.width / 2) * scale,
-    cy: size.height / 2 + (lens.cy - lens.height / 2) * scale,
-  };
-  // Local references bind only the source pixels, even for a library asset
-  // which happened to come from a previous reconstruction.
-  const [frame, camera, image, points] = createCapture(
-    { id: asset.id, name: asset.name },
-    id,
-    placement,
-  );
-  camera.transform = matrixTransform(
-    worldMatrix(frame, {}).invert().multiply(cameraMatrix(placement)),
-  );
-  camera.projection = projection;
-  image.projection = projection;
-  points.transform = structuredClone(camera.transform);
-  points.assetId = undefined;
-  return [frame, camera, image, points];
 }
 
 export function completeCapture(

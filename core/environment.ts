@@ -1,3 +1,4 @@
+export const worldLabsKeyUrl = "https://atlas.worldlabs.ai/api-keys";
 import { z } from "zod";
 
 // Suggestions for an empty config, not an allowlist of supported variable names.

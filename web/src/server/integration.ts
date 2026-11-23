@@ -1,34 +1,34 @@
 import { imageIndex } from "../../../core/images";
-import type { SceneNode, Camera } from "../../../core/schema";
+import type { Camera, Workspace } from "../../../core/schema";
 import { applyCommand } from "../../../core/commands";
 import { createCapture } from "../../../core/captures";
 import type { WorkspaceStore } from "./store";
 
-export async function integrateAssets(
-  store: WorkspaceStore,
+type Placement = {
+  camera: Camera;
+  parentId?: string | null;
+  beforeId?: string | null;
+};
+
+export function integrateFrames(
+  state: Workspace,
   assetIds: string[],
-  signal?: AbortSignal,
-  placement?: {
-    camera: Camera;
-    parentId?: string | null;
-    beforeId?: string | null;
-  },
+  placement?: Placement,
   jobId?: string,
+  name?: string,
 ) {
-  const snapshot = store.current;
-  const captures: SceneNode[][] = [];
-  const existing = imageIndex(snapshot).capturesByAsset;
+  if (jobId && state.resultApplications[jobId]?.includes("frames")) return [];
+  const existing = imageIndex(state).capturesByAsset;
   const origin = placement
-    ? snapshot.assets[assetIds[0]]?.camera?.extrinsics.position
+    ? state.assets[assetIds[0]]?.camera?.extrinsics.position
     : undefined;
-  for (const assetId of [...new Set(assetIds)]) {
-    signal?.throwIfAborted();
-    if (existing.has(assetId)) continue;
-    const asset = snapshot.assets[assetId];
-    if (!asset?.camera || asset.missing)
+  const added = [...new Set(assetIds)].flatMap((assetId) => {
+    if (existing.has(assetId)) return [];
+    const asset = state.assets[assetId];
+    if (!asset?.camera || asset.missing || asset.trashedAt)
       throw new Error("Reconstruct these frames before integrating them");
     const id = `node_${asset.id}`;
-    if (snapshot.nodes[id]) continue;
+    if (state.nodes[id]) return [];
     const capture = createCapture(
       asset,
       id,
@@ -36,41 +36,41 @@ export async function integrateAssets(
       undefined,
       origin,
     );
-    captures.push(capture);
-  }
-  signal?.throwIfAborted();
-  if (!captures.length) return [];
+    if (name) capture[0].name = name;
+    return capture;
+  });
+  if (!added.length) return [];
+  applyCommand(state, {
+    type: "edit.batch",
+    commands: [
+      { type: "nodes.put", nodes: added },
+      ...(placement?.parentId !== undefined || placement?.beforeId !== undefined
+        ? [
+            {
+              type: "nodes.move" as const,
+              ids: added
+                .filter((node) => node.parentId === null)
+                .map((node) => node.id),
+              parentId: placement.parentId ?? null,
+              beforeId: placement.beforeId,
+            },
+          ]
+        : []),
+    ],
+  });
+  if (jobId) (state.resultApplications[jobId] ??= []).push("frames");
+  return added.map((node) => node.id);
+}
+
+export function integrateAssets(
+  store: WorkspaceStore,
+  assetIds: string[],
+  signal?: AbortSignal,
+  placement?: Placement,
+  jobId?: string,
+) {
   return store.updateScene((state) => {
     signal?.throwIfAborted();
-    if (jobId && state.resultApplications[jobId]?.includes("frames")) return [];
-    const current = imageIndex(state).capturesByAsset;
-    const added = captures.flatMap((capture) =>
-      state.nodes[capture[0].id] || current.has(capture[0].assetId!)
-        ? []
-        : capture,
-    );
-    if (added.length) {
-      applyCommand(state, {
-        type: "edit.batch",
-        commands: [
-          { type: "nodes.put", nodes: added },
-          ...(placement?.parentId !== undefined ||
-          placement?.beforeId !== undefined
-            ? [
-                {
-                  type: "nodes.move" as const,
-                  ids: added
-                    .filter((node) => node.parentId === null)
-                    .map((node) => node.id),
-                  parentId: placement.parentId ?? null,
-                  beforeId: placement.beforeId,
-                },
-              ]
-            : []),
-        ],
-      });
-    }
-    if (jobId) (state.resultApplications[jobId] ??= []).push("frames");
-    return added.map((node) => node.id);
+    return integrateFrames(state, assetIds, placement, jobId);
   });
 }

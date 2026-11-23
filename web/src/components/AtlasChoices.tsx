@@ -1,6 +1,14 @@
-import { Images, SpinnerGap } from "@phosphor-icons/react";
-import { Button, Dialog, Flex, Text } from "@radix-ui/themes";
-import { useEffect, useState } from "react";
+import {
+  ArrowClockwise,
+  Check,
+  Images,
+  SpinnerGap,
+  TrashSimple,
+  WarningCircle,
+  X,
+} from "@phosphor-icons/react";
+import { Dialog } from "@radix-ui/themes";
+import { useEffect, useRef, useState } from "react";
 import { atlasReview } from "../../../core/atlas-review";
 import { assetUrl } from "../../../core/schema";
 import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
@@ -10,6 +18,7 @@ export function AtlasChoices() {
   const workspace = useWorkspaceData(["atlasRound", "jobs", "assets"], []);
   const { command } = useImageToWorldClient();
   const round = atlasReview(workspace);
+  const dialog = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -42,88 +51,33 @@ export function AtlasChoices() {
         <Images />
       </ToolbarIconButton>
       <Dialog.Root open={open} onOpenChange={setOpen}>
-        <Dialog.Content maxWidth="960px" className="atlas-choices">
-          <Dialog.Title mb="1">Choose the next view</Dialog.Title>
-          <Dialog.Description size="2" color="gray" mb="3">
-            {round.caption}
+        <Dialog.Content
+          ref={dialog}
+          maxWidth="960px"
+          className="atlas-choices"
+          tabIndex={-1}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            dialog.current?.focus();
+          }}
+        >
+          <Dialog.Title className="atlas-choice-accessible">
+            Choose the next view
+          </Dialog.Title>
+          <Dialog.Description className="atlas-choice-accessible">
+            {round.caption || "Compare the Atlas views and choose one to keep."}
           </Dialog.Description>
-          <div className="atlas-choice-grid">
-            {round.candidates.map((candidate, index) => {
-              const label = index === 0 ? "View A" : "View B";
-              const asset = candidate.assetId
-                ? workspace.assets[candidate.assetId]
-                : undefined;
-              return (
-                <section
-                  className="atlas-choice"
-                  aria-label={label}
-                  key={candidate.id}
-                >
-                  {asset ? (
-                    <img
-                      src={assetUrl(asset)}
-                      alt={label}
-                      className="atlas-choice-image"
-                    />
-                  ) : (
-                    <div
-                      className="atlas-choice-image atlas-choice-status"
-                      role="status"
-                    >
-                      {candidate.status === "running" && (
-                        <SpinnerGap className="spin" aria-hidden />
-                      )}
-                      <Text size="2">
-                        {candidate.error ??
-                          candidate.message ??
-                          candidate.status}
-                      </Text>
-                    </div>
-                  )}
-                  <Flex justify="end" align="center">
-                    {["failed", "cancelled"].includes(candidate.status) ? (
-                      <Button
-                        size="1"
-                        color="gray"
-                        variant="surface"
-                        disabled={busy}
-                        onClick={() =>
-                          void run({ type: "jobs.retry", id: candidate.id })
-                        }
-                      >
-                        Retry {label}
-                      </Button>
-                    ) : (
-                      <Button
-                        size="1"
-                        color="gray"
-                        variant="surface"
-                        disabled={busy || round.phase !== "review"}
-                        onClick={() =>
-                          void run({
-                            type: "atlas.review",
-                            id: round.id,
-                            decision: { kind: "keep", jobId: candidate.id },
-                          })
-                        }
-                      >
-                        Keep {label}
-                      </Button>
-                    )}
-                  </Flex>
-                </section>
-              );
-            })}
-          </div>
-          {error && (
-            <Text as="p" color="red" size="2" role="alert">
-              {error}
-            </Text>
-          )}
-          <Flex mt="3" justify="end" gap="2">
-            <Button
-              size="1"
-              color="gray"
+          <div className="atlas-choice-tools">
+            {error && (
+              <span className="atlas-choice-error" title={error}>
+                <WarningCircle aria-hidden="true" />
+                <span className="atlas-choice-accessible" role="alert">
+                  {error}
+                </span>
+              </span>
+            )}
+            <ToolbarIconButton
+              label="Discard both"
               variant="ghost"
               disabled={busy}
               onClick={() =>
@@ -134,14 +88,94 @@ export function AtlasChoices() {
                 })
               }
             >
-              Discard both
-            </Button>
-            <Dialog.Close>
-              <Button size="1" color="gray" variant="surface">
-                Close
-              </Button>
-            </Dialog.Close>
-          </Flex>
+              <TrashSimple />
+            </ToolbarIconButton>
+            <ToolbarIconButton
+              label="Close comparison"
+              variant="ghost"
+              onClick={() => setOpen(false)}
+            >
+              <X />
+            </ToolbarIconButton>
+          </div>
+          <div className="atlas-choice-grid">
+            {round.candidates.map((candidate, index) => {
+              const label = index === 0 ? "View A" : "View B";
+              const asset = candidate.assetId
+                ? workspace.assets[candidate.assetId]
+                : undefined;
+              const projection = asset?.camera?.intrinsics;
+              const retryable =
+                candidate.status === "failed" ||
+                candidate.status === "cancelled";
+              const status =
+                candidate.error ?? candidate.message ?? candidate.status;
+              const loading = !candidate.error && !retryable;
+              const Placeholder = loading
+                ? SpinnerGap
+                : retryable
+                  ? ArrowClockwise
+                  : WarningCircle;
+              return (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  className="atlas-choice"
+                  aria-label={
+                    asset
+                      ? `Keep ${label}`
+                      : retryable
+                        ? `Retry ${label}: ${status}`
+                        : `${label}: ${status}`
+                  }
+                  title={asset ? `Keep ${label}` : status}
+                  disabled={busy || (!retryable && round.phase !== "review")}
+                  style={
+                    projection
+                      ? {
+                          aspectRatio: `${projection.width} / ${projection.height}`,
+                        }
+                      : undefined
+                  }
+                  onClick={() => {
+                    if (retryable)
+                      void run({ type: "jobs.retry", id: candidate.id });
+                    else if (asset)
+                      void run({
+                        type: "atlas.review",
+                        id: round.id,
+                        decision: { kind: "keep", jobId: candidate.id },
+                      });
+                  }}
+                >
+                  {asset ? (
+                    <>
+                      <img
+                        src={assetUrl(asset)}
+                        alt={label}
+                        className="atlas-choice-image"
+                      />
+                      {round.phase === "review" && (
+                        <span className="atlas-choice-check" aria-hidden="true">
+                          <Check weight="bold" />
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <Placeholder
+                      className={loading ? "spin" : undefined}
+                      aria-hidden="true"
+                    />
+                  )}
+                  {!asset && (
+                    <span className="atlas-choice-accessible" role="status">
+                      {status}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </Dialog.Content>
       </Dialog.Root>
     </>

@@ -52,6 +52,7 @@ export function AgentCursors({
               <Tooltip
                 key={actor}
                 delayDuration={0}
+                className="scene-label-tooltip"
                 content={latest.name + " · " + latest.phase}
               >
                 <span

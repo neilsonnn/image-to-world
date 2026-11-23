@@ -81,6 +81,7 @@ export class FlyControls {
     private enabled: () => boolean,
     private commit: () => void,
     private begin: () => void = () => {},
+    private surface: HTMLElement = element,
   ) {
     const signal = this.listeners.signal;
     element.addEventListener("pointerdown", this.pointerDown, { signal });
@@ -88,11 +89,11 @@ export class FlyControls {
     element.addEventListener("pointerup", this.pointerUp, { signal });
     element.addEventListener("pointercancel", this.stop, { signal });
     element.addEventListener("lostpointercapture", this.stop, { signal });
-    element.addEventListener("pointerleave", this.leave, { signal });
+    surface.addEventListener("pointerleave", this.leave, { signal });
     element.addEventListener("contextmenu", (event) => event.preventDefault(), {
       signal,
     });
-    element.addEventListener("wheel", this.wheel, { signal, passive: false });
+    surface.addEventListener("wheel", this.wheel, { signal, passive: false });
     window.addEventListener("keyup", this.keyUp, { signal });
     window.addEventListener("blur", this.stop, { signal });
     document.addEventListener("visibilitychange", this.stop, { signal });
@@ -114,7 +115,7 @@ export class FlyControls {
   keyDown(event: KeyboardEvent) {
     if (
       !this.enabled() ||
-      (!this.element.matches(":hover") && this.pointer === null)
+      (!this.surface.matches(":hover") && this.pointer === null)
     )
       return false;
     const key = event.key.toLowerCase();
@@ -200,7 +201,7 @@ export class FlyControls {
       event.deltaMode === 1
         ? 16
         : event.deltaMode === 2
-          ? this.element.clientHeight
+          ? this.surface.clientHeight
           : 1;
     if (event.ctrlKey) zoomFlyCamera(this.camera, event.deltaY * units);
     else lookFlyCamera(this.camera, event.deltaX * units, event.deltaY * units);

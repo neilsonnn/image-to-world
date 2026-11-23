@@ -15,7 +15,7 @@ import { assetUrl } from "../../../core/schema";
 export function FrameState({ tasks }: { tasks: string[] }) {
   const label = tasks.length ? tasks.join(" · ") : "Work complete";
   return (
-    <Tooltip content={label} delayDuration={0}>
+    <Tooltip content={label} delayDuration={0} className="scene-label-tooltip">
       <span className="frame-state" aria-label={label} tabIndex={0}>
         {tasks.length ? <SpinnerGap className="spin" /> : <Check />}
       </span>

@@ -1911,6 +1911,9 @@ button {
 .viewport-overlay [aria-label="View"] {
   margin-left: auto;
 }
+.scene-label-tooltip {
+  pointer-events: none;
+}
 .frame-label-layer {
   position: absolute;
   inset: 0;
@@ -2310,44 +2313,94 @@ button {
   max-width: min(360px, 100%);
 }
 @container (max-width: 850px) {
-  .viewport-feed:has(~ .viewport-canvas .view-frame-actions) {
+  .viewport-feed:has(~ .view-frame-actions) {
     bottom: 54px;
   }
 }
 
+.atlas-choices.rt-DialogContent {
+  padding: 6px;
+  background: var(--surface);
+  border-radius: var(--floating-toolbar-radius);
+}
+.atlas-choice-accessible {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.atlas-choice-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 2px 5px 5px;
+}
+.atlas-choice-error {
+  display: inline-flex;
+  align-items: center;
+  color: var(--danger);
+}
 .atlas-choice-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  align-items: center;
+  gap: 6px;
 }
 .atlas-choice {
+  position: relative;
   display: grid;
-  align-content: start;
-  gap: 8px;
-  min-width: 0;
-}
-.atlas-choice-image {
-  display: block;
+  place-items: center;
   width: 100%;
-  height: min(48vh, 430px);
-  object-fit: contain;
+  min-width: 0;
+  aspect-ratio: 16 / 9;
+  max-height: 70dvh;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--line);
   border-radius: var(--control-radius);
   background: var(--surface-canvas);
-}
-.atlas-choice-status {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 8px;
   color: var(--secondary-text);
-  overflow-wrap: anywhere;
 }
-.atlas-choice-status svg {
-  flex-shrink: 0;
+.atlas-choice:not(:disabled) {
+  cursor: pointer;
 }
-.atlas-choice > .rt-Flex {
-  flex-wrap: nowrap;
-  white-space: nowrap;
+.atlas-choice:not(:disabled):hover,
+.atlas-choice:focus-visible {
+  border-color: var(--accent);
+}
+.atlas-choice:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -3px;
+}
+.atlas-choice > svg {
+  width: 22px;
+  height: 22px;
+}
+.atlas-choice-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.atlas-choice-check {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--control-radius);
+  background: var(--surface-overlay);
+  color: var(--text);
+}
+.atlas-choice:not(:disabled):hover .atlas-choice-check,
+.atlas-choice:focus-visible .atlas-choice-check {
+  background: var(--surface-pressed);
 }

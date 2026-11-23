@@ -1,3 +1,5 @@
+import { randomInt } from "node:crypto";
+import { atlasReview } from "../../../core/atlas-review";
 import { sceneChange, editSceneChange } from "./activity-scene";
 import type { Activity } from "../../../core/activity";
 import { createHash } from "node:crypto";
@@ -20,7 +22,8 @@ import {
 } from "../../../core/schema";
 import type { JobRunner } from "./jobs";
 import type { WorkspaceStore } from "./store";
-import { integrateAssets } from "./integration";
+import { captureFrame } from "../../../core/captures";
+import { integrateAssets, integrateFrames } from "./integration";
 import { saveEnvironment } from "./environment";
 
 export class CommandService {
@@ -93,7 +96,14 @@ export class CommandService {
           ["generation.submit", "jobs.submit"].includes(command.type) &&
           this.store.current.jobs[jobId]
         ) {
-          const result = { revision: this.store.revision, jobId };
+          const result = {
+            revision: this.store.revision,
+            jobId,
+            ...(command.type === "generation.submit" &&
+            command.request.kind === "view.pair"
+              ? { jobIds: [jobId, `atlas_choice_${jobId}`] }
+              : {}),
+          };
           await this.store.saveJobReceipt(context.requestId, { body, result });
           return result;
         }
@@ -127,6 +137,19 @@ export class CommandService {
       if (command.type === "environment.configure") {
         const result = await this.perform(command, context);
         this.store.recordActivity({ ...activity, phase: "succeeded" });
+        return result;
+      }
+      if (command.type === "atlas.review") {
+        const result = await this.reviewRound(command, context, body);
+        this.store.recordActivity({
+          ...activity,
+          phase: "succeeded",
+          nodeIds: result.nodeIds,
+          sceneChange: sceneChange(
+            result.nodeIds ?? [],
+            this.store.current.nodes,
+          ),
+        });
         return result;
       }
       const external = [
@@ -264,6 +287,55 @@ export class CommandService {
       throw error;
     }
   }
+  private reviewRound(
+    command: Extract<Command, { type: "atlas.review" }>,
+    context: CommandContext,
+    body: string,
+  ) {
+    if (!context.interactive)
+      throw new Error("Choose or discard the comparison in the editor");
+    return this.store.updateScene((state) => {
+      checkPreconditions(state, context);
+      const review = atlasReview(state);
+      if (!review || review.id !== command.id || review.decision)
+        throw new Error("This Atlas comparison is no longer open");
+      const round = state.atlasRound!;
+      const result: CommandResult = {
+        revision: state.revision + 1,
+        nodeIds: [],
+      };
+      if (command.decision.kind === "discard")
+        round.decision = { kind: "discard" };
+      else {
+        const jobId = command.decision.jobId;
+        const candidate = review.candidates.find((c) => c.id === jobId);
+        if (review.phase !== "review" || !candidate?.assetId)
+          throw new Error(
+            "Wait for two posed results and choose a view from this comparison",
+          );
+        const nodeIds = integrateFrames(
+          state,
+          [candidate.assetId],
+          undefined,
+          jobId,
+          review.caption.slice(0, 80),
+        );
+        const frameId = nodeIds[0];
+        if (!frameId) throw new Error("The chosen Atlas view cannot be placed");
+        captureFrame(state, frameId);
+        state.atlasRound!.decision = { kind: "keep", jobId, frameId };
+        const edit = state.undo.at(-1)!;
+        Object.assign(edit, {
+          actorId: context.actorId,
+          requestId: context.requestId,
+        });
+        Object.assign(result, { nodeIds, editId: edit.id });
+      }
+      state.receipts[context.requestId!] = { body, result };
+      return result;
+    });
+  }
+
   private async perform(
     command: ReturnType<typeof commandSchema.parse>,
     context: CommandContext,
@@ -291,9 +363,28 @@ export class CommandService {
         break;
       case "generation.submit": {
         const { request } = command;
+        const id = await this.submissionId(command, context.requestId!);
+        if (request.kind === "view.pair") {
+          const alternative = `atlas_choice_${id}`;
+          await this.jobs.submit(
+            generationInput(this.store.current, {
+              ...request,
+              seed: request.seed ?? randomInt(2147483647),
+            }),
+            id,
+            undefined,
+            context,
+            alternative,
+          );
+          return {
+            revision: this.store.revision,
+            jobId: id,
+            jobIds: [id, alternative],
+          };
+        }
         jobId = await this.jobs.submit(
           generationInput(this.store.current, request),
-          await this.submissionId(command, context.requestId!),
+          id,
           undefined,
           context,
         );
@@ -336,6 +427,10 @@ export class CommandService {
           job = snapshot.jobs[command.jobId];
         if (!job || job.status !== "succeeded")
           throw new Error("Choose a completed generation");
+        if (job.choiceRoundId)
+          throw new Error(
+            "Keep this Atlas view from its comparison in the editor",
+          );
         const frames = frameAssets(snapshot, job);
         const selected =
           command.indices?.map((index) => frameAt(snapshot, job, index)) ??

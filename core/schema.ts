@@ -159,11 +159,7 @@ export const atlasContextSchema = z.object({
   excludedIds: z.array(z.string()).default([]),
   soloIds: z.array(z.string()).default([]),
 });
-export const placementModeSchema = z.enum([
-  "individual",
-  "reconstruct",
-  "reference",
-]);
+export const placementModeSchema = z.enum(["individual", "reconstruct"]);
 export type PlacementMode = z.infer<typeof placementModeSchema>;
 
 const frameActor = z.string().trim().min(1).max(120);
@@ -612,6 +608,7 @@ export const jobSchema = z.object({
   frameAssetIds: z.array(z.string()).optional(),
   extractedFrameIds: z.array(z.string()).optional(),
   sourceFrameAssetIds: z.array(z.string()).optional(),
+  choiceRoundId: z.string().optional(),
   frameIndices: z.array(number.int().nonnegative()).optional(),
   cameras: z.array(cameraSchema).optional(),
   reconstructionScale: number.positive().optional(),
@@ -677,7 +674,25 @@ export const editSchema = z.object({
   changes: z.array(changeSchema),
 });
 export type Edit = z.infer<typeof editSchema>;
+export const atlasRoundSchema = z.object({
+  id: z.string(),
+  caption: z.string(),
+  jobIds: z.tuple([z.string(), z.string()]),
+  decision: z
+    .discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("keep"),
+        jobId: z.string(),
+        frameId: z.string(),
+      }),
+      z.object({ kind: z.literal("discard") }),
+    ])
+    .optional(),
+});
+export type AtlasRound = z.infer<typeof atlasRoundSchema>;
+
 export const workspaceSchema = z.object({
+  atlasRound: atlasRoundSchema.nullable().default(null),
   primaryId: z.string().nullable().default(null),
   selectionAnchor: z.string().nullable().default(null),
   undo: z.array(editSchema).max(100).default([]),
@@ -714,6 +729,7 @@ export const workspaceSchema = z.object({
 export type Workspace = z.infer<typeof workspaceSchema>;
 export function emptyWorkspace(): Workspace {
   return {
+    atlasRound: null,
     primaryId: null,
     selectionAnchor: null,
     undo: [],
@@ -865,6 +881,13 @@ export const generationSchema = z.discriminatedUnion("kind", [
     seed: number.int().optional(),
   }),
   z.object({
+    kind: z.literal("view.pair"),
+    camera: cameraSchema,
+    prompt: z.string().trim().min(1),
+    nodeIds: z.array(z.string()).min(1).optional(),
+    seed: number.int().min(0).max(2147483646).optional(),
+  }),
+  z.object({
     kind: z.literal("splats"),
     nodeIds: z.array(z.string()).optional(),
     contextPathId: z.string().nullable().optional(),
@@ -924,6 +947,14 @@ export const commandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("assets.reveal"), id: z.string() }),
   z.object({ type: z.literal("generation.submit"), request: generationSchema }),
+  z.object({
+    type: z.literal("atlas.review"),
+    id: z.string(),
+    decision: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("keep"), jobId: z.string() }),
+      z.object({ kind: z.literal("discard") }),
+    ]),
+  }),
   z.object({
     type: z.literal("frames.integrate"),
     jobId: z.string(),

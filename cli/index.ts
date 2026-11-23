@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import type { atlasReview } from "../core/atlas-review";
 import { projectApi } from "../core/project-url";
 import { objectInventory } from "../core/object-inventory";
 import {
@@ -94,7 +95,7 @@ const HELP = `image-to-world controls the same filesystem workspace as the brows
   bun run image-to-world camera [--file camera.json]    Read/set viewport camera
   bun run image-to-world path update <path-id> [--fov 60] [--target-frames 36]
   bun run image-to-world path keyframe <path-id> [--index 0] [--file camera.json] [--id keyframe-id] [--remove]
-  bun run image-to-world scene place <asset-id>... [--parent frame-id] [--camera camera.json] [--reference-only | --reconstruct]  Place a local reference Frame, jointly pose images, or place assets
+  bun run image-to-world scene place <asset-id>... [--parent frame-id] [--camera camera.json] [--reconstruct]  Pose images with Atlas or place 3D assets
   bun run image-to-world camera solve --position x,y,z --look-at x,y,z [--relative-to node-id]
                    [--up x,y,z] [--fov 60] [--out camera.json]  Calculate orientation from your position/target; no scene edit
   bun run image-to-world camera place [--position x,y,z --look-at x,y,z --relative-to node-id]
@@ -104,6 +105,8 @@ const HELP = `image-to-world controls the same filesystem workspace as the brows
   bun run image-to-world context [list|include|exclude|solo|show|hide|freeze|unfreeze] <capture-id>...
   bun run image-to-world path create <camera-id>... [--target-frames 36]
   bun run image-to-world pose <asset-id>... [--camera camera.json]
+  bun run image-to-world atlas pair --camera camera.json --prompt '...' [<frame-id>...] [--seed n] [--wait]
+  bun run image-to-world atlas round [--wait] [--timeout seconds]  Read the current comparison or wait for the editor's choice
   bun run image-to-world atlas [--depth] [--camera camera.json] [--path path-id] [--prompt '...']
   bun run image-to-world splats [capture-id...] [--path path-id] [--prompt '...'] [--refine]
                    Reconstruct splats from posed captures (draft unless --refine)
@@ -142,7 +145,7 @@ They do not choose shots, assess visual quality, or prescribe a scene-building s
 
 All responses are JSON. Errors use stderr and exit 1. Generation returns a job ID
 immediately; --wait waits for completion; --ready follows automatic depth/pose jobs. --url defaults to http://127.0.0.1:4310
-(or IMAGE_TO_WORLD_URL). No API credentials are needed by the CLI.
+(or IMAGE_TO_WORLD_URL). Poser and Atlas jobs require WLT_API_KEY in the editor environment.
 `;
 
 export async function run(argv: string[]) {
@@ -206,7 +209,6 @@ export async function run(argv: string[]) {
       remove: { type: "boolean" },
       "no-reconstruct": { type: "boolean" },
       reconstruct: { type: "boolean" },
-      "reference-only": { type: "boolean" },
       camera: { type: "string" },
       depth: { type: "boolean" },
       path: { type: "string" },
@@ -295,7 +297,11 @@ export async function run(argv: string[]) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(commandSchema.parse(input)),
       })
-    ).json() as Promise<{ jobId?: string; revision: number }>;
+    ).json() as Promise<{
+      jobId?: string;
+      jobIds?: string[];
+      revision: number;
+    }>;
   const wait = async (id: string, defaultTimeout = 300) => {
     const deadline = Date.now() + finite(values.timeout, defaultTimeout) * 1000;
     for (;;) {
@@ -319,6 +325,26 @@ export async function run(argv: string[]) {
       await Bun.sleep(1000);
     }
   };
+  const getRound = async () =>
+    (await request("atlas-round")).json() as Promise<
+      ReturnType<typeof atlasReview>
+    >;
+  const waitRound = async (id: string, until: "review" | "decision") => {
+    const deadline = Date.now() + finite(values.timeout, 300) * 1000;
+    for (;;) {
+      const round = await getRound();
+      if (!round || round.id !== id)
+        throw new Error("This Atlas comparison is no longer current");
+      if (
+        round.phase === "failed" ||
+        round.decision ||
+        (until === "review" && round.phase === "review") ||
+        Date.now() >= deadline
+      )
+        return round;
+      await Bun.sleep(1000);
+    }
+  };
   const submit = async (input: JobInput) => {
     const result = await command({ type: "jobs.submit", input });
     output(values.wait ? await wait(result.jobId!) : result);
@@ -328,7 +354,13 @@ export async function run(argv: string[]) {
       type: "generation.submit",
       request: generation,
     });
-    output(values.wait ? await wait(result.jobId!) : result);
+    output(
+      values.wait
+        ? generation.kind === "view.pair"
+          ? await waitRound(result.jobId!, "review")
+          : await wait(result.jobId!)
+        : result,
+    );
   };
   const indices = () =>
     values.indices
@@ -872,16 +904,10 @@ export async function run(argv: string[]) {
         ...(values.out ? { file: path.resolve(values.out) } : {}),
       });
     } else if (sub === "place") {
-      if (values["reference-only"] && values.reconstruct)
-        throw new Error("Choose either --reference-only or --reconstruct");
       output(
         await command({
           type: "assets.place",
-          mode: values["reference-only"]
-            ? "reference"
-            : values.reconstruct
-              ? "reconstruct"
-              : "individual",
+          mode: values.reconstruct ? "reconstruct" : "individual",
           assetIds: rest,
           ...(values.parent
             ? { parentId: values.parent === "root" ? null : values.parent }
@@ -1099,7 +1125,22 @@ export async function run(argv: string[]) {
         ? { placement: cameraSchema.parse(await jsonFile(values.camera)) }
         : {}),
     });
-  else if (action === "atlas")
+  else if (action === "atlas" && sub === "pair")
+    await generate({
+      kind: "view.pair",
+      camera: cameraSchema.parse(
+        await jsonFile(need(values.camera, "--camera camera.json")),
+      ),
+      prompt: need(values.prompt, "--prompt"),
+      nodeIds: rest.length ? rest : undefined,
+      seed: values.seed === undefined ? undefined : finite(values.seed, 42),
+    });
+  else if (action === "atlas" && sub === "round") {
+    const round = await getRound();
+    output(
+      values.wait && round ? await waitRound(round.id, "decision") : round,
+    );
+  } else if (action === "atlas")
     await generate({
       kind: "view",
       returnDepth: values.depth || undefined,

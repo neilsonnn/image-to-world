@@ -23,9 +23,9 @@ without either key.
    bun install --frozen-lockfile
    ```
 
-2. No credential setup is needed before opening the editor. Use **Environment**
-   in the top bar or **Workspace settings → Environment variables** to edit the
-   shared local config as key/value rows. `WLT_API_KEY` and `FAL_KEY` are suggested
+2. Atlas scene building requires a [World Labs API key](https://atlas.worldlabs.ai/api-keys).
+   Open the editor and use **Workspace settings → Environment variables** to save
+   it as `WLT_API_KEY`. The shared local config uses key/value rows. `WLT_API_KEY` and `FAL_KEY` are suggested
    entries; add any variable by name. Values stay masked, and existing values are
    never sent back to the browser. Blank replacement fields keep current values;
    removing a saved variable restores any inherited process value.
@@ -111,6 +111,12 @@ await player.play();
 ```
 
 Declare module resources through `assetUrl(id)` so they travel in the ZIP. Any external service your custom JavaScript calls still needs to be reachable from the published site.
+
+## Build a scene with Atlas
+
+Give the agent your reference images and the full URL of the editor tab. The agent checks `status` for `worldLabsConfigured` and poses the images with Atlas. After the reference Frames are arranged, it asks what you want to see next in the agent chat.
+
+The agent solves a camera for your answer and runs `atlas pair --camera shot.json --prompt '…'`. The editor opens both candidates side by side. **Keep View A** or **Keep View B** adds that view to your scene and Atlas context. **Discard both** leaves the scene as it was. The agent reads your decision with `atlas round` and asks what to see next. Finish choosing views before beginning the 3D build.
 
 ## Editor layout and shortcuts
 
@@ -240,10 +246,8 @@ The CLI composites the same draft on the server before uploading PNG bytes to FA
 ## Build scenes and generate views
 
 Import images, linear EXR depth, logarithmic depth PNGs, SPZ/PLY splats, or video.
-**Pose images** gives each Frame a camera and depth points. Its depth guide is visible for layout. Use **Input** while viewing its camera to compare the original. **Frame guides** in Spatial context hides the depth guides together when modeling begins. To model directly from a reference
-without depth estimation, use `scene place <image-id> --reference-only`.
-This local operation places the Frame at your chosen camera and makes no provider request. Select
-posed image nodes as Atlas context and generate a view from the current camera.
+**Pose images** gives each Frame a camera and depth points. Its depth guide is visible for layout. Use **Input** while viewing its camera to compare the original. **Frame guides** in Spatial context hides the depth guides together when modeling begins.
+Select posed image nodes as Atlas context and generate a view from the current camera.
 The inspector can also attach a depth asset and camera metadata to an image.
 
 All scene objects share parent, transform, visibility, and selection behavior.

@@ -2,7 +2,7 @@
 
 An editable study of the supplied tiny-dome studio illustration. Ten independent modules build the plaster shell and round windows, limestone footing, woodland, house tree, trestle desk, swivel chair, typewriter, drawing papers, lamp and brush collection, and potted plants. The central window has an actual opening, recessed rails and layered trees beyond it. The drawing board, folio and shelf objects have depth and can be inspected from either camera.
 
-Open a fresh editor project, then pass the original illustration and the loopback URL printed by the editor to the recipe.
+Open a fresh editor project, configure `WLT_API_KEY` in **Workspace settings → Environment variables**, then pass the original illustration and the loopback URL to the recipe. Atlas estimates the input’s camera and depth before the recipe builds the studio.
 
 ```sh
 bun run image-to-world open /path/to/new-project --port 4336

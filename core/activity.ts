@@ -130,6 +130,7 @@ const commandNames: Partial<Record<Command["type"], string>> = {
   "environment.configure": "Configure environment",
   "caption.clear": "Clear enhanced caption",
   "frame.work": "Update Frame activity",
+  "atlas.review": "Review Atlas views",
   "frames.integrate": "Integrate frames",
   "jobs.cancel": "Cancel job",
   "jobs.retry": "Retry job",
@@ -142,6 +143,7 @@ export function operationName(command: Command): string {
       "image.create": jobNames.image,
       "image.edit": jobNames.nano,
       view: jobNames.atlas,
+      "view.pair": "Generate two Atlas views",
       model: jobNames.fal,
     }[command.request.kind];
   if (command.type === "edit.batch")

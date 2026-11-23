@@ -1,3 +1,4 @@
+import { AtlasChoices } from "./AtlasChoices";
 import { HeaderSceneTools } from "./HeaderSceneTools";
 import { SceneActions } from "./SceneActions";
 import { AgentGuide } from "./AgentGuide";
@@ -8,6 +9,7 @@ import {
   PlugsConnected,
   Plugs,
   Gear,
+  Key,
   Wrench,
   X,
 } from "@phosphor-icons/react";
@@ -77,6 +79,9 @@ function EditorLoading() {
 
 function EditorWorkspace() {
   const connected = useClientState((state) => state.connected);
+  const needsAtlas = useClientState(
+    (state) => state.status?.worldLabsConfigured === false,
+  );
   const client = useImageToWorldClient();
   const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [agentGuideOpen, setAgentGuideOpen] = useState(false);
@@ -85,7 +90,9 @@ function EditorWorkspace() {
   const [contextOpen, setContextOpen] = useState(true);
   const [imageOpen, setImageOpen] = useState(false);
   const [playing, setPlaying] = useState(false);
-  const { requestPlacement, dialog: imageImportDialog } = useImageImport();
+  const { requestPlacement, dialog: imageImportDialog } = useImageImport(() =>
+    setConnectionsOpen(true),
+  );
   const [previewNodes, setPreviewNodes] = useState<SceneNode[] | null>(null);
   const [gizmoNodes, setGizmoNodes] = useState<SceneNode[] | null>(null);
   const [previewCamera, setPreviewCamera] = useState<CameraData | null>(null);
@@ -249,6 +256,15 @@ function EditorWorkspace() {
         />
         <div className="topbar-actions">
           {!playing && <HeaderSceneTools />}
+          <AtlasChoices />
+          {needsAtlas && (
+            <ToolbarIconButton
+              label="Set up World Labs for Atlas"
+              onClick={() => setConnectionsOpen(true)}
+            >
+              <Key />
+            </ToolbarIconButton>
+          )}
           <Hint
             label={
               connected

@@ -488,15 +488,23 @@ export class WorkspaceStore {
     jobId: string,
     fn: (state: Workspace) => T | Promise<T>,
   ) {
-    return this.update(fn, undefined, { jobId, scene: true });
+    return this.updateSceneAndJobs([jobId], fn);
+  }
+  updateSceneAndJobs<T>(
+    jobIds: string[],
+    fn: (state: Workspace) => T | Promise<T>,
+  ) {
+    return this.update(fn, undefined, { jobIds, scene: true });
   }
   updateJob(id: string, fn: (job: JobSummary) => void) {
-    return this.update((state) => fn(state.jobs[id]), undefined, { jobId: id });
+    return this.update((state) => fn(state.jobs[id]), undefined, {
+      jobIds: [id],
+    });
   }
   update<T>(
     fn: (state: Workspace) => T | Promise<T>,
     rollback?: () => Promise<void>,
-    scope?: "scene" | { jobId: string; scene?: boolean },
+    scope?: "scene" | { jobIds: string[]; scene?: boolean },
   ): Promise<T> {
     const result = this.tail.then(async () => {
       let committed = false;
@@ -513,17 +521,17 @@ export class WorkspaceStore {
             ? { ...structuredClone({ ...before, jobs: {} }), jobs: before.jobs }
             : { ...before };
         if (scope && scope !== "scene") {
-          const id = scope.jobId;
           state.jobs = { ...before.jobs };
-          if (before.jobs[id])
-            state.jobs[id] = structuredClone(before.jobs[id]);
+          for (const id of scope.jobIds)
+            if (before.jobs[id])
+              state.jobs[id] = structuredClone(before.jobs[id]);
         }
         const value = await fn(state);
         state.revision = before.revision + 1;
         const patches = diffWorkspace(
           before,
           state,
-          scope && scope !== "scene" ? [scope.jobId] : undefined,
+          scope && scope !== "scene" ? scope.jobIds : undefined,
         );
         if (patches.some((p) => p.field === "nodes"))
           validateScene(state.nodes);

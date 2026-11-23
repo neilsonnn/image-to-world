@@ -1,3 +1,4 @@
+import { worldLabsKeyUrl } from "../../../core/environment";
 import { applyJobResult } from "../../../core/result-targets";
 import { prepareContext } from "./depth";
 import { applyCommand } from "../../../core/commands";
@@ -30,11 +31,17 @@ import {
 import type { WorkspaceStore } from "./store";
 import { environmentValue } from "./environment";
 
-export const worldLabs = () =>
-  createClient({
-    apiKey: required("WLT_API_KEY"),
+export function worldLabs() {
+  const apiKey = environmentValue("WLT_API_KEY")?.trim();
+  if (!apiKey)
+    throw new Error(
+      `Atlas needs a World Labs API key. Create one at ${worldLabsKeyUrl} and add WLT_API_KEY in Workspace settings → Environment variables.`,
+    );
+  return createClient({
+    apiKey,
     baseUrl: environmentValue("WLT_API_BASE_URL") || undefined,
   });
+}
 
 export const falClient = () =>
   createFalClient({ credentials: required("FAL_KEY") });

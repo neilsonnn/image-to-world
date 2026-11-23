@@ -1,3 +1,4 @@
+import { atlasReview } from "../../../core/atlas-review";
 import { createProjectHost } from "./projects";
 import { playerResponse } from "./player-export";
 import { modelSuggestions } from "../../../core/models";
@@ -103,6 +104,8 @@ export async function createService(root: string) {
           return Response.json(store.liveSnapshot(), {
             headers: { "X-Workspace-Stream": store.streamId },
           });
+        if (request.method === "GET" && route === "atlas-round")
+          return Response.json(atlasReview(store.current));
         if (request.method === "GET" && route === "activity")
           return Response.json(
             store.activitySnapshot(Number(url.searchParams.get("after") ?? 0)),
@@ -117,7 +120,7 @@ export async function createService(root: string) {
           return Response.json({
             application: "image-to-world",
             workspacePath: store.root,
-            worldLabsConfigured: !!environmentValue("WLT_API_KEY"),
+            worldLabsConfigured: !!environmentValue("WLT_API_KEY")?.trim(),
             falConfigured: !!environmentValue("FAL_KEY"),
             rendererAvailable: !!rendererExecutable(),
             ffmpegAvailable: !!ffmpegPath(),

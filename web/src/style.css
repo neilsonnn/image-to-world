@@ -2314,3 +2314,40 @@ button {
     bottom: 54px;
   }
 }
+
+.atlas-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.atlas-choice {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+.atlas-choice-image {
+  display: block;
+  width: 100%;
+  height: min(48vh, 430px);
+  object-fit: contain;
+  border-radius: var(--control-radius);
+  background: var(--surface-canvas);
+}
+.atlas-choice-status {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 8px;
+  color: var(--secondary-text);
+  overflow-wrap: anywhere;
+}
+.atlas-choice-status svg {
+  flex-shrink: 0;
+}
+.atlas-choice > .rt-Flex {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}

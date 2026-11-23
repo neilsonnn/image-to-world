@@ -155,6 +155,18 @@ export function generationInput(
         integrate: r.integrate,
       };
     }
+    case "view.pair":
+      return {
+        kind: "atlas",
+        nodeIds: atlasContext(workspace, r.nodeIds, null).map(
+          ({ node }) => node.id,
+        ),
+        cameras: [r.camera],
+        prompt: r.prompt,
+        enhancePrompt: false,
+        returnDepth: true,
+        seed: r.seed ?? s.seed,
+      };
     case "view": {
       const pathId =
         r.contextPathId === undefined

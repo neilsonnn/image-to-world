@@ -106,7 +106,7 @@ async function cropToFormat(
   });
 }
 
-export function useImageImport() {
+export function useImageImport(onAtlasSetup: () => void) {
   const client = useImageToWorldClient();
   const locked = useWorkspace(lockedFormat);
   const [pending, setPending] = useState<PendingPlacement[]>([]);
@@ -125,7 +125,7 @@ export function useImageImport() {
         .join(" and ");
       setLayouts((queue) => [
         ...queue,
-        `In my image-to-world project at ${window.location.href}, arrange ${targets}. Wait for posed depth, inspect the point clouds from above and from the side, ground the Frames, and space disconnected views so their observed volumes do not overlap. Preserve the relative poses of any jointly reconstructed photos. Verify the layout before generating connecting views.`,
+        `In my image-to-world project at ${window.location.href}, arrange ${targets}. Wait for posed depth, inspect the point clouds from above and from the side, ground the Frames, and space disconnected views so their observed volumes do not overlap. Preserve the relative poses of any jointly reconstructed photos. Verify the layout, then ask me what to see next and generate two Atlas views to choose between.`,
       ]);
     },
     [],
@@ -192,6 +192,10 @@ export function useImageImport() {
     crops: ReadonlyMap<string, CropPosition>,
   ) => {
     if (!active) return;
+    if (client.store.getState().status?.worldLabsConfigured === false) {
+      onAtlasSetup();
+      return;
+    }
     const { camera, destination, posedIds } = active;
     const offerLayout = (result?: CommandResult) =>
       askLayout(
@@ -200,31 +204,6 @@ export function useImageImport() {
       );
     setPending((queue) => queue.slice(1));
     try {
-      if (mode === "reference") {
-        const references = await Promise.all(
-          images.map(async (image) => {
-            const position = crops.get(image.asset.id);
-            const crop = importCropRect(image, format, position);
-            if (
-              Math.abs(crop.width - image.width) < 0.5 &&
-              Math.abs(crop.height - image.height) < 0.5
-            )
-              return image.asset;
-            const file = await cropToFormat(
-              image,
-              {
-                width: Math.round(crop.width),
-                height: Math.round(crop.height),
-              },
-              position,
-            );
-            return (await client.upload([file]))[0];
-          }),
-        );
-        await place(references, mode, camera, destination);
-        askLayout(posedIds);
-        return;
-      }
       if (!locked)
         await client.command({
           type: "workspace.update",
@@ -421,20 +400,6 @@ function ImportBody({
               ? "Reconstruct needs at least two overlapping photos."
               : "Overlapping photos of one place"}
           </span>
-        </button>
-        <button
-          className="image-import-choice"
-          type="button"
-          disabled={!images || !format}
-          onClick={() =>
-            images && format && onChoose("reference", images, format, crops)
-          }
-        >
-          <span className="image-import-art is-single" aria-hidden>
-            <img src={assetUrl(assets[0])} alt="" draggable={false} />
-          </span>
-          <strong>Reference only</strong>
-          <span>Place a movable Frame at this camera. Runs locally.</span>
         </button>
       </div>
     </div>

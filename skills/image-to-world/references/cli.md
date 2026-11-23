@@ -1,5 +1,11 @@
 # Editor command reference
 
+## Compare two Atlas views
+
+Run `status` against the editor URL and check `worldLabsConfigured` before posing or generating. Use `camera solve` to save a translated target camera, then submit `atlas pair --camera shot.json --prompt 'View-specific caption'`. Add Frame IDs after `pair` to limit context. The editor displays two variations of the same shot. The request returns both job IDs. `--wait` waits until the pair is ready for review or has failed.
+
+Use `atlas round --wait --timeout 120` to wait for the human’s choice. On timeout it reports the current phase. When the result includes a keep decision, use its `frameId` to inspect the scene or plan the next view. Only the editor’s **Keep** action places a candidate in the project. A pending round survives reload and restart.
+
 ## Discover the workspace
 
 1. Run `bun run image-to-world status` to verify the connection and provider configuration.

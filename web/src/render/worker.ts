@@ -10,7 +10,11 @@ import { isNodeInSubtree } from "../../../core/clips";
 import type { JobInput, Workspace } from "../../../core/schema";
 
 type RenderInput = Extract<JobInput, { kind: "render" }>;
-async function render(workspace: Workspace, input: RenderInput) {
+async function render(
+  workspace: Workspace,
+  input: RenderInput,
+  guides?: string[],
+) {
   const scene = new Scene();
   const errors: string[] = [];
   const surface = new SceneRenderer(true, (detail) => errors.push(detail));
@@ -26,6 +30,8 @@ async function render(workspace: Workspace, input: RenderInput) {
     "#657080",
     "#c4e6ff",
     () => renderer,
+    undefined,
+    guides && new Set(guides),
   );
   const camera = new PerspectiveCamera(
     50,

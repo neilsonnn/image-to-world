@@ -56,7 +56,7 @@ import {
   type Command,
   type CommandResult,
   type ImageDraft,
-  type Job,
+  type JobSummary,
   type Workspace,
   type SceneNode,
 } from "../../../core/schema";
@@ -68,7 +68,9 @@ import { Field } from "./panelShared";
 import { Hint, PanelHeader } from "./ui";
 
 type EditorSettings = Workspace["settings"]["editor2d"];
-type NanoJob = Job & { input: Extract<Job["input"], { kind: "nano" }> };
+type NanoJob = JobSummary & {
+  input: Extract<JobSummary["input"], { kind: "nano" }>;
+};
 
 const EMPTY_DRAFT: ImageDraft = { strokes: [], layers: [] };
 

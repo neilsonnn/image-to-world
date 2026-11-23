@@ -19,9 +19,11 @@ import { encodeDepth } from "./depth";
 import { lightRigSchema } from "../../../core/lighting";
 import { fitObject } from "./observations";
 const cleanup: Array<() => Promise<unknown>> = [];
+// Playwright can spend up to 30 seconds shutting down a GPU process before
+// terminating it. Await disposal before releasing the test project.
 afterEach(async () => {
   for (const fn of cleanup.splice(0).reverse()) await fn();
-});
+}, 45_000);
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "image-to-world-agent-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -200,7 +202,7 @@ test("queued inputs retain their bytes when the library file changes", async () 
   const asset = await store.importFile(new Blob(["first"]), "source.txt");
   // Viewport jobs remain queued, making the snapshot race deterministic without an external provider.
   const id = await runner.submit({ kind: "capture", camera });
-  const job = store.snapshot().jobs[id];
+  const job = await store.loadJob(id);
   const pins = await store.pinAssets(store.snapshot(), { assetId: asset.id });
   job.pinnedAssets = pins;
   job.contextSnapshot!.assets[asset.id] = asset;
@@ -432,20 +434,21 @@ test("workers share a movable Frame and guarded fits survive moving the Frame du
   ).rejects.toThrow("conflict");
 });
 test.skipIf(!rendererExecutable())(
-  "independent renderer loads a mesh, produces exact mask/IDs and linear depth, and leaves editor state alone",
+  "a restarted renderer reproduces the submitted mesh, pose, mask, IDs and linear depth",
   async () => {
-    const { store, runner, commands } = await fixture();
-    const asset = await store.importFile(triangle(), "triangle.glb");
-    await commands.execute({
+    const initial = await fixture();
+    // Hold the queue until a new store and worker open the project.
+    await initial.runner.close();
+    const unused = await initial.store.importFile(
+      new Blob(["unrelated"]),
+      "notes.txt",
+    );
+    const asset = await initial.store.importFile(triangle(), "triangle.glb");
+    await initial.commands.execute({
       type: "nodes.put",
       nodes: [{ ...node("mesh"), kind: "mesh", assetId: asset.id }],
     });
-    const before = structuredClone({
-      nodes: store.snapshot().nodes,
-      settings: store.snapshot().settings,
-      selection: store.snapshot().selection,
-    });
-    const id = await runner.submit(
+    const id = await initial.runner.submit(
       {
         kind: "render",
         camera,
@@ -456,6 +459,36 @@ test.skipIf(!rendererExecutable())(
       undefined,
       { actorId: "Renderer" },
     );
+    const manifest = Bun.file(
+      path.join(initial.store.root, "jobs", id, "input.json"),
+    );
+    const frozen = await manifest.text();
+    expect(frozen).not.toContain(unused.id);
+    expect(Object.keys(JSON.parse(frozen).contextSnapshot.assets)).toEqual([
+      asset.id,
+    ]);
+    expect(initial.store.current.jobs[id].input).toEqual({ kind: "render" });
+    await initial.commands.execute({
+      type: "nodes.transform",
+      ids: ["mesh"],
+      transform: { position: [100, 0, 0] },
+    });
+    const meshFile = (await initial.store.assetFile(asset.id)).file;
+    await Bun.write(meshFile, "replaced after queueing");
+    await initial.store.close();
+    const store = await new WorkspaceStore(initial.store.root).init();
+    const runner = new JobRunner(store),
+      commands = new CommandService(store, runner);
+    cleanup.push(async () => {
+      await runner.close();
+      await store.close();
+    });
+    const before = structuredClone({
+      nodes: store.snapshot().nodes,
+      settings: store.snapshot().settings,
+      selection: store.snapshot().selection,
+    });
+    await runner.init();
     const job = await done(store, id);
     expect(job.error).toBeUndefined();
     expect(job.status).toBe("succeeded");
@@ -470,6 +503,16 @@ test.skipIf(!rendererExecutable())(
       settings: store.snapshot().settings,
       selection: store.snapshot().selection,
     }).toEqual(before);
+    expect(await manifest.text()).toBe(frozen);
+    expect(store.current.nodes.mesh.transform.position).toEqual([100, 0, 0]);
+    // Subsequent probe and fit jobs use the live scene.
+    await Bun.write(meshFile, triangle());
+    await store.syncAssets();
+    await commands.execute({
+      type: "nodes.transform",
+      ids: ["mesh"],
+      transform: identity(),
+    });
     const assets = job.outputAssetIds.map((id) => store.snapshot().assets[id]);
     const depth = assets.find((a) => a.role === "depth")!;
     const grid = linearDepth(

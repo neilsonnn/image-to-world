@@ -1,5 +1,5 @@
 import { FrameState } from "./FrameLabels";
-import { frameSlugs, frameTasks } from "../../../core/frame-work";
+import { activeJobs, frameSlugs, frameTasks } from "../../../core/frame-work";
 import { SplatPanel } from "./SplatPanel";
 import {
   Aperture,
@@ -41,7 +41,11 @@ import {
   sessionFormat,
 } from "../../../core/formats";
 import { generationInput } from "../../../core/generation";
-import { assetUrl, type Job, type Workspace } from "../../../core/schema";
+import {
+  assetUrl,
+  type JobSummary,
+  type Workspace,
+} from "../../../core/schema";
 import type { SelectionState } from "../../../core/selection";
 import { useImageToWorldClient, useWorkspaceData } from "../lib/client";
 import { useGlobalShortcuts } from "../lib/shortcuts";
@@ -96,7 +100,7 @@ function thumbnailAspect({ width, height }: { width: number; height: number }) {
   return width / height;
 }
 
-const isActive = (job: Job | undefined) =>
+const isActive = (job: JobSummary | undefined) =>
   job?.status === "queued" || job?.status === "running";
 
 export function AtlasDock({
@@ -131,7 +135,7 @@ function SpatialContext({
   const slugs = frameSlugs(workspace.nodes);
   const captureIds = captures.map(({ id }) => id);
   const context = atlasContextNodes(workspace, undefined, path?.id);
-  const generating = Object.values(workspace.jobs)
+  const generating = activeJobs(workspace.jobs)
     .filter((job) => job.input.kind === "atlas" && isActive(job))
     .sort((a, b) => a.createdAt - b.createdAt);
   const inputCount = context.length;
@@ -526,7 +530,7 @@ function CaptureTile({
   );
 }
 
-function GeneratingTile({ job }: { job: Job }) {
+function GeneratingTile({ job }: { job: JobSummary }) {
   const { safeCommand } = useImageToWorldClient();
   const status =
     job.status === "queued" ? "Queued" : job.message || "Generating";

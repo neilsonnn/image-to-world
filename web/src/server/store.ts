@@ -1,3 +1,18 @@
+import {
+  atomicJson,
+  optionalJson,
+  sessionData,
+  projectData,
+  diffWorkspace,
+  sessionPatch,
+  JobFiles,
+} from "./project-files";
+import {
+  checkPreconditions,
+  type CommandContext,
+} from "../../../core/command-context";
+import type { Command } from "../../../core/schema";
+import type { FieldPatch } from "../../../core/workspace-delta";
 import { validateGlb } from "../../../core/mesh";
 import type { Operation } from "../../../core/activity";
 import {
@@ -21,10 +36,13 @@ import {
 import path from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Job } from "../../../core/schema";
-import { validateScene } from "../../../core/commands";
+import { navigate, validateScene } from "../../../core/commands";
 import {
   emptyWorkspace,
   workspaceSchema,
+  jobSchema,
+  jobSummarySchema,
+  type JobSummary,
   type Asset,
   type Workspace,
 } from "../../../core/schema";
@@ -49,7 +67,7 @@ export class WorkspaceStore {
   withJobAssets<T>(job: Job, work: () => Promise<T>) {
     return this.jobAssets.run(job, work);
   }
-  async pinAssets(snapshot: Workspace, inputs: unknown, includeScene = false) {
+  async pinAssets(snapshot: Workspace, inputs: unknown) {
     const ids = new Set<string>();
     const walk = (value: unknown): void => {
       if (
@@ -71,14 +89,6 @@ export class WorkspaceStore {
         Object.values(value).forEach(walk);
     };
     walk(inputs);
-    if (includeScene) {
-      walk(snapshot.settings.lighting?.environmentAssetId);
-      for (const node of Object.values(snapshot.nodes)) {
-        walk(node.assetId);
-        walk(node.geometryAssetId);
-        walk(node.procedural);
-      }
-    }
     const pins: NonNullable<Job["pinnedAssets"]> = {};
     await mkdir(path.join(this.assetsPath, ".snapshots"), { recursive: true });
     for (const id of ids) {
@@ -152,6 +162,133 @@ export class WorkspaceStore {
   readonly root: string;
   readonly assetsPath: string;
   private state = emptyWorkspace();
+  readonly streamId = randomUUID();
+  private files: JobFiles;
+  private sessionTimer?: ReturnType<typeof setTimeout>;
+  private sessionTail: Promise<void> = Promise.resolve();
+  private sessionDirty = false;
+  private navigationReceipts: Workspace["receipts"] = {};
+  // Job command receipts live beside job history. Index filenames on open so
+  // normal navigation never reads a historical request.
+  private jobReceiptKeys = new Set<string>();
+  private receiptKey(id: string) {
+    return createHash("sha256").update(id).digest("hex");
+  }
+  async commandReceipt(id: string) {
+    const key = this.receiptKey(id);
+    return (
+      this.state.receipts[id] ??
+      this.navigationReceipts[id] ??
+      (this.jobReceiptKeys.has(key)
+        ? await optionalJson(path.join(this.root, "jobs", ".requests", key))
+        : undefined)
+    );
+  }
+  async saveJobReceipt(id: string, receipt: Workspace["receipts"][string]) {
+    const key = this.receiptKey(id);
+    await atomicJson(path.join(this.root, "jobs", ".requests", key), receipt);
+    this.jobReceiptKeys.add(key);
+  }
+  private needsRecovery = false;
+  private sessionFile() {
+    return path.join(this.root, "session.json");
+  }
+  private flushSession() {
+    clearTimeout(this.sessionTimer);
+    if (this.sessionDirty) {
+      this.sessionDirty = false;
+      const data = {
+        revision: this.state.revision,
+        ...sessionData(this.state),
+        receipts: this.navigationReceipts,
+      };
+      this.sessionTail = this.sessionTail
+        .catch(() => {})
+        .then(() => atomicJson(this.sessionFile(), data));
+    }
+    return this.sessionTail;
+  }
+  private scheduleSession() {
+    this.sessionDirty = true;
+    clearTimeout(this.sessionTimer);
+    this.sessionTimer = setTimeout(
+      () =>
+        void this.flushSession().catch((e) => {
+          this.sessionDirty = true;
+          this.emit("error", { message: String(e) });
+        }),
+      150,
+    );
+  }
+  async loadJob(id: string) {
+    const job = this.state.jobs[id];
+    if (!job) throw new Error("Unknown job " + id);
+    return this.files.load(job);
+  }
+  private publish(next: Workspace, patches: FieldPatch[]) {
+    const base = this.state.revision;
+    const visible = patches
+      .filter((p) => p.field !== "receipts" && p.field !== "resultApplications")
+      .map((p) => {
+        if (p.field !== "undo" && p.field !== "redo") return p;
+        const old = this.state[p.field].map(liveEdit),
+          edits = next[p.field].map(liveEdit);
+        if ([...old, ...edits].some((edit) => !edit.id))
+          return { ...p, value: edits };
+        const ids = new Set(edits.map((edit) => edit.id));
+        const kept = old.filter((edit) => ids.has(edit.id));
+        if (
+          kept.some(
+            (edit, i) => JSON.stringify(edit) !== JSON.stringify(edits[i]),
+          )
+        )
+          return { ...p, value: edits };
+        return {
+          ...p,
+          removeEdits: old
+            .filter((edit) => !ids.has(edit.id))
+            .map((edit) => edit.id),
+          value: edits.slice(kept.length),
+        };
+      });
+    this.state = next;
+    if (patches.some(sessionPatch)) this.scheduleSession();
+    this.emit("change", {
+      stream: this.streamId,
+      base,
+      revision: next.revision,
+      patches: visible,
+    });
+  }
+  navigate(command: Command, context: CommandContext, body: string) {
+    const task = this.tail.then(() => {
+      if (this.closed || this.needsRecovery)
+        throw new Error("Workspace unavailable");
+      const id = context.requestId!;
+      if (this.jobReceiptKeys.has(this.receiptKey(id)))
+        throw new Error("Conflicting request ID");
+      const old = this.navigationReceipts[id] ?? this.state.receipts[id];
+      if (old) {
+        if (old.body !== body || !old.result)
+          throw new Error("Conflicting request ID");
+        return old.result;
+      }
+      checkPreconditions(this.state, context);
+      const next = navigate(this.state, command);
+      next.revision++;
+      const result = { revision: next.revision };
+      this.navigationReceipts = Object.fromEntries([
+        ...Object.entries(this.navigationReceipts).slice(-127),
+        [id, { body, result }],
+      ]);
+      this.publish(next, diffWorkspace(this.state, next));
+      this.scheduleSession();
+      return result;
+    });
+    this.tail = task.catch(() => {});
+    return task;
+  }
+
   private tail: Promise<unknown> = Promise.resolve();
   private watchers: FSWatcher[] = [];
   private listeners = new Set<(event: string, data: unknown) => void>();
@@ -162,6 +299,7 @@ export class WorkspaceStore {
   private writtenAt = 0;
   constructor(root: string) {
     this.root = path.resolve(root);
+    this.files = new JobFiles(this.root);
     this.assetsPath = path.join(this.root, "assets");
   }
   async init() {
@@ -193,6 +331,32 @@ export class WorkspaceStore {
           );
         await this.write(this.state);
       }
+      const journal = await optionalJson(
+        path.join(this.root, ".job-commit.json"),
+      );
+      if (journal) {
+        if (journal.revision === this.state.revision)
+          for (const record of journal.jobs) await this.files.save(record);
+        await rm(path.join(this.root, ".job-commit.json"));
+      }
+      const session = await optionalJson(this.sessionFile());
+      if (session) {
+        const { selection, primaryId, selectionAnchor, settings } = session;
+        this.state = workspaceSchema.parse({
+          ...this.state,
+          selection,
+          primaryId,
+          selectionAnchor,
+          settings: { ...this.state.settings, ...settings },
+          revision: Math.max(this.state.revision, session.revision),
+        });
+        this.navigationReceipts = session.receipts ?? {};
+        this.normalizeSession(this.state);
+      }
+      this.state.jobs = await this.files.summaries();
+      const receiptDir = path.join(this.root, "jobs", ".requests");
+      await mkdir(receiptDir, { recursive: true });
+      this.jobReceiptKeys = new Set(await readdir(receiptDir));
       try {
         this.activity = JSON.parse(
           await readFile(path.join(this.root, ".activity.json"), "utf8"),
@@ -235,12 +399,30 @@ export class WorkspaceStore {
     }
   }
   private async read() {
-    const state = workspaceSchema.parse(
-      JSON.parse(
-        await readFile(path.join(this.root, "workspace.json"), "utf8"),
-      ),
+    const doc = JSON.parse(
+      await readFile(path.join(this.root, "workspace.json"), "utf8"),
     );
+    if (doc.version !== 8 || "jobs" in doc)
+      throw new Error("Expected project schema 8");
+    const session = sessionData(this.state);
+    const state = workspaceSchema.parse({
+      ...doc,
+      ...session,
+      settings: { ...doc.settings, ...session.settings },
+      jobs: {},
+    });
     validateScene(state.nodes);
+    this.normalizeSession(state);
+    return state;
+  }
+  private normalizeSession(state: Workspace) {
+    if (
+      state.settings.viewingCameraId &&
+      !state.nodes[state.settings.viewingCameraId]
+    ) {
+      state.settings.viewingCameraId = null;
+      state.settings.freeCamera = null;
+    }
     state.selection = state.selection.filter(
       (id) => state.nodes[id] || state.assets[id],
     );
@@ -252,14 +434,15 @@ export class WorkspaceStore {
         !state.assets[state.selectionAnchor])
     )
       state.selectionAnchor = state.primaryId;
-    return state;
   }
   private async write(state: Workspace) {
     const file = path.join(this.root, "workspace.json");
     const temporary = `${file}.${randomUUID()}.tmp`;
     const handle = await open(temporary, "wx");
     try {
-      await handle.writeFile(JSON.stringify(state, null, 2) + "\n");
+      await handle.writeFile(
+        JSON.stringify(projectData(state), null, 2) + "\n",
+      );
       await handle.sync();
     } finally {
       await handle.close();
@@ -272,6 +455,22 @@ export class WorkspaceStore {
     await rename(temporary, file);
     this.writtenAt = (await stat(file)).mtimeMs;
   }
+  // Published records are immutable between commits. Call snapshot() for a mutable copy.
+  get current(): Readonly<Workspace> {
+    return this.state;
+  }
+  get revision() {
+    return this.state.revision;
+  }
+  liveSnapshot(): Workspace {
+    return {
+      ...this.state,
+      resultApplications: {},
+      receipts: {},
+      undo: this.state.undo.map(liveEdit),
+      redo: this.state.redo.map(liveEdit),
+    };
+  }
   snapshot(): Workspace {
     return structuredClone(this.state);
   }
@@ -282,24 +481,92 @@ export class WorkspaceStore {
   private emit(event: string, data: unknown) {
     for (const listener of this.listeners) listener(event, data);
   }
+  updateScene<T>(fn: (state: Workspace) => T | Promise<T>) {
+    return this.update(fn, undefined, "scene");
+  }
+  updateSceneAndJob<T>(
+    jobId: string,
+    fn: (state: Workspace) => T | Promise<T>,
+  ) {
+    return this.update(fn, undefined, { jobId, scene: true });
+  }
+  updateJob(id: string, fn: (job: JobSummary) => void) {
+    return this.update((state) => fn(state.jobs[id]), undefined, { jobId: id });
+  }
   update<T>(
     fn: (state: Workspace) => T | Promise<T>,
     rollback?: () => Promise<void>,
+    scope?: "scene" | { jobId: string; scene?: boolean },
   ): Promise<T> {
     const result = this.tail.then(async () => {
       let committed = false;
       try {
         if (this.closed) throw new Error("Workspace is closed");
-        const disk = await this.read();
-        const state = structuredClone(disk);
+        if (this.needsRecovery)
+          throw new Error("Reopen project to finish job commit");
+        await this.reloadExternal();
+        const before = this.state;
+        const editingScene = scope === "scene" || scope?.scene;
+        const state = !scope
+          ? structuredClone(before)
+          : editingScene
+            ? { ...structuredClone({ ...before, jobs: {} }), jobs: before.jobs }
+            : { ...before };
+        if (scope && scope !== "scene") {
+          const id = scope.jobId;
+          state.jobs = { ...before.jobs };
+          if (before.jobs[id])
+            state.jobs[id] = structuredClone(before.jobs[id]);
+        }
         const value = await fn(state);
-        state.revision = Math.max(disk.revision, this.state.revision) + 1;
-        workspaceSchema.parse(state);
-        validateScene(state.nodes);
-        await this.write(state);
+        state.revision = before.revision + 1;
+        const patches = diffWorkspace(
+          before,
+          state,
+          scope && scope !== "scene" ? [scope.jobId] : undefined,
+        );
+        if (patches.some((p) => p.field === "nodes"))
+          validateScene(state.nodes);
+        const jobs: JobSummary[] = [];
+        for (const p of patches.filter((p) => p.field === "jobs")) {
+          const id = p.key!,
+            job = state.jobs[id];
+          if (!job) throw new Error("Removing job history is unsupported");
+          if (!before.jobs[id]) {
+            const full = jobSchema.parse(job);
+            await this.files.manifest(full);
+          }
+          if ("request" in job && job.request !== undefined)
+            await this.files.request(id, job.request);
+          state.jobs[id] = jobSummarySchema.parse(job);
+          p.value = state.jobs[id];
+          jobs.push(state.jobs[id]);
+        }
+        const authored = patches.some(
+          (p) => p.field !== "jobs" && !sessionPatch(p),
+        );
+        const journal = path.join(this.root, ".job-commit.json");
+        if (authored && jobs.length) {
+          await atomicJson(journal, { revision: state.revision, jobs });
+        }
+        if (authored) {
+          try {
+            await this.write(state);
+          } catch (error) {
+            // Recovery checks the committed scene revision before replaying a journal.
+            if (jobs.length) this.needsRecovery = true;
+            throw error;
+          }
+        }
         committed = true;
-        this.state = state;
-        this.emit("change", { revision: state.revision });
+        try {
+          for (const job of jobs) await this.files.save(job);
+          if (authored && jobs.length) await rm(journal);
+        } catch (e) {
+          this.needsRecovery = true;
+          throw e;
+        }
+        this.publish(state, patches);
         return value;
       } catch (error) {
         if (!committed) await rollback?.();
@@ -308,6 +575,18 @@ export class WorkspaceStore {
     });
     this.tail = result.catch(() => {});
     return result;
+  }
+  private async reloadExternal() {
+    const info = await stat(path.join(this.root, "workspace.json"));
+    if (info.mtimeMs === this.writtenAt) return;
+    const next = await this.read();
+    next.jobs = this.state.jobs;
+    this.writtenAt = info.mtimeMs;
+    const patches = diffWorkspace(this.state, next);
+    if (patches.length) {
+      next.revision = Math.max(this.state.revision + 1, next.revision);
+      this.publish(next, patches);
+    }
   }
   private scheduleSync() {
     clearTimeout(this.scanTimer);
@@ -338,10 +617,13 @@ export class WorkspaceStore {
       }
     };
     const result = this.tail.then(async () => {
-      if (this.closed) return;
+      if (this.closed || this.needsRecovery) return;
       await scan();
-      const state = await this.read();
-      const before = JSON.stringify(state);
+      await this.reloadExternal();
+      const state = {
+        ...this.state,
+        assets: structuredClone(this.state.assets),
+      };
       const byPath = new Map<string, Asset>();
       for (const asset of Object.values(state.assets)) {
         asset.missing = asset.trashedAt !== undefined || !found.has(asset.path);
@@ -365,13 +647,11 @@ export class WorkspaceStore {
           state.assets[id] = this.fileAsset(id, file, info);
         }
       }
-      if (before !== JSON.stringify(state)) {
-        state.revision = Math.max(state.revision, this.state.revision) + 1;
+      const patches = diffWorkspace(this.state, state);
+      if (patches.length) {
+        state.revision++;
         await this.write(state);
-      }
-      if (JSON.stringify(this.state) !== JSON.stringify(state)) {
-        this.state = state;
-        this.emit("change", { revision: state.revision });
+        this.publish(state, patches);
       }
     });
     this.tail = result.catch(() => {});
@@ -399,7 +679,7 @@ export class WorkspaceStore {
   async importFile(file: Blob, name: string, metadata: Partial<Asset> = {}) {
     if (path.extname(name).toLowerCase() === ".glb")
       validateGlb(await file.arrayBuffer());
-    return this.update(async (state) => {
+    return this.updateScene(async (state) => {
       const safeName =
         path
           .basename(name)
@@ -468,6 +748,7 @@ export class WorkspaceStore {
     for (const watcher of this.watchers) watcher.close();
     await this.tail;
     await this.activityTail;
+    await this.flushSession();
     const file = path.join(this.root, ".lock");
     try {
       const lock = JSON.parse(await readFile(file, "utf8"));
@@ -497,4 +778,12 @@ function referencedIds(state: Workspace) {
     walk(fields);
   }
   return ids;
+}
+
+function liveEdit({
+  changes,
+  selection,
+  ...metadata
+}: Workspace["undo"][number]) {
+  return { ...metadata, changes: [] };
 }

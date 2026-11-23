@@ -36,7 +36,7 @@ export async function observeRegion(
 ): Promise<Asset[]> {
   if (job.input.kind !== "observe") throw new Error("Expected observation");
   const input = job.input,
-    w = { ...store.snapshot(), ...job.contextSnapshot } as Workspace;
+    w = { ...store.current, ...job.contextSnapshot } as Workspace;
   const frame = captureFrame(w, input.nodeId),
     c = frame.camera.intrinsics;
   const rootWorld = worldMatrix(frame.node, w.nodes);
@@ -260,7 +260,7 @@ export async function fitObject(
 ): Promise<Asset[]> {
   if (job.input.kind !== "fit") throw new Error("Expected fit request");
   const input = job.input,
-    w = { ...store.snapshot(), ...job.contextSnapshot } as Workspace,
+    w = { ...store.current, ...job.contextSnapshot } as Workspace,
     node = w.nodes[input.nodeId];
   if (node?.kind !== "mesh") throw new Error("Fit requires a mesh node");
   const { file } = await store.assetFile(input.observationAssetId);

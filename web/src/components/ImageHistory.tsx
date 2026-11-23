@@ -6,13 +6,15 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { imageIndex } from "../../../core/images";
-import { assetUrl, type Asset, type Job } from "../../../core/schema";
+import { assetUrl, type Asset, type JobSummary } from "../../../core/schema";
 import type { SelectionState } from "../../../core/selection";
 import { useCollection } from "../lib/useCollection";
 import type { SharedProps } from "./panelShared";
 import { Hint } from "./ui";
 
-type NanoJob = Job & { input: Extract<Job["input"], { kind: "nano" }> };
+type NanoJob = JobSummary & {
+  input: Extract<JobSummary["input"], { kind: "nano" }>;
+};
 export type ImageHistoryProps = {
   safeCommand: SharedProps["safeCommand"];
   activeAssetId: string | null;
@@ -21,7 +23,7 @@ export type ImageHistoryProps = {
   onRetry: (jobId: string) => void;
 };
 
-function jobForAsset(asset: Asset, jobs: Record<string, Job>) {
+function jobForAsset(asset: Asset, jobs: Record<string, JobSummary>) {
   const job = asset.jobId ? jobs[asset.jobId] : undefined;
   return job?.input.kind === "nano" ? (job as NanoJob) : undefined;
 }

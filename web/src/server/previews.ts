@@ -8,7 +8,7 @@ export async function renderContactSheet(
 ) {
   if (job.input.kind !== "contactSheet" || !job.contextSnapshot)
     throw new Error("Contact sheet snapshot is missing");
-  const snapshot = { ...store.snapshot(), ...job.contextSnapshot } as Workspace;
+  const snapshot = { ...store.current, ...job.contextSnapshot } as Workspace;
   const items = job.previewItems;
   if (!items?.length) throw new Error("Contact sheet items are missing");
   const columns = Math.min(job.input.columns, items.length),

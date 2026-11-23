@@ -8,11 +8,11 @@ import {
   SpinnerGap,
   X,
 } from "@phosphor-icons/react";
-import type { Command, Job } from "../../../core/schema";
+import type { Command, JobSummary } from "../../../core/schema";
 import { assetUrl } from "../../../core/schema";
 import { Hint } from "./ui";
 
-function jobLabel(job: Job) {
+function jobLabel(job: JobSummary) {
   if (job.input.kind === "image")
     return `${imageModels[job.input.model].label} → Frame`;
   if (job.input.kind === "nano")

@@ -25,7 +25,7 @@ import {
 import { GizmoOptions } from "./GizmoOptions";
 import { ToolbarPopover } from "./ui";
 import { FrameLabel, FrameEdit, positionFrameLabels } from "./FrameLabels";
-import { frameSlugs, frameTasks } from "../../../core/frame-work";
+import { activeJobs, frameSlugs, frameTasks } from "../../../core/frame-work";
 import { cameraNode } from "../../../core/captures";
 import {
   useImageToWorldClient,
@@ -61,6 +61,7 @@ import {
 } from "@radix-ui/themes";
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useMemo,
   useState,
@@ -926,6 +927,7 @@ export function Viewport({
       .then(() => {
         if (!mounted) return;
         camera.coordinateSystem = renderer.coordinateSystem;
+        setSyncTick((value) => value + 1);
         resize();
         render();
       })
@@ -969,7 +971,7 @@ export function Viewport({
     if (!playing) runtimeRef.current?.graph.setHovered(hoveredNodeId);
   }, [hoveredNodeId, playing]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
     if (playing || runtime.dragging || runtime.capturing) {
@@ -1087,13 +1089,14 @@ export function Viewport({
     if (!runtime || playing) return;
     const now = Date.now();
     let nextRetry = Number.POSITIVE_INFINITY;
-    for (const job of Object.values(workspace.jobs)) {
+    for (const id of captureAttempts.current.keys()) {
+      const status = workspace.jobs[id]?.status;
+      if (status !== "queued" && status !== "running")
+        captureAttempts.current.delete(id);
+    }
+    for (const job of activeJobs(workspace.jobs)) {
       if (job.input.kind !== "capture" && job.input.kind !== "inspect")
         continue;
-      if (job.status !== "queued" && job.status !== "running") {
-        captureAttempts.current.delete(job.id);
-        continue;
-      }
       if (captureControllers.current.has(job.id)) {
         nextRetry = Math.min(nextRetry, 1_000);
         continue;

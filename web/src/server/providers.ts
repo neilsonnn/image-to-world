@@ -200,7 +200,7 @@ export async function saveFrame(
   signal: AbortSignal,
   options: { depthBlob?: Blob; integrate?: boolean } = {},
 ) {
-  const current = store.snapshot();
+  const current = store.current;
   const existing = Object.values(current.assets).find(
     (a) =>
       a.jobId === job.id && a.path.endsWith(`${job.id}-frame-${index}.png`),
@@ -240,7 +240,7 @@ export async function saveFrame(
     );
   const source =
     job.input.kind === "reconstruct"
-      ? store.snapshot().assets[job.input.assetIds[index]]
+      ? store.current.assets[job.input.assetIds[index]]
       : undefined;
   const blob = await downloadTaskAsset(frame.imageAsset, signal);
   const asset = await store.importFile(blob, `${job.id}-frame-${index}.png`, {
@@ -306,7 +306,7 @@ async function integrateFrame(
       (node) => JSON.stringify(node) !== JSON.stringify(state.nodes[node.id]),
     );
   };
-  await store.update((state) => {
+  await store.updateSceneAndJob(job.id, (state) => {
     applyJobResult(
       state,
       job,

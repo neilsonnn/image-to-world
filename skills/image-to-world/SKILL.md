@@ -7,6 +7,10 @@ description: Pose image references and build an Atlas world one user-selected vi
 
 Build in the user’s existing Three.js canvas. Use **SVG & 3D Design** for construction, composition and visual review.
 
+## Open the editor
+
+If the user gives an editor URL, use it and confirm the intended project with `status`. Otherwise, use Bun 1.3.10 or newer. From the checkout, run `bun install --frozen-lockfile`, then `bun run image-to-world open ~/Projects/my-scene` with the project folder you want to open or create. Keep the launcher running and share the URL it prints. Use that full URL with `--url` on subsequent commands. See [local setup](references/cli.md#local-setup) for port conflicts and optional dependencies.
+
 ## Build the views first
 
 1. **Check Atlas setup.** Run `status` against the full editor URL. If `worldLabsConfigured` is false, stop and ask the user to create a [World Labs API key](https://atlas.worldlabs.ai/api-keys) and save it as `WLT_API_KEY` in **Workspace settings → Environment variables**. Have them enter the key there. Check again before proceeding. If Atlas rejects the key, surface the error and pause for setup.
@@ -29,6 +33,8 @@ Render the authored set at the reference framing, compare matching crops, then t
 Treat the set as a realtime level. Decide what supports weight, what someone can pick up, and what should turn or slide at a joint. Give furniture and architecture fixed collision surfaces, loose props a dynamic rigid body, and purely visual details a place on their owning part. Build a task lamp as a base, arms and shade with pivots at its actual hinges. A pull on the shade should bend the arm while the base stays planted. Use simple collision shapes that preserve openings and leave enough clearance for the mechanism to move.
 
 Test the finished set in **Play**. Let it settle, pull a movable part off-center, release it onto a support, and check the pose at the joint limits. **Stop** restores the authored scene. The [module reference](references/modules.md#bodies-and-joints) shows how to declare bodies and joints.
+
+Use **Open in web** to preview the scene in a standalone player. **Export** downloads a ZIP with the player, scene, and runtime assets. The ZIP includes instructions for hosting and embedding it.
 
 ## Editor tools
 

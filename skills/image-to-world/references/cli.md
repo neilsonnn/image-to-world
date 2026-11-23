@@ -1,5 +1,13 @@
 # Editor command reference
 
+## Local setup
+
+The launcher binds to loopback and defaults to port 4310. If that port serves another project, open yours with `--port 4311`. Use `--no-browser` for terminal-only sessions. Run `doctor <project-folder>` to diagnose setup and `status` with the full editor URL to check the active project and provider configuration. The project lives in its own folder. Copy the whole folder to retain jobs and their saved inputs.
+
+Save provider keys in **Workspace settings → Environment variables**. The editor stores them in local user configuration and masks them in the UI. Atlas requires `WLT_API_KEY`. Image editing and FAL models use `FAL_KEY`. Video encoding and reconstruction use FFmpeg and ffprobe. Independent renders use Chrome or Chromium. Configuration and optional dependencies can be checked locally with `doctor`.
+
+For editor development, use `bun run dev`. Before submitting a code change, run `bun run check`, `bun run test`, and `bun run build`. The launcher smoke test is `bun scripts/smoke-launch.ts`.
+
 ## Compare two Atlas views
 
 Run `status` against the editor URL and check `worldLabsConfigured` before posing or generating. Use `camera solve` to save a translated target camera, then submit `atlas pair --camera shot.json`. This moves the camera and sends the saved enhanced caption with enhancement off. If there is no cached enhancement yet, it uses the current description. Add `--prompt 'Updated description'` when the user wants to change the scene description. Keeping the result makes that description and its enhancement available to the next round. Add Frame IDs after `pair` to limit context. Pass the user’s wording as `--request-text` to show it above the two previews. The request returns both job IDs. `--wait` waits until the pair is ready for review or has failed.

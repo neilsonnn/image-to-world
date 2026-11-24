@@ -318,7 +318,7 @@ export class CommandService {
           [candidate.assetId],
           undefined,
           jobId,
-          review.caption.slice(0, 80),
+          { name: review.caption.slice(0, 80), slug: review.frameSlug },
         );
         const frameId = nodeIds[0];
         if (!frameId) throw new Error("The chosen Atlas view cannot be placed");
@@ -392,6 +392,7 @@ export class CommandService {
             {
               jobId: alternative,
               caption: atlasPairCaption(workspace, request.prompt),
+              frameSlug: request.frameSlug,
               requestText: request.requestText,
               updateCaption: request.prompt !== undefined,
             },

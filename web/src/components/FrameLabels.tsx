@@ -181,7 +181,15 @@ export function FrameLabel({
         </button>
       </div>
       {thumbnail && (
-        <img className="frame-thumb" src={assetUrl(thumbnail)} alt="" />
+        <button
+          className="frame-thumb"
+          type="button"
+          aria-label={`Select ${slug}`}
+          aria-pressed={selected}
+          onClick={onSelect}
+        >
+          <img src={assetUrl(thumbnail)} alt="" />
+        </button>
       )}
     </>
   );

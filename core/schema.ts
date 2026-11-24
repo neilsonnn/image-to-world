@@ -163,6 +163,13 @@ export const placementModeSchema = z.enum(["individual", "reconstruct"]);
 export type PlacementMode = z.infer<typeof placementModeSchema>;
 
 const frameActor = z.string().trim().min(1).max(120);
+const frameSlugSchema = z
+  .string()
+  .max(80)
+  .regex(
+    /^[a-z][a-z0-9]*(?:-[a-z0-9]+){1,2}$/,
+    "Use two or three lowercase words joined by hyphens",
+  );
 const frameDescription = z
   .string()
   .trim()
@@ -201,11 +208,7 @@ export const nodeSchema = z
       .strict()
       .optional(),
     procedural: proceduralSchema.optional(),
-    frameSlug: z
-      .string()
-      .max(80)
-      .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+){1,2}$/)
-      .optional(),
+    frameSlug: frameSlugSchema.optional(),
     frameWorkers: z
       .array(z.object({ actor: frameActor, description: frameDescription }))
       .optional(),
@@ -678,6 +681,7 @@ export type Edit = z.infer<typeof editSchema>;
 export const atlasRoundSchema = z.object({
   id: z.string(),
   caption: z.string(),
+  frameSlug: frameSlugSchema,
   requestText: z.string().trim().min(1).optional(),
   updateCaption: z.boolean().optional(),
   jobIds: z.tuple([z.string(), z.string()]),
@@ -886,6 +890,7 @@ export const generationSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("view.pair"),
     camera: cameraSchema,
+    frameSlug: frameSlugSchema,
     requestText: z.string().trim().min(1).optional(),
     prompt: z.string().trim().min(1).optional(),
     nodeIds: z.array(z.string()).min(1).optional(),

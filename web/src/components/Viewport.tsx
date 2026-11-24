@@ -48,6 +48,7 @@ import { SceneRenderer } from "../lib/scene-renderer";
 import type { WebGPURenderer } from "three/webgpu";
 import {
   Crosshair,
+  FrameCorners,
   Gear,
   VideoCamera,
   ListBullets,
@@ -1459,6 +1460,22 @@ export function Viewport({
     void commandRef
       .current({ type: "workspace.update", settings: patch })
       .catch((error) => errorRef.current(message(error)));
+  const updateViewportOptions = (
+    patch: Partial<Workspace["settings"]["viewportOptions"]>,
+  ) =>
+    void commandRef
+      .current({
+        type: "workspace.update",
+        settings: {
+          viewportOptions: {
+            ...workspaceRef.current.settings.viewportOptions,
+            ...patch,
+          },
+        },
+      })
+      .catch((error) => errorRef.current(message(error)));
+  const { passepartout, frameThumbnails, maskOpacity } =
+    workspace.settings.viewportOptions;
 
   const empty = Object.keys(workspace.nodes).length === 0;
   const format = sessionFormat(workspace);
@@ -1586,6 +1603,20 @@ export function Viewport({
           role="toolbar"
           aria-label="Viewport display"
         >
+          <Tooltip delayDuration={0} content="Passepartout">
+            <IconButton
+              aria-label="Passepartout"
+              aria-pressed={passepartout}
+              size="1"
+              variant={passepartout ? "solid" : "surface"}
+              color="gray"
+              onClick={() =>
+                updateViewportOptions({ passepartout: !passepartout })
+              }
+            >
+              <FrameCorners />
+            </IconButton>
+          </Tooltip>
           <Popover.Root>
             <Tooltip delayDuration={0} content="Image display">
               <Popover.Trigger>
@@ -1735,63 +1766,29 @@ export function Viewport({
                     />
                   </Tooltip>
                 </Flex>
-                {(
-                  [
-                    ["passepartout", "Passepartout"],
-                    ["frameThumbnails", "Frame thumbnails"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <Flex key={key} justify="between" align="center">
-                    <Text size="1">{label}</Text>
-                    <Switch
-                      aria-label={label}
-                      size="1"
-                      checked={workspace.settings.viewportOptions[key] ?? true}
-                      onCheckedChange={(value) =>
-                        void commandRef
-                          .current({
-                            type: "workspace.update",
-                            settings: {
-                              viewportOptions: {
-                                ...workspaceRef.current.settings
-                                  .viewportOptions,
-                                [key]: value,
-                              },
-                            },
-                          })
-                          .catch((e) => errorRef.current(message(e)))
-                      }
-                    />
-                  </Flex>
-                ))}
+                <Flex justify="between" align="center">
+                  <Text size="1">Frame thumbnails</Text>
+                  <Switch
+                    aria-label="Frame thumbnails"
+                    size="1"
+                    checked={frameThumbnails !== false}
+                    onCheckedChange={(frameThumbnails) =>
+                      updateViewportOptions({ frameThumbnails })
+                    }
+                  />
+                </Flex>
                 <Text size="1" color="gray">
-                  Mask opacity ·{" "}
-                  {Math.round(
-                    workspace.settings.viewportOptions.maskOpacity * 100,
-                  )}
-                  %
+                  Mask opacity · {Math.round(maskOpacity * 100)}%
                 </Text>
                 <Slider
-                  key={workspace.settings.viewportOptions.maskOpacity}
+                  key={maskOpacity}
                   aria-label="Passepartout opacity"
-                  defaultValue={[
-                    workspace.settings.viewportOptions.maskOpacity,
-                  ]}
+                  defaultValue={[maskOpacity]}
                   min={0}
                   max={1}
                   step={0.05}
                   onValueCommit={([maskOpacity]) =>
-                    void commandRef
-                      .current({
-                        type: "workspace.update",
-                        settings: {
-                          viewportOptions: {
-                            ...workspaceRef.current.settings.viewportOptions,
-                            maskOpacity,
-                          },
-                        },
-                      })
-                      .catch((e) => errorRef.current(message(e)))
+                    updateViewportOptions({ maskOpacity })
                   }
                 />
                 <Flex justify="between" align="center">
@@ -1907,10 +1904,7 @@ export function Viewport({
                         .catch((e) => errorRef.current(message(e)))
                     }
                     thumbnail={
-                      workspace.settings.viewportOptions.frameThumbnails !==
-                      false
-                        ? ref?.asset
-                        : undefined
+                      frameThumbnails !== false ? ref?.asset : undefined
                     }
                   />
                 </div>
@@ -1946,7 +1940,7 @@ export function Viewport({
             />
           </div>
         )}
-        {!playing && workspace.settings.viewportOptions.passepartout && (
+        {!playing && passepartout && (
           <div
             className="viewport-passepartout"
             aria-hidden="true"

@@ -13,6 +13,14 @@ const transformOverrides: Partial<
   capture: { scale: false },
 };
 
+const selectionOutlineOverrides: Partial<Record<SceneNode["kind"], boolean>> = {
+  capture: false,
+};
+
+export function showsSelectionOutline(node: SceneNode) {
+  return selectionOutlineOverrides[node.kind] ?? true;
+}
+
 export function transformCapabilities(nodes: readonly SceneNode[]) {
   const supported: TransformCapabilities = {
     translate: true,

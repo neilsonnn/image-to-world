@@ -2,6 +2,7 @@ import { imageIndex } from "../../../core/images";
 import type { Camera, Workspace } from "../../../core/schema";
 import { applyCommand } from "../../../core/commands";
 import { createCapture } from "../../../core/captures";
+import { availableSlug, frameSlugs } from "../../../core/frame-work";
 import type { WorkspaceStore } from "./store";
 
 type Placement = {
@@ -15,10 +16,13 @@ export function integrateFrames(
   assetIds: string[],
   placement?: Placement,
   jobId?: string,
-  name?: string,
+  label?: { name: string; slug: string },
 ) {
   if (jobId && state.resultApplications[jobId]?.includes("frames")) return [];
   const existing = imageIndex(state).capturesByAsset;
+  const usedSlugs = label
+    ? new Set(frameSlugs(state.nodes).values())
+    : undefined;
   const origin = placement
     ? state.assets[assetIds[0]]?.camera?.extrinsics.position
     : undefined;
@@ -36,7 +40,14 @@ export function integrateFrames(
       undefined,
       origin,
     );
-    if (name) capture[0].name = name;
+    if (label && usedSlugs) {
+      const frame = capture[0];
+      frame.frameSlug = usedSlugs.has(label.slug)
+        ? availableSlug(label.slug, usedSlugs)
+        : label.slug;
+      frame.name = label.name || frame.frameSlug;
+      usedSlugs.add(frame.frameSlug);
+    }
     return capture;
   });
   if (!added.length) return [];

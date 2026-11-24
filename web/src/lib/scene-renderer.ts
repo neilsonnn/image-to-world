@@ -145,9 +145,14 @@ class SplatLayer {
     this.syncCamera(camera);
     r.getDrawingBufferSize(this.size);
     const { x: w, y: h } = this.size;
-    if (this.gl.domElement.width !== w || this.gl.domElement.height !== h)
+    if (this.target.width !== w || this.target.height !== h) {
+      // Canvas uploads reuse their GPU allocation. After a resize the old
+      // extent can fail the copy and leave the previous splat frame on screen.
+      this.depthTexture.dispose();
+      this.splatTexture.dispose();
       this.gl.setSize(w, h, false);
-    this.target.setSize(w, h);
+      this.target.setSize(w, h);
+    }
     const background = scene.background;
     const colorSpace = r.outputColorSpace;
     const autoClear = r.autoClear;

@@ -15,6 +15,7 @@ import {
   type Workspace,
 } from "../../../core/schema";
 import { createService } from "./http";
+import { CommandService } from "./commands";
 import { renderImageDraft } from "./image-edit";
 import { JobRunner } from "./jobs";
 import { WorkspaceStore } from "./store";
@@ -1461,6 +1462,7 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
   camera.extrinsics.position = [2, 1.5, 0];
   const caption = "Look into the flooded pump room";
   const requestText = "Let’s see the pump room.";
+  const frameSlug = "flooded-pump-room";
   const request = {
     type: "generation.submit",
     request: {
@@ -1468,6 +1470,7 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
       camera,
       prompt: caption,
       requestText,
+      frameSlug,
       seed: 270,
     },
   } as const;
@@ -1479,6 +1482,7 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
   ).toEqual(ids);
   expect(atlasReview(store.current)?.phase).toBe("generating");
   expect(atlasReview(store.current)?.requestText).toBe(requestText);
+  expect(atlasReview(store.current)?.frameSlug).toBe(frameSlug);
   await expect(commands.execute(request)).rejects.toThrow(
     "open Atlas comparison",
   );
@@ -1530,6 +1534,7 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
 
   const winner = kept.nodeIds![0];
   expect(store.current.nodes[winner].assetId).toBe(jobs[1].frameAssetIds![0]);
+  expect(store.current.nodes[winner].frameSlug).toBe(frameSlug);
   expect(
     Object.values(store.current.nodes).some(
       (n) => n.assetId === jobs[0].frameAssetIds![0],
@@ -1555,6 +1560,7 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
     request: {
       kind: "view.pair",
       camera: nextCamera,
+      frameSlug,
       requestText: "Step right toward the stairs.",
     },
   });
@@ -1582,6 +1588,7 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
   cleanups.push(() => reopened.close());
   expect(atlasReview(reopened.current)?.phase).toBe("review");
   expect(atlasReview(reopened.current)?.id).toBe(next.jobId);
+  expect(atlasReview(reopened.current)?.frameSlug).toBe(frameSlug);
   expect(atlasReview(reopened.current)?.requestText).toBe(
     "Step right toward the stairs.",
   );
@@ -1589,6 +1596,22 @@ test("Atlas queues two variants of one frozen shot and keeps only the editor's c
     "source-capture",
     winner,
   ]);
+  const reopenedCommands = new CommandService(
+    reopened,
+    new JobRunner(reopened),
+  );
+  const secondChoice = await reopenedCommands.execute(
+    {
+      type: "atlas.review",
+      id: next.jobId!,
+      decision: { kind: "keep", jobId: next.jobIds![0] },
+    },
+    { interactive: true },
+  );
+  const secondFrame = reopened.current.nodes[secondChoice.nodeIds![0]];
+  expect(reopened.current.nodes[winner].frameSlug).toBe(frameSlug);
+  expect(secondFrame.frameSlug).toMatch(/^flooded-pump-[a-z0-9]+$/);
+  expect(secondFrame.frameSlug).not.toBe(frameSlug);
 });
 
 test("camera-only Atlas requests use the current description before enhancement and discard on missing depth", async () => {
@@ -1602,7 +1625,7 @@ test("camera-only Atlas requests use the current description before enhancement 
   camera.extrinsics.position[0] = 2;
   const { jobId, jobIds } = await commands.execute({
     type: "generation.submit",
-    request: { kind: "view.pair", camera },
+    request: { kind: "view.pair", camera, frameSlug: "discarded-shot" },
   });
   for (const id of jobIds!)
     expect((await done(store, id)).error).toContain("without posed depth");

@@ -1,11 +1,15 @@
 ---
 name: image-to-world
-description: Pose image references and build an Atlas world one user-selected view at a time, then author playable 3D sets in the image-to-world editor. Author geometry, style-matched TSL materials and articulated props, verify the result from independent cameras, and export interactive scenes for the web.
+description: Pose image references and build an Atlas world one user-selected view at a time, then author playable 3D sets in the image-to-world editor. Match the reference through geometry, shaders, lighting and post-processing. Verify the playable result and export it for the web.
 ---
 
 # image-to-world
 
-Build in the user’s existing Three.js canvas. Use **SVG & 3D Design** for construction, composition and visual review.
+## Match the look of the reference
+
+Study what gives the image its character. Look at the silhouettes, the shapes of light and shadow, the color in the distance, the edges that catch a highlight. Use the full rendering pipeline to recreate those relationships. Shape the environment and lighting, write material and screen-space shaders, and use reflections, atmosphere, color grading and motion wherever they serve the reference. A painted surface can stay simple while bounced light gives it volume and a moving reflection makes it feel wet.
+
+Render at the reference framing and look at the images side by side. Identify the most visible mismatch and change the part of the pipeline that can solve it. Move through the scene to see how the look holds together in play.
 
 ## Open the editor
 
@@ -18,40 +22,12 @@ If the user gives an editor URL, use it and confirm the intended project with `s
 3. **Repeat the conversation.** Always offer at least one camera-only option, for example “Step left and look along the façade, keeping the same description.” If the user gives only camera direction, solve the translated camera and run `atlas pair --camera shot.json --slug garden-steps` without `--prompt`. The server reuses the cached enhanced caption with enhancement off. Choose a distinct two- or three-word `--slug` for what the shot reveals. The kept Frame uses it automatically. Pass the chosen option or the user’s own wording with `--request-text` so it appears above the previews. Include `--prompt` only when the user requests new descriptive content. Tell the user to choose in the editor popup, then use `atlas round --wait` to watch for the decision. As soon as they keep a view or discard the pair, ask where to go next. Continue through as many rounds as they want. While waiting for an answer or editor choice, keep the loop pending across poll timeouts. End the loop or move into 3D only when the user explicitly asks. If a job fails, surface the error and help with recovery before resuming.
 4. **Build after approval.** Atlas supplies the entire initial scene beyond the posed inputs. Wait for the user to finish choosing views before authoring geometry. Turn `context guides off` and build continuous architecture, parametric forms, and style-matched materials from those views. Keep source pixels out of authored materials.
 
-Give each new Frame a distinctive two- or three-word slug that describes its subject, such as `desk-painter`. Set `frameSlug` with `nodes.patch`. When working on a Frame, run `frame work <frame-id> "Shaping lamp arms" --actor <worker>`. Update the two-to-four-word description as your task changes. Run `frame work <frame-id> done --actor <worker>` when you finish or stop. Each worker clears its own status.
-
-## Match the reference’s surface style
-
-Study a few representative patches at full size before choosing materials. Look at where a shadow changes hue, how wide a highlight is, which edges carry a drawn line, and the scale and direction of marks. Write surface-specific TSL shaders for the features that give this particular image its character. Share a palette where the painting does, and give different materials their own response to light.
-
-For an anime illustration, follow what the artist actually drew. Paper might have broad flat light and a crisp lavender cast shadow, glazed ceramic a single broken highlight, and foliage overlapping dark masses with a few bright brushstrokes. A painted background may call for soft value transitions beside sharply inked props. For a hard cel boundary, use a narrow `smoothstep` on the normal–light dot product to mix two painted colors. For a gouache wash, broaden that transition and break it with pigment variation in object space.
-
-Render the authored set at the reference framing, compare matching crops, then turn the camera to check that highlights, marks and silhouettes still describe the forms. Revise the shader with the most visible mismatch.
-
 ## Build for play
 
-Treat the set as a realtime level. Decide what supports weight, what someone can pick up, and what should turn or slide at a joint. Give furniture and architecture fixed collision surfaces, loose props a dynamic rigid body, and purely visual details a place on their owning part. Build a task lamp as a base, arms and shade with pivots at its actual hinges. A pull on the shade should bend the arm while the base stays planted. Use simple collision shapes that preserve openings and leave enough clearance for the mechanism to move.
-
-Test the finished set in **Play**. Let it settle, pull a movable part off-center, release it onto a support, and check the pose at the joint limits. **Stop** restores the authored scene. The [module reference](references/modules.md#bodies-and-joints) shows how to declare bodies and joints.
+Decide what supports weight, what the player can move, and what should turn or slide at a joint. Give structures simple colliders that preserve openings. Put hinges at their actual pivots. Walk the route in **Play** and operate a representative prop to check contact, clearance and movement.
 
 Use **Open in web** to preview the scene in a standalone player. **Export** downloads a ZIP with the player, scene, and runtime assets. The ZIP includes instructions for hosting and embedding it.
 
-## Editor tools
+## Authoring tools
 
-Run `image-to-world` (or `bun run image-to-world` from the repository). Use `--url` for the project's local server and `--actor` for the worker’s name.
-
-| To                              | Use                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Import and pose                 | `import <file>…`, then `scene place <asset-id>…` and `jobs wait <job-id>` for each returned job. Use `--reconstruct` for overlapping photos of one place.                                                                                                                                                                                                                                                                                                                                 |
-| Author geometry and materials   | `module add <source.ts> --parent <frame>` or `module update <node-id> <source.ts>`. Import geometry from `three`, node materials from `three/webgpu`, and shader functions from `three/tsl`. Expose the dimensions, palette or pattern values that someone might want to change.                                                                                                                                                                                                          |
-| Build an object from a sighting | `observe <frame> --region x,y,w,h` saves a crop, masks and original placement evidence. `image edit <crop> --asset-only --prompt …` creates fresh complete object views.                                                                                                                                                                                                                                                                                                                  |
-| Generate a reusable mesh        | `model speridlabs/idol/max --build-key <shared-design> --file input.json` takes one chosen image as `{"image_url":{"$asset":"…"}}`. Add `rig` for a character or `enable_pbr` for material maps. Find the `game_glb` or successful `rigged_character_glb` output by name in `inventory`.                                                                                                                                                                                                  |
-| Place or author                 | `scene place <mesh-asset> --parent <frame>`, `fit <mesh-node> --observation <manifest>`, or `module add <source.ts> --parent <frame>`. Apply fit proposals with their returned preconditions. Modules can own meshes, lights, shaders and splats.                                                                                                                                                                                                                                         |
-| Match and review                | `lighting <frame> --file rig.json` adjusts that shot. `lighting --file look.json` sets the project look. `render <frame> --set --reference <image>` compares only that Frame’s authored set from its camera, omitting the source image and points. Each worker renders independently of the human viewport. In the viewport, toggle **Input** to compare the reference with the scene. Adjust its opacity under **Reference image settings**. Use an oblique view for depth and contacts. |
-| Capture environment lighting    | `probe <frame> --wait` captures the built geometry as a panoramic lighting asset. Assign it with `lighting --file look.json` (`environmentAssetId`, intensity and yaw).                                                                                                                                                                                                                                                                                                                   |
-
-The lead can give different Frames or objects to parallel workers. Agree on a shared build key for one reusable design. Identical requests join one job. A new variant gets a new key. Two physical chairs can share one mesh and have separate local transforms. A chair seen from several cameras can have a single owning Frame and several observation IDs. Use `nodes.patch` to attach `observationAssetIds`; use field guards if another worker is editing the same node.
-
-The original image and depth are placement evidence. Keep fresh generated angles as separate assets. Preserve the user's selection and camera with independent renders and narrow, undoable edits.
-
-Read the [CLI reference](references/cli.md) for calibrated cameras, masks, recovery and concurrency. Read the [module reference](references/modules.md) for authored Three.js objects. Discover exact fields with `--help`, `schema commands` and `schema generation`.
+Use **SVG & 3D Design** for construction and composition. Preserve the user’s selection and camera with independent renders and narrow, undoable edits. For editor commands, frame coordination and review, see the [CLI reference](references/cli.md). For Three.js geometry, TSL materials and articulated props, see the [module reference](references/modules.md).

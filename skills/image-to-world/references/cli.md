@@ -377,6 +377,8 @@ writes scene state. Use `schema generation` and `schema context` to discover exa
 
 ## Concurrent workers
 
+Give each Frame a distinctive two- or three-word `frameSlug` with `nodes.patch`. Report the current task with `frame work <frame-id> "<short description>" --actor <worker>` and clear your status with `frame work <frame-id> done --actor <worker>`. Agree on a shared `--build-key` when several Frames use the same generated design.
+
 Workers may share one live server. Set `IMAGE_TO_WORLD_URL` once and optionally
 `IMAGE_TO_WORLD_ACTOR` per worker; identity also accepts `--actor`. Work on separate
 objects, and nominate one worker to clean a shared source view. Independent local

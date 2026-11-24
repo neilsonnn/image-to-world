@@ -61,10 +61,10 @@ test("selection extents rotate with a container under a scaled parent and hide w
   const graph = new SceneGraph(new Scene(), () => {}, "#888888", "#ffffff");
   try {
     const workspace = emptyWorkspace();
-    const capture = nodeSchema.parse({
-      id: "capture",
-      name: "Capture",
-      kind: "capture",
+    const container = nodeSchema.parse({
+      id: "container",
+      name: "Container",
+      kind: "group",
       parentId: "parent",
       transform: {
         position: [3, 1, -2],
@@ -83,12 +83,12 @@ test("selection extents rotate with a container under a scaled parent and hide w
           scale: [2, 1, 3],
         },
       }),
-      capture,
+      container,
       clip: nodeSchema.parse({
         id: "clip",
         name: "Clip",
         kind: "clip",
-        parentId: "capture",
+        parentId: container.id,
         transform: {
           position: [2, 0, -3],
           quaternion: [0, 0, 0, 1],
@@ -97,14 +97,14 @@ test("selection extents rotate with a container under a scaled parent and hide w
         clip: { scope: "local", invert: false, softness: 0 },
       }),
     };
-    workspace.selection = [capture.id];
+    workspace.selection = [container.id];
     for (const angle of [0, 0.4, 0.9]) {
-      capture.transform.quaternion = [0, Math.sin(angle), 0, Math.cos(angle)];
+      container.transform.quaternion = [0, Math.sin(angle), 0, Math.cos(angle)];
       graph.sync(workspace);
       graph.update();
       graph.scene.updateMatrixWorld(true);
       const marker = graph.selectionOutline.children[0];
-      const root = graph.entries.get(capture.id)!.root;
+      const root = graph.entries.get(container.id)!.root;
       const local = root.matrixWorld
         .clone()
         .invert()
@@ -120,7 +120,7 @@ test("selection extents rotate with a container under a scaled parent and hide w
       for (const index of [1, 2, 4, 6, 8, 9])
         expect(axes[index]).toBeCloseTo(0);
     }
-    capture.visible = false;
+    container.visible = false;
     graph.sync(workspace);
     graph.update();
     expect(graph.selectionOutline.children[0].visible).toBe(false);
@@ -332,6 +332,13 @@ test("camera attention reuses its mounted frustum, highlights through occlusion,
     graph.setHovered(null);
     expect(mounted!.visible).toBe(true);
     graph.setSelection(["frame"]);
+    graph.update();
+    expect(graph.selectionOutline.children).toHaveLength(0);
+    expect(graph.bounds(["frame"])).toBeDefined();
+    graph.setSelection(["frame", "frame_camera"]);
+    graph.update();
+    expect(graph.selectionOutline.children).toHaveLength(1);
+    expect(graph.selectionOutline.children[0].visible).toBe(true);
     expect(mounted!.visible).toBe(true);
     graph.setSelection([]);
     expect(mounted!.visible).toBe(true);

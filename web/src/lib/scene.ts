@@ -1,5 +1,6 @@
 import { defaultLighting } from "../../../core/lighting";
 import { disposeObject } from "./resources";
+import { showsSelectionOutline } from "../../../core/node-capabilities";
 import type { ModulePhysics } from "../../../core/physics";
 import { createProcedural, type ModuleRenderer } from "./procedural";
 import type { Camera as RuntimeCamera } from "three";
@@ -1021,16 +1022,25 @@ export class SceneGraph {
   }
 
   setSelection(ids: string[]) {
+    const outlined = ids.filter((id) => {
+      const entry = this.entries.get(id);
+      return entry && showsSelectionOutline(entry.node);
+    });
     if (
       ids.length === this.selection.length &&
-      ids.every((id, index) => id === this.selection[index])
+      ids.every((id, index) => id === this.selection[index]) &&
+      outlined.length === this.selectionOutline.children.length &&
+      outlined.every(
+        (id, index) =>
+          id === this.selectionOutline.children[index].userData.selectionId,
+      )
     )
       return;
     this.selection = [...ids];
     for (const entry of this.entries.values()) this.applyCameraHighlight(entry);
     disposeObject(this.selectionOutline);
     this.selectionOutline.clear();
-    for (const id of ids) {
+    for (const id of outlined) {
       const marker = new LineSegments(
         new EdgesGeometry(new BoxGeometry(1, 1, 1)),
         new LineBasicMaterial({
@@ -1057,7 +1067,10 @@ export class SceneGraph {
       if (!marker.visible || !entry) continue;
       const frame = entry.spatial?.object ?? entry.root;
       const bounds = this.bounds([id], frame);
-      if (!bounds) continue;
+      if (!bounds) {
+        marker.visible = false;
+        continue;
+      }
       const size = bounds.getSize(new Vector3());
       bounds.getCenter(marker.position);
       marker.quaternion.identity();

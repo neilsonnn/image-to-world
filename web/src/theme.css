@@ -55,9 +55,9 @@
   --node-camera: #e5a05b;
   --node-image: #72a9e5;
   --viewport-helper: #8a8a8a;
-  --viewport-axis-x: #b0b0b0;
-  --viewport-axis-y: #828282;
-  --viewport-axis-z: #5f5f5f;
+  --viewport-axis-x: #ee535c;
+  --viewport-axis-y: #64cc6d;
+  --viewport-axis-z: #5598ff;
   --viewport-active: #dedede;
 }
 

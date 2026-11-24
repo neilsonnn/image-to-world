@@ -114,6 +114,7 @@ export class JobRunner {
     comparison?: {
       jobId: string;
       caption: string;
+      frameSlug: string;
       requestText?: string;
       updateCaption: boolean;
     },
@@ -493,6 +494,7 @@ export class JobRunner {
         state.atlasRound = {
           id,
           caption: comparison.caption,
+          frameSlug: comparison.frameSlug,
           requestText: comparison.requestText,
           updateCaption: comparison.updateCaption,
           jobIds,
